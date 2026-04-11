@@ -1,0 +1,118 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg: #0a0a0b;
+    --bg-2: #111113;
+    --card: #15151a;
+    --card-2: #1c1c22;
+    --border: rgba(255, 255, 255, 0.08);
+    --border-2: rgba(255, 255, 255, 0.12);
+    --text: #f5f5f7;
+    --text-dim: rgba(245, 245, 247, 0.6);
+    --text-faint: rgba(245, 245, 247, 0.4);
+    --accent: #ff6b35;
+    --accent-2: #ffb84d;
+    --green: #4ade80;
+    --red: #f87171;
+    --blue: #60a5fa;
+  }
+
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html,
+  body {
+    min-height: 100vh;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background:
+      radial-gradient(ellipse 80% 50% at 20% 0%, rgba(255, 107, 53, 0.08), transparent 60%),
+      radial-gradient(ellipse 60% 40% at 80% 100%, rgba(74, 222, 128, 0.06), transparent 60%);
+  }
+
+  #root {
+    position: relative;
+    z-index: 1;
+    min-height: 100vh;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    font-family: inherit;
+  }
+}
+
+@layer components {
+  .serif {
+    font-family: "Instrument Serif", serif;
+    font-weight: 400;
+    letter-spacing: -0.02em;
+  }
+
+  .mono {
+    font-family: "JetBrains Mono", monospace;
+  }
+
+  .input {
+    @apply w-full rounded-xl border bg-white/[0.03] px-4 py-3 text-base text-text transition;
+    border-color: var(--border);
+  }
+  .input:focus {
+    @apply outline-none;
+    border-color: var(--accent);
+    background: rgba(255, 107, 53, 0.04);
+    box-shadow: 0 0 0 4px rgba(255, 107, 53, 0.1);
+  }
+  .input::placeholder {
+    color: var(--text-faint);
+  }
+
+  .label {
+    @apply mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em];
+    color: var(--text-dim);
+  }
+
+  .btn {
+    @apply inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-transparent px-5 py-3 text-sm font-medium transition;
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, #ff6b35 0%, #ff8555 100%);
+    color: white;
+    box-shadow: 0 4px 16px rgba(255, 107, 53, 0.3);
+  }
+  .btn-primary:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(255, 107, 53, 0.4);
+  }
+  .btn-primary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .btn-ghost {
+    @apply border text-text;
+    background: rgba(255, 255, 255, 0.04);
+    border-color: var(--border);
+  }
+  .btn-ghost:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--border-2);
+  }
+
+  .card {
+    @apply rounded-2xl border;
+    background: var(--card);
+    border-color: var(--border);
+  }
+}
