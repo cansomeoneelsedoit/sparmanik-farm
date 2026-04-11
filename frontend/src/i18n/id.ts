@@ -255,7 +255,8 @@ export const id: Record<TranslationKey, string> = {
   harvest: "Panen",
 
   sops: "SOP",
-  title: "Judul",`n  sops_title: "Cara kami.",
+  title: "Judul",
+  sops_title: "Cara kami.",
   active: "Aktif",
   archive: "Arsip",
   new_with_ai: "Baru dengan AI",
