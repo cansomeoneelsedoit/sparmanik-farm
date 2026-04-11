@@ -206,7 +206,7 @@ def _build_farm_context(db: Session) -> str:
             status = "OK"
         lines.append(
             f"- {i.name} [{i.category}] {i.quantity} {i.unit} "
-            f"(reorder {i.reorder_level}) {status} @{int(i.cost)}/unit"
+            f"(reorder {i.reorder_level}) {status} @{int(i.cost_per_unit)}/unit"
         )
     lines.append("")
 
