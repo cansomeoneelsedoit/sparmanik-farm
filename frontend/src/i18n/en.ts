@@ -253,7 +253,7 @@ export const en = {
   harvest: "Harvest",
 
   sops: "SOPs",
-  sops_title: "How we do it.",
+  title: "Title",`n  sops_title: "How we do it.",
   active: "Active",
   archive: "Archive",
   new_with_ai: "New with AI",
