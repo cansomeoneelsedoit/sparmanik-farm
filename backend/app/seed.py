@@ -11,6 +11,7 @@ from app.models import (
     User, InventoryItem, Recipe, RecipeIngredient, Task, Setting,
     Sale, StaffWage, task_assignees, Planting, AccountingEntry, ForecastBudget,
     Sop, Video, Supplier,
+    RawMaterial, MixedNutrient, Part, HarvestExpense,
 )
 from app.auth import hash_password
 
@@ -545,6 +546,95 @@ def seed():
             db.add(Setting(key="shipping_address", value=SHIPPING_ADDRESS_SEED))
             db.commit()
             print("  + shipping address (Bintang Damanik, Pematang Siantar)")
+
+        # ── Harvest Tracking Seed Data ──
+        # Parts (pre-load all 22 items)
+        if db.scalar(select(Part).limit(1)) is None:
+            PARTS_SEED = [
+                ("Selang PE 5 mm dual layer", "meter", "https://shrtlink.ai/selang_PE_5mm_dual_layer", "250 meter needed"),
+                ("Selang PE 16 mm dual layer", "meter", "https://shrtlink.ai/selang_PE_16mm_dual_layer", "300 meter needed"),
+                ("Drip stake SIRRIS", "pcs", "https://shrtlink.ai/drip_stake_SIRRIS", "450 pcs needed"),
+                ("Drip emiter netafim 2 L/H", "pcs", "https://shrtlink.ai/drip_emiter_netafim", "450 pcs needed"),
+                ("Barb Valve male thread 3/4 to PE 16 mm", "pcs", "https://shrtlink.ai/barb_valve_male", "25 pcs needed"),
+                ("Weedmat hijau lebar 2 meter", "meter", "https://shrtlink.ai/weedmat", "300 meter needed"),
+                ("Paku weedmat", "pcs", "https://shrtlink.ai/paku_weedmat", "500 pcs needed"),
+                ("Tali majun", "gulung", "https://shrtlink.ai/majun_tali", "50 gulung needed"),
+                ("Drainase alas polibag (optional)", "pcs", "https://shrtlink.ai/drainase_alas_polibag", "410 pcs needed"),
+                ("Peredam tandon air", "meter", "https://shrtlink.ai/peredam", "40 meter needed"),
+                ("TDS meter", "pcs", "https://shrtlink.ai/TDS_meter", "1 pcs needed"),
+                ("pH meter", "pcs", "https://shrtlink.ai/PH_meter", "1 pcs needed"),
+                ("TDS Calibration liquid", "bottle", "https://shrtlink.ai/TDS_calibration", "500ml"),
+                ("pH Calibration liquid", "bottle", "https://shrtlink.ai/PH_Calibration", "500ml"),
+                ("Refractometer", "pcs", "https://shrtlink.ai/Refractometer", "1 pcs needed"),
+                ("H3PO4 (Phosphoric Acid)", "liter", "https://shrtlink.ai/H3PO4", "35 liter needed"),
+                ("Potassium Hydroxide (KOH)", "kg", "https://shrtlink.ai/KOH", "3 kg needed"),
+                ("Timbangan gantung (hanging scale)", "pcs", "https://url-shortener.me/E3JO", "1 pcs needed"),
+                ("Timbangan besar (large scale)", "pcs", "https://url-shortener.me/E3JY", "1 pcs needed"),
+                ("Pompa celup YLP3500-55W", "pcs", "https://url-shortener.me/E3MT", "2 pcs needed"),
+                ("Nampan plastik 60x40", "pcs", "https://url-shortener.me/E3NO", "10 pcs needed"),
+                ("Rockwool", "slab", "https://url-shortener.me/E3NW", "4 slab needed"),
+                ("Poly Bags", "pcs", "", ""),
+                ("Cocopeat", "kg", "", ""),
+            ]
+            for name, unit, link, notes in PARTS_SEED:
+                db.add(Part(name=name, unit=unit, link=link, notes=notes))
+            db.commit()
+            print(f"  + {len(PARTS_SEED)} harvest parts")
+
+        # Raw Materials (nutrient ingredients)
+        if db.scalar(select(RawMaterial).limit(1)) is None:
+            RAW_SEED = [
+                ("Calcium Nitrate (Cal Nit)", "kg", "Nutrient A base"),
+                ("Potassium Nitrate", "kg", "Nutrient A / B"),
+                ("Iron EDTA (Fe)", "kg", "Nutrient A trace"),
+                ("Manganese Sulfate (Mn)", "kg", "Nutrient A trace"),
+                ("Zinc Sulfate (Zn)", "kg", "Nutrient A trace"),
+                ("Boric Acid (B)", "kg", "Nutrient A trace"),
+                ("Copper Sulfate (Cu)", "kg", "Nutrient A trace"),
+                ("Ammonium Molybdate (Mo)", "kg", "Nutrient A trace"),
+                ("Monopotassium Phosphate (MKP)", "kg", "Nutrient B base"),
+                ("Potassium Sulfate", "kg", "Nutrient B"),
+                ("Magnesium Sulfate (Epsom)", "kg", "Nutrient B"),
+                ("NPK blend", "kg", "General"),
+                ("H3PO4 (Phosphoric Acid)", "liter", "pH Down"),
+                ("Potassium Hydroxide (KOH)", "kg", "pH Up"),
+                ("pH Up (commercial)", "liter", "pH"),
+                ("pH Down (commercial)", "liter", "pH"),
+            ]
+            for name, unit, cat in RAW_SEED:
+                db.add(RawMaterial(name=name, unit=unit, category=cat))
+            db.commit()
+            print(f"  + {len(RAW_SEED)} raw materials")
+
+        # Mixed Nutrients (ready-to-use products)
+        if db.scalar(select(MixedNutrient).limit(1)) is None:
+            MIXED_SEED = [
+                ("Nutrient A Melon", "liter", "Melon"),
+                ("Nutrient B Melon", "liter", "Melon"),
+                ("Nutrient C Melon", "liter", "Melon"),
+                ("Nutrient A Chilli", "liter", "Chilli"),
+                ("Nutrient B Chilli", "liter", "Chilli"),
+                ("Nutrient C Chilli", "liter", "Chilli"),
+                ("pH Up (mixed)", "liter", "All"),
+                ("pH Down (mixed)", "liter", "All"),
+            ]
+            for name, unit, crop in MIXED_SEED:
+                db.add(MixedNutrient(name=name, unit=unit, crop=crop))
+            db.commit()
+            print(f"  + {len(MIXED_SEED)} mixed nutrients")
+
+        # Consulting expense (20M IDR agreement - 10M paid)
+        if db.scalar(select(HarvestExpense).limit(1)) is None:
+            db.add(HarvestExpense(
+                date=date.today(),
+                harvest_name="Melon Harvest 1",
+                category="Consulting",
+                description="Consulting fee - 20M IDR agreement (10M paid, 10M due in 4 weeks)",
+                amount=10_000_000,
+                notes="Agreement: 20M IDR total. 10M paid. 10M due in 4 weeks.",
+            ))
+            db.commit()
+            print("  + consulting expense (10M IDR paid)")
 
         print("Seed complete.")
     finally:
