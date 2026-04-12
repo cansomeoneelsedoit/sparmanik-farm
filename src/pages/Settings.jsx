@@ -1,91 +1,60 @@
 import React from 'react';
 import settings from '../data/settings';
 import categories from '../data/categories';
-import produce from '../data/produce';
 import greenhouses from '../data/greenhouses';
 
 export default function Settings({ lang = 'en' }) {
   return (
-    <div className="page">
-      <h1 className="page-title">Settings</h1>
+    <div>
+      <h1 className="page-title">{lang === 'id' ? 'Pengaturan' : 'Settings'}</h1>
 
-      <div className="stat-grid">
-        <div className="stat-card">
-          <strong>Farm Name</strong>
-          <p>{settings.farmName}</p>
-        </div>
-        <div className="stat-card">
-          <strong>Language</strong>
-          <p>{settings.language}</p>
-        </div>
-        <div className="stat-card">
-          <strong>Exchange Rate</strong>
-          <p>1 USD = Rp {settings.exchangeRate?.toLocaleString()}</p>
-        </div>
+      <div className="card">
+        <h2>{lang === 'id' ? 'Info Kebun' : 'Farm Info'}</h2>
+        <table>
+          <tbody>
+            <tr>
+              <td style={{ color: 'var(--text2)' }}>{lang === 'id' ? 'Nama Kebun' : 'Farm Name'}</td>
+              <td>{settings.farmName}</td>
+            </tr>
+            <tr>
+              <td style={{ color: 'var(--text2)' }}>{lang === 'id' ? 'Kurs' : 'Exchange Rate'}</td>
+              <td>{settings.exchangeRate.toLocaleString()} IDR/AUD</td>
+            </tr>
+            <tr>
+              <td style={{ color: 'var(--text2)' }}>{lang === 'id' ? 'Bahasa Default' : 'Default Language'}</td>
+              <td>{lang === 'id' ? 'Inggris' : 'English'}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
-      <div style={{ marginTop: '32px' }}>
-        <h2>Categories ({categories.length})</h2>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-              </tr>
-            </thead>
-            <tbody>
-              {categories.map((cat, idx) => (
-                <tr key={idx}>
-                  <td>{cat.name}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <div className="card">
+        <h2>{lang === 'id' ? 'Kategori' : 'Categories'} ({categories.length})</h2>
+        <p style={{ marginTop: 8, color: 'var(--text2)', fontSize: 13 }}>
+          {categories.join(', ')}
+        </p>
       </div>
 
-      <div style={{ marginTop: '32px' }}>
-        <h2>Produce ({produce.length})</h2>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Category</th>
+      <div className="card">
+        <h2>{lang === 'id' ? 'Rumah Kaca' : 'Greenhouses'} ({greenhouses.length})</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>{lang === 'id' ? 'Nama' : 'Name'}</th>
+              <th>{lang === 'id' ? 'Tipe' : 'Type'}</th>
+              <th>{lang === 'id' ? 'Ukuran' : 'Size'}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {greenhouses.map(gh => (
+              <tr key={gh.id}>
+                <td>{gh.name}</td>
+                <td>{gh.type}</td>
+                <td>{gh.size} m²</td>
               </tr>
-            </thead>
-            <tbody>
-              {produce.map((prod, idx) => (
-                <tr key={idx}>
-                  <td>{prod.name}</td>
-                  <td>{prod.category}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div style={{ marginTop: '32px' }}>
-        <h2>Greenhouses ({greenhouses.length})</h2>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Size (m²)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {greenhouses.map((gh, idx) => (
-                <tr key={idx}>
-                  <td>{gh.name}</td>
-                  <td>{gh.size}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

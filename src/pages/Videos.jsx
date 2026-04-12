@@ -3,18 +3,18 @@ import videos from '../data/videos';
 
 export default function Videos({ lang = 'en' }) {
   return (
-    <div className="page">
-      <h1 className="page-title">Training Videos</h1>
+    <div>
+      <h1 className="page-title">{lang === 'id' ? 'Video Pelatihan' : 'Training Videos'}</h1>
 
-      <div className="card-grid">
-        {videos.map((video, idx) => (
-          <div key={idx} className="card">
-            <h3>{lang === 'id' ? video.titleId : video.title}</h3>
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-              <span className="badge-blue">{video.category}</span>
-              <span className="badge-green">{video.type}</span>
-            </div>
-            <p><strong>Duration:</strong> {video.duration}</p>
+      <div className="harvest-grid">
+        {videos.map(video => (
+          <div key={video.id} className="card">
+            <h3 style={{ marginBottom: 8 }}>
+              {"\u{1F3A5}"} {lang === 'id' ? video.titleId : video.title}
+            </h3>
+            <p style={{ color: 'var(--text2)', fontSize: 12 }}>
+              Duration: {video.duration} min &middot; Category: {video.category}
+            </p>
           </div>
         ))}
       </div>

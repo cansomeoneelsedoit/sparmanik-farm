@@ -11,28 +11,28 @@ export default function Suppliers({ lang = 'en' }) {
   }, [searchTerm]);
 
   return (
-    <div className="page">
-      <h1 className="page-title">Suppliers</h1>
+    <div>
+      <h1 className="page-title">{lang === 'id' ? 'Pemasok' : 'Suppliers'}</h1>
 
       <div className="filter-bar">
         <input
           type="text"
           className="search-input"
-          placeholder="Search by supplier name..."
+          placeholder={lang === 'id' ? 'Cari berdasarkan nama pemasok...' : 'Search by supplier name...'}
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
         />
-        <span className="stat-card">
-          {filteredSuppliers.length} suppliers
+        <span className="stat-card" style={{ padding: '8px 16px', fontSize: 13 }}>
+          {filteredSuppliers.length} {lang === 'id' ? 'pemasok' : 'suppliers'}
         </span>
       </div>
 
-      <div className="table-wrap">
+      <div className="card">
         <table>
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Notes</th>
+              <th>{lang === 'id' ? 'Nama' : 'Name'}</th>
+              <th>{lang === 'id' ? 'Catatan' : 'Notes'}</th>
               <th>Shop URL</th>
             </tr>
           </thead>
@@ -40,20 +40,13 @@ export default function Suppliers({ lang = 'en' }) {
             {filteredSuppliers.map((supplier, idx) => (
               <tr key={idx}>
                 <td>{supplier.name}</td>
-                <td>{supplier.notes || '—'}</td>
+                <td>{supplier.notes || '\u2014'}</td>
                 <td>
                   {supplier.shopUrl ? (
-                    <a
-                      href={supplier.shopUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="link"
-                    >
+                    <a href={supplier.shopUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>
                       Visit
                     </a>
-                  ) : (
-                    '—'
-                  )}
+                  ) : '\u2014'}
                 </td>
               </tr>
             ))}

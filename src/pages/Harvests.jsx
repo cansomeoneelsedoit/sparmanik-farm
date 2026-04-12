@@ -9,79 +9,54 @@ export default function Harvests({ lang = 'en' }) {
     return 'Rp ' + Math.round(n).toLocaleString('id-ID');
   }
 
-  const formatDate = (date) => {
-    return new Date(date).toLocaleDateString(lang === 'id' ? 'id-ID' : 'en-US');
-  };
+  function formatDate(dateStr) {
+    const date = new Date(dateStr + 'T00:00:00');
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
 
-  const getGreenhouseName = (ghId) => {
-    const gh = greenhouses.find((g) => g.id === ghId);
+  function getGreenhouseName(ghId) {
+    const gh = greenhouses.find(g => g.id === ghId);
     return gh ? gh.name : 'Unknown';
-  };
+  }
 
-  // Calculate P&L summary
-  const calculateSummary = () => {
-    let totalRevenue = 0;
-    let totalCosts = 0;
-
-    harvests.forEach((harvest) => {
-      // Add revenue from sales
-      if (harvest.sales && Array.isArray(harvest.sales)) {
-        totalRevenue += harvest.sales.reduce((sum, sale) => sum + (sale.amount || 0), 0);
-      }
-
-      // Add costs from assets
-      if (harvest.assets && Array.isArray(harvest.assets)) {
-        totalCosts += harvest.assets.reduce((sum, asset) => sum + (asset.fifo_cost || 0), 0);
-      }
-
-      // Add costs from usage
-      if (harvest.usage && Array.isArray(harvest.usage)) {
-        totalCosts += harvest.usage.reduce((sum, use) => sum + (use.fifo_cost || 0), 0);
-      }
-    });
-
-    return {
-      revenue: totalRevenue,
-      costs: totalCosts,
-      profit: totalRevenue - totalCosts
-    };
-  };
-
-  const summary = calculateSummary();
-  const isProfit = summary.profit >= 0;
+  let totalRevenue = 0;
+  let totalCosts = 0;
+  harvests.forEach(h => {
+    if (h.summary) {
+      totalRevenue += h.summary.revenue;
+      totalCosts += h.summary.costs;
+    }
+  });
+  const totalProfit = totalRevenue - totalCosts;
 
   return (
-    <div className="harvests-page">
+    <div>
       <h1 className="page-title">{title}</h1>
 
-      {/* P&L Summary */}
-      <div className="stat-grid">
+      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
         <div className="stat-card">
-          <h4>{lang === 'id' ? 'Total Pendapatan' : 'Total Revenue'}</h4>
-          <p className="stat-value">{fmtIDR(summary.revenue)}</p>
+          <div className="label">{lang === 'id' ? 'Total Pendapatan' : 'Total Revenue'}</div>
+          <div className="value">{fmtIDR(totalRevenue)}</div>
         </div>
         <div className="stat-card">
-          <h4>{lang === 'id' ? 'Total Biaya' : 'Total Costs'}</h4>
-          <p className="stat-value">{fmtIDR(summary.costs)}</p>
+          <div className="label">{lang === 'id' ? 'Total Biaya' : 'Total Costs'}</div>
+          <div className="value">{fmtIDR(totalCosts)}</div>
         </div>
-        <div className={`stat-card ${isProfit ? 'profit' : 'loss'}`}>
-          <h4>{lang === 'id' ? 'Keuntungan/Kerugian' : 'Profit/Loss'}</h4>
-          <p className="stat-value">{fmtIDR(summary.profit)}</p>
+        <div className="stat-card">
+          <div className="label" style={{ color: 'var(--green)' }}>{lang === 'id' ? 'Keuntungan' : 'Profit'}</div>
+          <div className="value" style={{ color: 'var(--green)' }}>{fmtIDR(totalProfit)}</div>
         </div>
       </div>
 
-      {/* Harvest Cards */}
-      <div className="harvests-grid">
-        {harvests.map((harvest) => (
-          <div key={harvest.id} className="card harvest-card">
-            <div className="harvest-header">
-              <h3>{harvest.name}</h3>
-              {harvest.status === 'live' && <span className="badge-green">Live</span>}
-            </div>
-
-            <p className="harvest-variety">{lang === 'id' ? 'Varietas: ' : 'Variety: '}{harvest.variety}</p>
-            <p className="harvest-greenhouse">{lang === 'id' ? 'Rumah Kaca: ' : 'Greenhouse: '}{getGreenhouseName(harvest.greenhouse_id)}</p>
-            <p className="harvest-start-date">{lang === 'id' ? 'Mulai: ' : 'Started: '}{formatDate(harvest.start_date)}</p>
+      <div className="harvest-grid">
+        {harvests.map(harvest => (
+          <div key={harvest.id} className="card">
+            <h3 style={{ marginBottom: 12 }}>
+              {harvest.name} <span className="badge-green">Live</span>
+            </h3>
+            <p className="harvest-info">{lang === 'id' ? 'Varietas' : 'Variety'}: {harvest.variety}</p>
+            <p className="harvest-info">{lang === 'id' ? 'Rumah Kaca' : 'Greenhouse'}: {getGreenhouseName(harvest.ghId)}</p>
+            <p className="harvest-info">{lang === 'id' ? 'Mulai' : 'Started'}: {formatDate(harvest.startDate)}</p>
           </div>
         ))}
       </div>

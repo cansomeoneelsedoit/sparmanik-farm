@@ -1,53 +1,50 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import harvests from '../data/harvests';
-import produce from '../data/produce';
 
 export default function Sales({ lang = 'en' }) {
-  const salesData = useMemo(() => {
-    const sales = [];
-    harvests.forEach(harvest => {
-      if (harvest.sales && harvest.sales.length > 0) {
-        harvest.sales.forEach(sale => {
-          const prod = produce.find(p => p.id === sale.produceId);
-          sales.push({
-            date: harvest.date,
-            produce: prod?.name || '—',
-            grade: sale.grade || '—',
-            weight: sale.weight || 0,
-            pricePerKg: sale.pricePerKg || 0,
-            amount: (sale.weight || 0) * (sale.pricePerKg || 0)
-          });
-        });
-      }
-    });
-    return sales;
-  }, []);
+  const allSales = [];
+  harvests.forEach(harvest => {
+    if (harvest.sales) {
+      harvest.sales.forEach(sale => {
+        allSales.push(sale);
+      });
+    }
+  });
+
+  function fmtIDR(n) {
+    return 'Rp ' + Math.round(n).toLocaleString('id-ID');
+  }
+
+  function formatDate(dateStr) {
+    const date = new Date(dateStr + 'T00:00:00');
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
 
   return (
-    <div className="page">
-      <h1 className="page-title">Sales</h1>
+    <div>
+      <h1 className="page-title">{lang === 'id' ? 'Penjualan' : 'Sales'}</h1>
 
-      <div className="table-wrap">
+      <div className="card">
         <table>
           <thead>
             <tr>
-              <th>Date</th>
-              <th>Produce</th>
-              <th>Grade</th>
-              <th>Weight (kg)</th>
-              <th>Price/kg (IDR)</th>
-              <th>Amount (IDR)</th>
+              <th>{lang === 'id' ? 'Tanggal' : 'Date'}</th>
+              <th>{lang === 'id' ? 'Produk' : 'Product'}</th>
+              <th>{lang === 'id' ? 'Jumlah' : 'Qty'}</th>
+              <th>{lang === 'id' ? 'Harga Satuan' : 'Unit Price'}</th>
+              <th>Total</th>
+              <th>{lang === 'id' ? 'Pembeli' : 'Buyer'}</th>
             </tr>
           </thead>
           <tbody>
-            {salesData.map((sale, idx) => (
+            {allSales.map((sale, idx) => (
               <tr key={idx}>
-                <td>{sale.date}</td>
-                <td>{sale.produce}</td>
-                <td>{sale.grade}</td>
-                <td>{sale.weight.toFixed(2)}</td>
-                <td>{sale.pricePerKg.toLocaleString('id-ID')}</td>
-                <td>{sale.amount.toLocaleString('id-ID')}</td>
+                <td>{formatDate(sale.date)}</td>
+                <td>{sale.product}</td>
+                <td>{sale.qty}</td>
+                <td>{fmtIDR(sale.unitPrice)}</td>
+                <td>{fmtIDR(sale.amount)}</td>
+                <td>{sale.buyer}</td>
               </tr>
             ))}
           </tbody>

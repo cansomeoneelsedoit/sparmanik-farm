@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import Sidebar from "./components/Sidebar";
 
-// Import all pages
 import Dashboard from "./pages/Dashboard";
 import Inventory from "./pages/Inventory";
 import Staff from "./pages/Staff";
@@ -10,11 +9,9 @@ import Harvests from "./pages/Harvests";
 import Suppliers from "./pages/Suppliers";
 import Sops from "./pages/Sops";
 import Videos from "./pages/Videos";
-import Recipes from "./pages/Recipes";
 import Settings from "./pages/Settings";
 import Sales from "./pages/Sales";
 
-// Map page names to components
 const pages = {
   dashboard: Dashboard,
   inventory: Inventory,
@@ -24,7 +21,6 @@ const pages = {
   suppliers: Suppliers,
   sops: Sops,
   videos: Videos,
-  recipes: Recipes,
   settings: Settings,
   sales: Sales,
 };
