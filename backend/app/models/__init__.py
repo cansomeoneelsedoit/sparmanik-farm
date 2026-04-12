@@ -2,9 +2,9 @@
 All SQLAlchemy models. Mirrors the data shapes from the HTML demo
 but normalized: join tables instead of nested JSON, foreign keys, timestamps.
 """
-from datetime import datetime
+from datetime import datetime, date
 from sqlalchemy import (
-    String, Integer, Float, Boolean, DateTime, Date, ForeignKey, Text, JSON, Table, Column
+    String, Integer, Float, Boolean, DateTime, Date, ForeignKey, Text, JSON, Table, Column, func
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
@@ -286,3 +286,139 @@ class Setting(Base):
 
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+# ============================================================
+# HARVEST TRACKING
+# ============================================================
+class RawMaterial(Base):
+    """Master list of raw chemicals/ingredients"""
+    __tablename__ = "raw_materials"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    unit: Mapped[str] = mapped_column(String(50), default="kg")
+    category: Mapped[str] = mapped_column(String(100), default="")  # e.g. "Nutrient A base", "pH"
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class RawPurchase(Base):
+    """Purchase log for raw materials"""
+    __tablename__ = "raw_purchases"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    raw_material_id: Mapped[int] = mapped_column(ForeignKey("raw_materials.id"))
+    date: Mapped[date] = mapped_column(Date)
+    supplier: Mapped[str] = mapped_column(String(200), default="")
+    qty: Mapped[float] = mapped_column(Float)
+    total_cost: Mapped[float] = mapped_column(Float)  # IDR
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class MixedNutrient(Base):
+    """Mixed nutrient products (Nutrient A Melon, B Chilli, etc.)"""
+    __tablename__ = "mixed_nutrients"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))  # e.g. "Nutrient A Melon"
+    unit: Mapped[str] = mapped_column(String(50), default="liter")
+    crop: Mapped[str] = mapped_column(String(100), default="")  # e.g. "Melon", "Chilli"
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class MixingLog(Base):
+    """Log of raw ingredients consumed when mixing a batch"""
+    __tablename__ = "mixing_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    batch: Mapped[int] = mapped_column(Integer)  # batch number
+    date: Mapped[date] = mapped_column(Date)
+    raw_material_id: Mapped[int] = mapped_column(ForeignKey("raw_materials.id"))
+    qty_used: Mapped[float] = mapped_column(Float)  # qty of raw used
+    mixed_nutrient_id: Mapped[int] = mapped_column(ForeignKey("mixed_nutrients.id"))
+    qty_produced: Mapped[float] = mapped_column(Float, default=0)  # only on first row of batch
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class HarvestUsage(Base):
+    """Log of mixed nutrients used on a specific harvest"""
+    __tablename__ = "harvest_usage"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    date: Mapped[date] = mapped_column(Date)
+    mixed_nutrient_id: Mapped[int] = mapped_column(ForeignKey("mixed_nutrients.id"))
+    qty_used: Mapped[float] = mapped_column(Float)
+    harvest_name: Mapped[str] = mapped_column(String(200), default="Melon Harvest 1")  # which harvest
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class Part(Base):
+    """Master list of parts/equipment"""
+    __tablename__ = "parts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    unit: Mapped[str] = mapped_column(String(50), default="pcs")
+    link: Mapped[str] = mapped_column(Text, default="")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class PartPurchase(Base):
+    """Purchase log for parts"""
+    __tablename__ = "part_purchases"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"))
+    date: Mapped[date] = mapped_column(Date)
+    supplier: Mapped[str] = mapped_column(String(200), default="")
+    qty: Mapped[float] = mapped_column(Float)
+    total_cost: Mapped[float] = mapped_column(Float)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class PartUsage(Base):
+    """Parts assigned to a specific harvest"""
+    __tablename__ = "part_usage"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    date: Mapped[date] = mapped_column(Date)
+    part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"))
+    qty_used: Mapped[float] = mapped_column(Float)
+    harvest_name: Mapped[str] = mapped_column(String(200), default="Melon Harvest 1")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class HarvestExpense(Base):
+    """Running costs for a harvest (labour, utilities, etc.)"""
+    __tablename__ = "harvest_expenses"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    date: Mapped[date] = mapped_column(Date)
+    harvest_name: Mapped[str] = mapped_column(String(200), default="Melon Harvest 1")
+    category: Mapped[str] = mapped_column(String(100))  # Labour, Utilities, Pest Prevention, etc.
+    description: Mapped[str] = mapped_column(String(500))
+    amount: Mapped[float] = mapped_column(Float)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class HarvestIncome(Base):
+    """Income from harvest sales"""
+    __tablename__ = "harvest_income"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    date: Mapped[date] = mapped_column(Date)
+    harvest_name: Mapped[str] = mapped_column(String(200), default="Melon Harvest 1")
+    buyer: Mapped[str] = mapped_column(String(200), default="")
+    weight_kg: Mapped[float] = mapped_column(Float)
+    price_per_kg: Mapped[float] = mapped_column(Float)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())

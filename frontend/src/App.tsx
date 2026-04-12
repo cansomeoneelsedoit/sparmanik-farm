@@ -7,6 +7,7 @@ import { DashboardPage } from "@/pages/DashboardPage";
 import { InventoryPage } from "@/pages/InventoryPage";
 import { RecipesPage } from "@/pages/RecipesPage";
 import { SalesPage } from "@/pages/SalesPage";
+import { HarvestPage } from "@/pages/HarvestPage";
 import { TasksPage } from "@/pages/TasksPage";
 import { StaffPage } from "@/pages/StaffPage";
 import { AccountingPage } from "@/pages/AccountingPage";
@@ -69,6 +70,14 @@ function Root() {
         element={
           <ProtectedRoute>
             <SalesPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/harvest"
+        element={
+          <ProtectedRoute>
+            <HarvestPage />
           </ProtectedRoute>
         }
       />

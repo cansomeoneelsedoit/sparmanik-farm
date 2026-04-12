@@ -7,6 +7,7 @@ const navItems = [
   { to: "/", key: "dashboard" as const, icon: dashIcon() },
   { to: "/calendar", key: "calendar" as const, icon: calIcon() },
   { to: "/sales", key: "sales" as const, icon: salesIcon() },
+  { to: "/harvest", key: "harvest" as const, icon: harvestIcon() },
   { to: "/tasks", key: "tasks" as const, icon: tasksIcon() },
   { to: "/inventory", key: "inventory" as const, icon: invIcon() },
   { to: "/recipes", key: "recipes" as const, icon: recipeIcon() },
@@ -112,6 +113,14 @@ function salesIcon() {
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <line x1="12" y1="1" x2="12" y2="23" />
       <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+    </svg>
+  );
+}
+
+function harvestIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2v16M6 8h12M9 5h6M8 12h8M7 16h10" />
     </svg>
   );
 }

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.routers import (
     auth, inventory, recipes, sales, tasks, staff, accounting, forecast, plantings,
-    sops, videos, suppliers, ai,
+    sops, videos, suppliers, ai, harvest,
 )
 
 settings = get_settings()
@@ -35,6 +35,7 @@ app.include_router(sops.router)
 app.include_router(videos.router)
 app.include_router(suppliers.router)
 app.include_router(ai.router)
+app.include_router(harvest.router)
 
 
 @app.get("/")
