@@ -1,0 +1,11 @@
+node_modules
+build
+.git
+*.md
+deploy-*.js
+git-push.js
+push-to-github.bat
+push-railway-config.js
+push-serve-dep.js
+npm-install.log
+generate-*.js
