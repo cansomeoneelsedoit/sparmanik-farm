@@ -251,7 +251,6 @@ export const en = {
   new_planting: "New planting",
   in_days: "in {n} days",
   days_ago: "{n} days ago",
-  harvest: "Harvest",
 
   sops: "SOPs",
   title: "Title",

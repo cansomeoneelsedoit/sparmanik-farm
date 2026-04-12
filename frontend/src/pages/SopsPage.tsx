@@ -435,7 +435,7 @@ function SopBuilderModal({
           {editing ? t("edit") : replacing ? t("replace_with_new") : t("new_with_ai")}
         </div>
         <h2 className="serif mb-2 text-3xl">{t("ai_sop_builder")}</h2>
-        <div className="mb-6 text-sm" style={{ color: "var(--text-dim)" }}>{editing ? t("edit_sop_details") : t("ai_sop_intro")}</div>
+        <div className="mb-6 text-sm" style={{ color: "var(--text-dim)" }}>{editing ? t("edit") : t("ai_sop_intro")}</div>
 
         <div className="mb-4">
           <label className="label">{t("title")}</label>

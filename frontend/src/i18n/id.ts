@@ -253,7 +253,6 @@ export const id: Record<TranslationKey, string> = {
   new_planting: "Tanaman baru",
   in_days: "dalam {n} hari",
   days_ago: "{n} hari lalu",
-  harvest: "Panen",
 
   sops: "SOP",
   title: "Judul",
