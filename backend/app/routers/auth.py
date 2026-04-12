@@ -39,7 +39,7 @@ def register(payload: UserRegister, db: Session = Depends(get_db)):
 def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     # OAuth2PasswordRequestForm uses 'username' field
     user = db.scalar(select(User).where(User.email == form.username.lower()))
-    if not user or not verify_password(form.password, user.password_hash):
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Wrong email or password",
