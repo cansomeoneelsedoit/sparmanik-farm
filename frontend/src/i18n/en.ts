@@ -130,6 +130,7 @@ export const en = {
 
   sales: "Sales",
   sales_title: "Harvest ledger.",
+  harvest: "Harvest",
   tasks: "Tasks",
   tasks_title: "What needs doing.",
 

@@ -132,6 +132,7 @@ export const id: Record<TranslationKey, string> = {
 
   sales: "Penjualan",
   sales_title: "Buku panen.",
+  harvest: "Panen",
   tasks: "Tugas",
   tasks_title: "Yang harus dikerjakan.",
 
