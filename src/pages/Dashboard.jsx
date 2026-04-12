@@ -50,9 +50,9 @@ function Dashboard({ lang = 'en' }) {
   const t = translations[lang] || translations.en;
 
   const totalItemsCount = items.length;
-  const totalStockValueAUD = items.reduce((sum, item) => sum + totalValue(item), 0);
+  const totalStockValueIDR = items.reduce((sum, item) => sum + totalValue(item), 0);
   const activeHarvestsCount = harvests.filter(h => h.status === "live").length;
-  const pendingTasksCount = tasks.filter(t => t.status === "pending").length;
+  const pendingTasksCount = tasks.filter(t => t.status !== "completed").length;
 
   const lowStockAlerts = items.filter(item => {
     const stock = totalStock(item);
@@ -77,7 +77,7 @@ function Dashboard({ lang = 'en' }) {
         </div>
         <div className="stat-card">
           <div className="label">{t.totalStockValue}</div>
-          <div className="value">A$ {Math.round(totalStockValueAUD / 10200).toLocaleString()}</div>
+          <div className="value">A$ {Math.round(totalStockValueIDR / 10200).toLocaleString()}</div>
         </div>
         <div className="stat-card">
           <div className="label">{t.activeHarvests}</div>
