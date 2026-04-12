@@ -24,6 +24,7 @@ export function SopsPage() {
   const [showBuilder, setShowBuilder] = useState(false);
   const [replacing, setReplacing] = useState<Sop | null>(null);
   const [viewing, setViewing] = useState<Sop | null>(null);
+  const [editing, setEditing] = useState<Sop | null>(null);
 
   async function refresh() {
     setLoading(true);
@@ -135,6 +136,7 @@ export function SopsPage() {
           archived={archived.filter((a) => a.title_key === viewing.title_key)}
           isOwner={isOwner}
           onClose={() => setViewing(null)}
+          onEdit={() => { setEditing(viewing); setViewing(null); }}
           onReplace={() => { setReplacing(viewing); }}
           onArchive={async () => {
             try {
@@ -166,6 +168,14 @@ export function SopsPage() {
           }}
         />
       )}
+
+      {editing && (
+        <SopBuilderModal
+          editing={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); refresh(); }}
+        />
+      )}
     </div>
   );
 }
@@ -193,6 +203,7 @@ function SopViewerModal({
   archived,
   isOwner,
   onClose,
+  onEdit,
   onReplace,
   onArchive,
   onRestore,
@@ -203,6 +214,7 @@ function SopViewerModal({
   archived: Sop[];
   isOwner: boolean;
   onClose: () => void;
+  onEdit: () => void;
   onReplace: () => void;
   onArchive: () => void;
   onRestore: () => void;
@@ -314,6 +326,7 @@ function SopViewerModal({
           <button className="btn btn-ghost flex-1" onClick={onClose}>{t("close")}</button>
           {source === "active" && (
             <>
+              <button className="btn btn-ghost" onClick={onEdit}>✏ {t("edit")}</button>
               <button className="btn btn-ghost" onClick={onReplace}>✨ {t("replace_with_new")}</button>
               <button className="btn btn-ghost" onClick={onArchive}>📦 {t("archive_sop")}</button>
             </>
@@ -340,20 +353,23 @@ function SopViewerModal({
 
 function SopBuilderModal({
   replacing,
+  editing,
   onClose,
   onSaved,
 }: {
-  replacing: Sop | null;
+  replacing?: Sop | null;
+  editing?: Sop | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const { t, lang } = useI18n();
-  const [title, setTitle] = useState(replacing?.title ?? "");
-  const [category, setCategory] = useState(replacing?.category ?? "Melon");
+  const sop = editing ?? replacing ?? null;
+  const [title, setTitle] = useState(sop?.title ?? "");
+  const [category, setCategory] = useState(sop?.category ?? "Melon");
   const [bullets, setBullets] = useState("");
-  const [imageUrl, setImageUrl] = useState(replacing?.image_url ?? "");
+  const [imageUrl, setImageUrl] = useState(sop?.image_url ?? "");
   const [generating, setGenerating] = useState(false);
-  const [draft, setDraft] = useState<AiGenerateResponse | null>(null);
+  const [draft, setDraft] = useState<AiGenerateResponse | null>(editing ? { description: editing.description, steps: editing.steps, safety_notes: editing.safety_notes, frequency: editing.frequency } : null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -389,7 +405,9 @@ function SopBuilderModal({
         frequency: draft.frequency,
         image_url: imageUrl,
       };
-      if (replacing) {
+      if (editing) {
+        await sopsApi.update(editing.id, payload);
+      } else if (replacing) {
         await sopsApi.replace(replacing.id, payload);
       } else {
         await sopsApi.create(payload);
@@ -414,10 +432,10 @@ function SopBuilderModal({
         style={{ borderColor: "var(--border-2)" }}
       >
         <div className="mono mb-2 text-[11px] uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>
-          {replacing ? t("replace_with_new") : t("new_with_ai")}
+          {editing ? t("edit") : replacing ? t("replace_with_new") : t("new_with_ai")}
         </div>
         <h2 className="serif mb-2 text-3xl">{t("ai_sop_builder")}</h2>
-        <div className="mb-6 text-sm" style={{ color: "var(--text-dim)" }}>{t("ai_sop_intro")}</div>
+        <div className="mb-6 text-sm" style={{ color: "var(--text-dim)" }}>{editing ? t("edit_sop_details") : t("ai_sop_intro")}</div>
 
         <div className="mb-4">
           <label className="label">{t("title")}</label>

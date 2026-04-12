@@ -49,6 +49,13 @@ export const videosApi = {
       body: JSON.stringify(payload),
     }).then((r) => json<Video>(r));
   },
+  update(id: number, payload: Partial<VideoCreate>) {
+    return fetch(`${API_BASE}/api/videos/${id}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).then((r) => json<Video>(r));
+  },
   remove(id: number) {
     return fetch(`${API_BASE}/api/videos/${id}`, {
       method: "DELETE",

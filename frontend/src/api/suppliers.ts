@@ -69,6 +69,13 @@ export const suppliersApi = {
       body: JSON.stringify(payload),
     }).then((r) => json<Supplier>(r));
   },
+  update(id: number, payload: Partial<SupplierCreate>) {
+    return fetch(`${API_BASE}/api/suppliers/${id}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).then((r) => json<Supplier>(r));
+  },
   remove(id: number) {
     return fetch(`${API_BASE}/api/suppliers/${id}`, {
       method: "DELETE",

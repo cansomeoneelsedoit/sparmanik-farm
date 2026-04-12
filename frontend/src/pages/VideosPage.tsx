@@ -12,6 +12,33 @@ const OWNER_EMAILS = new Set([
 const SUGGESTED_CATEGORIES = ["Melons", "Chillis", "General", "Nutrients", "Irrigation", "Pest control"];
 const SUGGESTED_SUBS = ["Seeding", "Growing", "Flowering", "Fruiting", "Harvest", "Maintenance", "Tour", "Other"];
 
+/** Convert any YouTube URL to embeddable format */
+function toEmbedUrl(raw: string): string {
+  let url = raw.trim();
+  // youtube.com/watch?v=ID
+  if (url.includes("youtube.com/watch?v=")) {
+    const id = url.split("v=")[1].split("&")[0];
+    return `https://www.youtube.com/embed/${id}`;
+  }
+  // youtu.be/ID
+  if (url.includes("youtu.be/")) {
+    const id = url.split("youtu.be/")[1].split("?")[0];
+    return `https://www.youtube.com/embed/${id}`;
+  }
+  // youtube.com/shorts/ID
+  if (url.includes("youtube.com/shorts/")) {
+    const id = url.split("/shorts/")[1].split("?")[0];
+    return `https://www.youtube.com/embed/${id}`;
+  }
+  // youtube.com/live/ID
+  if (url.includes("youtube.com/live/")) {
+    const id = url.split("/live/")[1].split("?")[0];
+    return `https://www.youtube.com/embed/${id}`;
+  }
+  // Already an embed URL or other — return as-is
+  return url;
+}
+
 export function VideosPage() {
   const { t } = useI18n();
   const { user } = useAuth();
@@ -23,6 +50,7 @@ export function VideosPage() {
   const [cat, setCat] = useState("all");
   const [sub, setSub] = useState("all");
   const [showNew, setShowNew] = useState(false);
+  const [editingItem, setEditingItem] = useState<Video | null>(null);
 
   async function refresh() {
     setLoading(true);
@@ -133,8 +161,9 @@ export function VideosPage() {
             <div key={v.id} className="card overflow-hidden">
               <div style={{ position: "relative", paddingBottom: "56.25%", background: "rgba(255,255,255,0.03)" }}>
                 <iframe
-                  src={v.url}
+                  src={toEmbedUrl(v.url)}
                   style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: 0 }}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                   allowFullScreen
                   title={v.title}
                 />
@@ -162,13 +191,26 @@ export function VideosPage() {
                     )}
                   </div>
                   {isOwner && (
-                    <button
-                      onClick={() => handleDelete(v.id)}
-                      className="rounded-md border px-2 py-1 text-xs"
-                      style={{ background: "rgba(248,113,113,0.1)", color: "var(--red)", borderColor: "rgba(248,113,113,0.2)" }}
-                    >
-                      ×
-                    </button>
+                    <div className="flex flex-col gap-1">
+                      <button
+                        onClick={() => setEditingItem(v)}
+                        className="rounded-md border px-2 py-1 text-xs"
+                        style={{
+                          background: "rgba(255,255,255,0.04)",
+                          color: "var(--text)",
+                          borderColor: "var(--border)",
+                        }}
+                      >
+                        ✏
+                      </button>
+                      <button
+                        onClick={() => handleDelete(v.id)}
+                        className="rounded-md border px-2 py-1 text-xs"
+                        style={{ background: "rgba(248,113,113,0.1)", color: "var(--red)", borderColor: "rgba(248,113,113,0.2)" }}
+                      >
+                        ×
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -179,21 +221,30 @@ export function VideosPage() {
 
       {showNew && (
         <NewVideoModal
+          item={null}
           onClose={() => setShowNew(false)}
           onSaved={() => { setShowNew(false); refresh(); }}
+        />
+      )}
+
+      {editingItem && (
+        <NewVideoModal
+          item={editingItem}
+          onClose={() => setEditingItem(null)}
+          onSaved={() => { setEditingItem(null); refresh(); }}
         />
       )}
     </div>
   );
 }
 
-function NewVideoModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+function NewVideoModal({ item, onClose, onSaved }: { item: Video | null; onClose: () => void; onSaved: () => void }) {
   const { t } = useI18n();
-  const [title, setTitle] = useState("");
-  const [url, setUrl] = useState("");
-  const [category, setCategory] = useState("Melons");
-  const [subcategory, setSubcategory] = useState("Tour");
-  const [notes, setNotes] = useState("");
+  const [title, setTitle] = useState(item?.title ?? "");
+  const [url, setUrl] = useState(item?.url ?? "");
+  const [category, setCategory] = useState(item?.category ?? "Melons");
+  const [subcategory, setSubcategory] = useState(item?.subcategory ?? "Tour");
+  const [notes, setNotes] = useState(item?.notes ?? "");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -202,16 +253,14 @@ function NewVideoModal({ onClose, onSaved }: { onClose: () => void; onSaved: () 
     setSaving(true);
     setErr(null);
     try {
-      // Convert YouTube watch URLs to embed URLs
-      let cleanUrl = url;
-      if (cleanUrl.includes("youtube.com/watch?v=")) {
-        const id = cleanUrl.split("v=")[1].split("&")[0];
-        cleanUrl = `https://www.youtube.com/embed/${id}`;
-      } else if (cleanUrl.includes("youtu.be/")) {
-        const id = cleanUrl.split("youtu.be/")[1].split("?")[0];
-        cleanUrl = `https://www.youtube.com/embed/${id}`;
+      // Convert any YouTube URL to embeddable format
+      const cleanUrl = toEmbedUrl(url);
+      const payload = { title, url: cleanUrl, category, subcategory, notes };
+      if (item) {
+        await videosApi.update(item.id, payload);
+      } else {
+        await videosApi.create(payload);
       }
-      await videosApi.create({ title, url: cleanUrl, category, subcategory, notes });
       onSaved();
     } catch (e) {
       setErr((e as Error).message);
@@ -232,7 +281,7 @@ function NewVideoModal({ onClose, onSaved }: { onClose: () => void; onSaved: () 
         style={{ borderColor: "var(--border-2)" }}
       >
         <div className="mono mb-2 text-[11px] uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>
-          {t("new_video")}
+          {item ? t("edit") : t("new_video")}
         </div>
         <h2 className="serif mb-6 text-3xl">{t("videos")}</h2>
         <form onSubmit={onSubmit}>

@@ -66,6 +66,13 @@ export const staffApi = {
       body: JSON.stringify(payload),
     }).then((r) => json<StaffWage>(r));
   },
+  update(id: number, payload: Partial<StaffWageCreate>) {
+    return fetch(`${API_BASE}/api/staff/${id}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).then((r) => json<StaffWage>(r));
+  },
   remove(id: number) {
     return fetch(`${API_BASE}/api/staff/${id}`, {
       method: "DELETE",

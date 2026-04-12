@@ -20,6 +20,7 @@ export function StaffPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
+  const [editingItem, setEditingItem] = useState<StaffWage | null>(null);
   const [viewingProfile, setViewingProfile] = useState<StaffProfile | null>(null);
 
   async function refresh() {
@@ -176,13 +177,22 @@ export function StaffPage() {
                             <Td align="right"><span className="mono font-medium">{fmtIDR(e.wage_total)}</span></Td>
                             <Td align="right">
                               {isOwner && (
-                                <button
-                                  onClick={() => handleDelete(e.id)}
-                                  className="rounded-md border px-2 py-1 text-xs"
-                                  style={{ background: "rgba(248,113,113,0.1)", color: "var(--red)", borderColor: "rgba(248,113,113,0.2)" }}
-                                >
-                                  ×
-                                </button>
+                                <div className="flex gap-1">
+                                  <button
+                                    onClick={() => setEditingItem(e)}
+                                    className="rounded-md border px-2 py-1 text-xs"
+                                    style={{ background: "rgba(255,255,255,0.04)", color: "var(--text)", borderColor: "var(--border)" }}
+                                  >
+                                    ✏
+                                  </button>
+                                  <button
+                                    onClick={() => handleDelete(e.id)}
+                                    className="rounded-md border px-2 py-1 text-xs"
+                                    style={{ background: "rgba(248,113,113,0.1)", color: "var(--red)", borderColor: "rgba(248,113,113,0.2)" }}
+                                  >
+                                    ×
+                                  </button>
+                                </div>
                               )}
                             </Td>
                           </tr>
@@ -198,7 +208,11 @@ export function StaffPage() {
       )}
 
       {showNew && (
-        <NewWageModal onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); refresh(); }} />
+        <NewWageModal item={null} onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); refresh(); }} />
+      )}
+
+      {editingItem && (
+        <NewWageModal item={editingItem} onClose={() => setEditingItem(null)} onSaved={() => { setEditingItem(null); refresh(); }} />
       )}
 
       {viewingProfile && (
@@ -327,14 +341,14 @@ function ProfileModal({ profile, onClose }: { profile: StaffProfile; onClose: ()
   );
 }
 
-function NewWageModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+function NewWageModal({ item, onClose, onSaved }: { item: StaffWage | null; onClose: () => void; onSaved: () => void }) {
   const { t } = useI18n();
-  const [name, setName] = useState("");
-  const [role, setRole] = useState("");
-  const [week, setWeek] = useState(getWeek(new Date()).toString());
-  const [d, setD] = useState(todayISO());
-  const [hours, setHours] = useState("");
-  const [rate, setRate] = useState("");
+  const [name, setName] = useState(item?.name ?? "");
+  const [role, setRole] = useState(item?.role ?? "");
+  const [week, setWeek] = useState((item?.week ?? getWeek(new Date())).toString());
+  const [d, setD] = useState(item?.date ?? todayISO());
+  const [hours, setHours] = useState(item?.hours.toString() ?? "");
+  const [rate, setRate] = useState(item?.hourly_rate.toString() ?? "");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -342,15 +356,20 @@ function NewWageModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
     e.preventDefault();
     setSaving(true);
     setErr(null);
+    const payload = {
+      name,
+      role,
+      week: parseInt(week),
+      date: d,
+      hours: parseFloat(hours),
+      hourly_rate: parseFloat(rate),
+    };
     try {
-      await staffApi.create({
-        name,
-        role,
-        week: parseInt(week),
-        date: d,
-        hours: parseFloat(hours),
-        hourly_rate: parseFloat(rate),
-      });
+      if (item) {
+        await staffApi.update(item.id, payload);
+      } else {
+        await staffApi.create(payload);
+      }
       onSaved();
     } catch (e) {
       setErr((e as Error).message);
@@ -371,7 +390,7 @@ function NewWageModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
         style={{ borderColor: "var(--border-2)" }}
       >
         <div className="mono mb-2 text-[11px] uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>
-          {t("new_wage")}
+          {item ? t("edit") : t("new_wage")}
         </div>
         <h2 className="serif mb-6 text-3xl">{t("staff")}</h2>
         <form onSubmit={onSubmit}>

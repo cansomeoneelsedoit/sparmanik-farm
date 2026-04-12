@@ -1,6 +1,6 @@
 import re
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
@@ -167,6 +167,27 @@ def restore_sop(
         raise HTTPException(status_code=404, detail="SOP not found")
     sop.archived = False
     sop.archived_at = None
+    db.commit()
+    db.refresh(sop)
+    return _to_out(sop)
+
+
+@router.patch("/{sop_id}", response_model=SopOut)
+def update_sop(
+    sop_id: int,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    sop = db.get(Sop, sop_id)
+    if not sop:
+        raise HTTPException(status_code=404, detail="SOP not found")
+    if sop.archived:
+        raise HTTPException(status_code=400, detail="Cannot edit archived SOP")
+    allowed = {"title", "category", "description", "steps", "safety_notes", "frequency", "image_url", "photos"}
+    for key, val in payload.items():
+        if key in allowed:
+            setattr(sop, key, val)
     db.commit()
     db.refresh(sop)
     return _to_out(sop)

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from datetime import date, timedelta
@@ -100,6 +100,25 @@ def create_sale(
 ):
     sale = Sale(**payload.model_dump())
     db.add(sale)
+    db.commit()
+    db.refresh(sale)
+    return _to_out(sale)
+
+
+@router.patch("/{sale_id}", response_model=SaleOut)
+def update_sale(
+    sale_id: int,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    sale = db.get(Sale, sale_id)
+    if not sale:
+        raise HTTPException(status_code=404, detail="Sale not found")
+    allowed = {"date", "week", "species", "grade", "weight_kg", "price_per_kg"}
+    for key, val in payload.items():
+        if key in allowed:
+            setattr(sale, key, val)
     db.commit()
     db.refresh(sale)
     return _to_out(sale)

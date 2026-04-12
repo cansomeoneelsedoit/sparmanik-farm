@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
@@ -82,6 +82,25 @@ def create_wage(
     db.commit()
     db.refresh(wage)
     return _to_out(wage)
+
+
+@router.patch("/{wage_id}", response_model=StaffWageOut)
+def update_wage(
+    wage_id: int,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    w = db.get(StaffWage, wage_id)
+    if not w:
+        raise HTTPException(status_code=404, detail="Wage entry not found")
+    allowed = {"name", "role", "week", "date", "hours", "hourly_rate"}
+    for key, val in payload.items():
+        if key in allowed:
+            setattr(w, key, val)
+    db.commit()
+    db.refresh(w)
+    return _to_out(w)
 
 
 @router.delete("/{wage_id}", status_code=204)

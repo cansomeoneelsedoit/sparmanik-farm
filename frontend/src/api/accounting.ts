@@ -68,6 +68,13 @@ export const accountingApi = {
       body: JSON.stringify(payload),
     }).then((r) => json<AccountingEntry>(r));
   },
+  update(id: number, payload: Partial<AccountingEntryCreate>) {
+    return fetch(`${API_BASE}/api/accounting/${id}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).then((r) => json<AccountingEntry>(r));
+  },
   sync() {
     return fetch(`${API_BASE}/api/accounting/sync`, {
       method: "POST",

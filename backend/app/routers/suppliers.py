@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
@@ -68,6 +68,25 @@ def create_supplier(
         notes=payload.notes,
     )
     db.add(s)
+    db.commit()
+    db.refresh(s)
+    return _to_out(s)
+
+
+@router.patch("/{supplier_id}", response_model=SupplierOut)
+def update_supplier(
+    supplier_id: int,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    s = db.get(Supplier, supplier_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    allowed = {"supplier_name", "product_name", "description", "price", "shipping_cost", "total_cost", "category", "image_url", "source_url", "notes"}
+    for key, val in payload.items():
+        if key in allowed:
+            setattr(s, key, val)
     db.commit()
     db.refresh(s)
     return _to_out(s)

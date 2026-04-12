@@ -75,6 +75,13 @@ export const sopsApi = {
       body: JSON.stringify(payload),
     }).then((r) => json<Sop>(r));
   },
+  update(id: number, payload: Partial<SopCreate>) {
+    return fetch(`${API_BASE}/api/sops/${id}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).then((r) => json<Sop>(r));
+  },
   replace(id: number, payload: SopCreate) {
     return fetch(`${API_BASE}/api/sops/${id}/replace`, {
       method: "POST",

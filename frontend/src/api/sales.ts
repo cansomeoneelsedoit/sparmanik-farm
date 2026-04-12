@@ -92,6 +92,13 @@ export const salesApi = {
       body: JSON.stringify(payload),
     }).then((r) => json<Sale>(r));
   },
+  update(id: number, payload: Partial<SaleCreate>) {
+    return fetch(`${API_BASE}/api/sales/${id}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).then((r) => json<Sale>(r));
+  },
   remove(id: number) {
     return fetch(`${API_BASE}/api/sales/${id}`, {
       method: "DELETE",

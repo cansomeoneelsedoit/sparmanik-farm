@@ -24,6 +24,7 @@ export function AccountingPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
+  const [editingItem, setEditingItem] = useState<AccountingEntry | null>(null);
   const [syncing, setSyncing] = useState(false);
 
   async function refresh() {
@@ -152,13 +153,26 @@ export function AccountingPage() {
                       </Td>
                       <Td align="right">
                         {a.source !== "auto" && (
-                          <button
-                            onClick={() => handleDelete(a.id)}
-                            className="rounded-md border px-2 py-1 text-xs"
-                            style={{ background: "rgba(248,113,113,0.1)", color: "var(--red)", borderColor: "rgba(248,113,113,0.2)" }}
-                          >
-                            ×
-                          </button>
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => setEditingItem(a)}
+                              className="rounded-md border px-2 py-1 text-xs"
+                              style={{
+                                background: "rgba(255,255,255,0.04)",
+                                color: "var(--text)",
+                                borderColor: "var(--border)",
+                              }}
+                            >
+                              ✏
+                            </button>
+                            <button
+                              onClick={() => handleDelete(a.id)}
+                              className="rounded-md border px-2 py-1 text-xs"
+                              style={{ background: "rgba(248,113,113,0.1)", color: "var(--red)", borderColor: "rgba(248,113,113,0.2)" }}
+                            >
+                              ×
+                            </button>
+                          </div>
                         )}
                       </Td>
                     </tr>
@@ -171,7 +185,11 @@ export function AccountingPage() {
       )}
 
       {showNew && (
-        <NewAcctModal onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); refresh(); }} />
+        <NewAcctModal item={null} onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); refresh(); }} />
+      )}
+
+      {editingItem && (
+        <NewAcctModal item={editingItem} onClose={() => setEditingItem(null)} onSaved={() => { setEditingItem(null); refresh(); }} />
       )}
     </div>
   );
@@ -270,13 +288,13 @@ function SourceChip({ source }: { source: string }) {
   );
 }
 
-function NewAcctModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+function NewAcctModal({ item, onClose, onSaved }: { item: AccountingEntry | null; onClose: () => void; onSaved: () => void }) {
   const { t } = useI18n();
-  const [d, setD] = useState(todayISO());
-  const [type, setType] = useState("expense");
-  const [desc, setDesc] = useState("");
-  const [cat, setCat] = useState("");
-  const [amount, setAmount] = useState("");
+  const [d, setD] = useState(item?.date ?? todayISO());
+  const [type, setType] = useState(item?.type ?? "expense");
+  const [desc, setDesc] = useState(item?.description ?? "");
+  const [cat, setCat] = useState(item?.category ?? "");
+  const [amount, setAmount] = useState(item?.amount.toString() ?? "");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -284,14 +302,19 @@ function NewAcctModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
     e.preventDefault();
     setSaving(true);
     setErr(null);
+    const payload = {
+      date: d,
+      type,
+      description: desc,
+      amount: parseFloat(amount),
+      category: cat,
+    };
     try {
-      await accountingApi.create({
-        date: d,
-        type,
-        description: desc,
-        amount: parseFloat(amount),
-        category: cat,
-      });
+      if (item) {
+        await accountingApi.update(item.id, payload);
+      } else {
+        await accountingApi.create(payload);
+      }
       onSaved();
     } catch (e) {
       setErr((e as Error).message);
@@ -312,7 +335,7 @@ function NewAcctModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
         style={{ borderColor: "var(--border-2)" }}
       >
         <div className="mono mb-2 text-[11px] uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>
-          {t("new_entry_acct")}
+          {item ? t("edit") : t("new_entry_acct")}
         </div>
         <h2 className="serif mb-6 text-3xl">{t("accounting")}</h2>
         <form onSubmit={onSubmit}>

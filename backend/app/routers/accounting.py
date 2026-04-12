@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
@@ -130,6 +130,27 @@ def sync_from_sales_and_wages(
         wages_added=wages_added,
         message=f"Synced {sales_added} sales and {wages_added} wage entries",
     )
+
+
+@router.patch("/{entry_id}", response_model=AccountingEntryOut)
+def update_entry(
+    entry_id: int,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    entry = db.get(AccountingEntry, entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    if entry.source == "auto":
+        raise HTTPException(status_code=400, detail="Cannot edit auto-generated entries")
+    allowed = {"date", "type", "description", "amount", "category"}
+    for key, val in payload.items():
+        if key in allowed:
+            setattr(entry, key, val)
+    db.commit()
+    db.refresh(entry)
+    return _to_out(entry)
 
 
 @router.delete("/{entry_id}", status_code=204)

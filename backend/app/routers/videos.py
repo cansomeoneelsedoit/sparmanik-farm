@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
@@ -38,6 +38,25 @@ def create_video(
 ):
     v = Video(**payload.model_dump())
     db.add(v)
+    db.commit()
+    db.refresh(v)
+    return _to_out(v)
+
+
+@router.patch("/{video_id}", response_model=VideoOut)
+def update_video(
+    video_id: int,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    v = db.get(Video, video_id)
+    if not v:
+        raise HTTPException(status_code=404, detail="Video not found")
+    allowed = {"title", "url", "category", "subcategory", "notes"}
+    for key, val in payload.items():
+        if key in allowed:
+            setattr(v, key, val)
     db.commit()
     db.refresh(v)
     return _to_out(v)

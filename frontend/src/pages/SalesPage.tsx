@@ -33,6 +33,7 @@ export function SalesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
+  const [editingItem, setEditingItem] = useState<Sale | null>(null);
 
   async function refresh() {
     setLoading(true);
@@ -243,17 +244,30 @@ export function SalesPage() {
                       </Td>
                       <Td align="right">
                         {isOwner && (
-                          <button
-                            onClick={() => handleDelete(s.id)}
-                            className="rounded-md border px-2 py-1 text-xs"
-                            style={{
-                              background: "rgba(248,113,113,0.1)",
-                              color: "var(--red)",
-                              borderColor: "rgba(248,113,113,0.2)",
-                            }}
-                          >
-                            ×
-                          </button>
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => setEditingItem(s)}
+                              className="rounded-md border px-2 py-1 text-xs"
+                              style={{
+                                background: "rgba(255,255,255,0.04)",
+                                color: "var(--text)",
+                                borderColor: "var(--border)",
+                              }}
+                            >
+                              ✏
+                            </button>
+                            <button
+                              onClick={() => handleDelete(s.id)}
+                              className="rounded-md border px-2 py-1 text-xs"
+                              style={{
+                                background: "rgba(248,113,113,0.1)",
+                                color: "var(--red)",
+                                borderColor: "rgba(248,113,113,0.2)",
+                              }}
+                            >
+                              ×
+                            </button>
+                          </div>
                         )}
                       </Td>
                     </tr>
@@ -267,9 +281,21 @@ export function SalesPage() {
 
       {showNew && (
         <NewSaleModal
+          item={null}
           onClose={() => setShowNew(false)}
           onSaved={() => {
             setShowNew(false);
+            refresh();
+          }}
+        />
+      )}
+
+      {editingItem && (
+        <NewSaleModal
+          item={editingItem}
+          onClose={() => setEditingItem(null)}
+          onSaved={() => {
+            setEditingItem(null);
             refresh();
           }}
         />
@@ -340,17 +366,17 @@ function GradeChip({ grade }: { grade: string }) {
   );
 }
 
-function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+function NewSaleModal({ item, onClose, onSaved }: { item: Sale | null; onClose: () => void; onSaved: () => void }) {
   const { t } = useI18n();
   const today = todayISO();
   const thisWeek = getWeek(new Date());
 
-  const [saleDate, setSaleDate] = useState(today);
-  const [week, setWeek] = useState(thisWeek.toString());
-  const [species, setSpecies] = useState<string>("chili_red");
-  const [grade, setGrade] = useState<string>("A");
-  const [weight, setWeight] = useState("");
-  const [price, setPrice] = useState("");
+  const [saleDate, setSaleDate] = useState(item?.date ?? today);
+  const [week, setWeek] = useState((item?.week ?? thisWeek).toString());
+  const [species, setSpecies] = useState<string>(item?.species ?? "chili_red");
+  const [grade, setGrade] = useState<string>(item?.grade ?? "A");
+  const [weight, setWeight] = useState(item?.weight_kg.toString() ?? "");
+  const [price, setPrice] = useState(item?.price_per_kg.toString() ?? "");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -358,15 +384,20 @@ function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
     e.preventDefault();
     setSaving(true);
     setErr(null);
+    const payload = {
+      date: saleDate,
+      week: parseInt(week),
+      species,
+      grade,
+      weight_kg: parseFloat(weight),
+      price_per_kg: parseFloat(price),
+    };
     try {
-      await salesApi.create({
-        date: saleDate,
-        week: parseInt(week),
-        species,
-        grade,
-        weight_kg: parseFloat(weight),
-        price_per_kg: parseFloat(price),
-      });
+      if (item) {
+        await salesApi.update(item.id, payload);
+      } else {
+        await salesApi.create(payload);
+      }
       onSaved();
     } catch (e) {
       setErr((e as Error).message);
@@ -387,7 +418,7 @@ function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
         style={{ borderColor: "var(--border-2)" }}
       >
         <div className="mono mb-2 text-[11px] uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>
-          {t("new_sale")}
+          {item ? t("edit") : t("new_sale")}
         </div>
         <h2 className="serif mb-6 text-3xl">{t("sales")}</h2>
         <form onSubmit={onSubmit}>
