@@ -8,6 +8,7 @@ RUN npm run build
 
 FROM nginx:alpine
 COPY --from=build /app/build /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
 EXPOSE 80
-CMD sh -c "sed -i 's/listen 80/listen '\"$PORT\"'/' /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
+CMD ["/start.sh"]
