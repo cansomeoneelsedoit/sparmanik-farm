@@ -1,22 +1,21 @@
 {
-  "name": "sparmanik-farm-os",
-  "version": "1.0.0",
-  "description": "Sparmanik Farm — Cultivation OS",
-  "main": "src/index.js",
-  "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-scripts": "^5.0.1",
-    "react-router-dom": "^6.20.0",
-    "lucide-react": "^0.383.0",
-    "serve": "^14.2.0"
-  },
+  "name": "sparmanik-farm-1",
+  "version": "0.1.0",
+  "private": true,
   "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "extract-farm": "node scripts/extractFarmAssets.mjs"
   },
-  "browserslist": {
-    "production": [">0.2%", "not dead", "not op_mini all"],
-    "development": ["last 1 chrome version"]
+  "dependencies": {
+    "next": "16.2.4",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "eslint": "^9",
+    "eslint-config-next": "16.2.4"
   }
 }
