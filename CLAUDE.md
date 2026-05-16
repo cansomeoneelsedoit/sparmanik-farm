@@ -6,7 +6,7 @@ Cultivation OS for a hydroponic farm in Indonesia. Originally a single-file
 vanilla-JS SPA (`public/farm-legacy.js`); now a full-stack Next.js 16 app with
 Postgres. The legacy script is still in `public/` but is no longer loaded.
 
-Live: <https://front-end-production-cd2d.up.railway.app>
+Live: <https://web-production-1e6de.up.railway.app>
 Repo: <https://github.com/cansomeoneelsedoit/sparmanik-farm>
 Sign in (dev): `dev@sparmanikfarm.local` / `devpassword`
 
