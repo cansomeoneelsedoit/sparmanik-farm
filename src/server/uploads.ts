@@ -78,3 +78,15 @@ export async function readUpload(relativePath: string): Promise<{ buffer: Buffer
 export function getUploadDir(): string {
   return UPLOAD_DIR;
 }
+
+/**
+ * Read an upload from disk and return it base64-encoded. Used for the
+ * Anthropic vision API, which expects images embedded inline in the message
+ * content as base64 strings.
+ */
+export async function readUploadAsBase64(relativePath: string): Promise<string> {
+  const safe = safeRelativePath(relativePath);
+  const absolute = path.join(UPLOAD_DIR, safe);
+  const buffer = await fs.readFile(absolute);
+  return buffer.toString("base64");
+}

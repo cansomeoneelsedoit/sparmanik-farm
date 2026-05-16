@@ -569,11 +569,14 @@ model AuditAction {
 // ---------- AI ----------
 
 model AiMessage {
-  id        String   @id @default(cuid())
-  userId    String   @map("user_id")
-  role      AiRole
-  content   String
-  createdAt DateTime @default(now()) @map("created_at")
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  role        AiRole
+  content     String
+  // Optional list of attached images for vision: [{ path, mimeType, width, height }].
+  // Only set on USER messages; ASSISTANT messages stay text-only.
+  attachments Json?
+  createdAt   DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
