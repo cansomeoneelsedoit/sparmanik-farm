@@ -18,6 +18,7 @@ const attachmentSchema = z.object({
 });
 
 const schema = z.object({
+  conversationId: z.string().min(1),
   content: z.string().max(8000),
   attachments: z.array(attachmentSchema).max(4).optional(),
   provider: z.enum(["claude", "gemini"]).default("claude"),
@@ -25,7 +26,7 @@ const schema = z.object({
 
 export async function sendAiMessage(
   input: unknown,
-): Promise<ActionResult<{ reply: string; provider: AiProvider }>> {
+): Promise<ActionResult<{ reply: string; provider: AiProvider; conversationId: string }>> {
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Invalid input" };
   if (!parsed.data.content.trim() && (!parsed.data.attachments || parsed.data.attachments.length === 0)) {
@@ -34,10 +35,17 @@ export async function sendAiMessage(
   const session = await auth();
   if (!session?.user?.id) return { ok: false, error: "Not authenticated" };
 
+  // Make sure the conversation belongs to this user.
+  const conv = await prisma.aiConversation.findFirst({
+    where: { id: parsed.data.conversationId, userId: session.user.id },
+  });
+  if (!conv) return { ok: false, error: "Conversation not found" };
+
   try {
     await prisma.aiMessage.create({
       data: {
         userId: session.user.id,
+        conversationId: conv.id,
         role: "USER",
         content: parsed.data.content,
         attachments: parsed.data.attachments && parsed.data.attachments.length > 0
@@ -46,8 +54,17 @@ export async function sendAiMessage(
       },
     });
 
+    // First-message auto-title: pick the first ~50 chars of the user's text.
+    if (!conv.title && parsed.data.content.trim()) {
+      const title = parsed.data.content.trim().slice(0, 60).replace(/\s+/g, " ");
+      await prisma.aiConversation.update({
+        where: { id: conv.id },
+        data: { title },
+      });
+    }
+
     const history = await prisma.aiMessage.findMany({
-      where: { userId: session.user.id },
+      where: { conversationId: conv.id },
       orderBy: { createdAt: "asc" },
       take: 30,
     });
@@ -66,20 +83,50 @@ export async function sendAiMessage(
 
     const reply = await askAi(parsed.data.provider, chat);
     await prisma.aiMessage.create({
-      data: { userId: session.user.id, role: "ASSISTANT", content: reply },
+      data: {
+        userId: session.user.id,
+        conversationId: conv.id,
+        role: "ASSISTANT",
+        content: reply,
+      },
+    });
+    // Bump updatedAt + remember provider so the sidebar sort + the toggle
+    // restore work next time the user opens the conversation.
+    await prisma.aiConversation.update({
+      where: { id: conv.id },
+      data: { updatedAt: new Date(), provider: parsed.data.provider },
     });
 
     revalidatePath("/ask-ai");
-    return { ok: true, data: { reply, provider: parsed.data.provider } };
+    return {
+      ok: true,
+      data: { reply, provider: parsed.data.provider, conversationId: conv.id },
+    };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "AI request failed" };
   }
 }
 
-export async function clearAiHistory(): Promise<ActionResult> {
+export async function createConversation(): Promise<ActionResult<{ id: string }>> {
   const session = await auth();
   if (!session?.user?.id) return { ok: false, error: "Not authenticated" };
-  await prisma.aiMessage.deleteMany({ where: { userId: session.user.id } });
+  const conv = await prisma.aiConversation.create({
+    data: { userId: session.user.id },
+  });
+  revalidatePath("/ask-ai");
+  return { ok: true, data: { id: conv.id } };
+}
+
+export async function deleteConversation(id: string): Promise<ActionResult> {
+  const session = await auth();
+  if (!session?.user?.id) return { ok: false, error: "Not authenticated" };
+  // Only delete if the conversation actually belongs to the caller.
+  const conv = await prisma.aiConversation.findFirst({
+    where: { id, userId: session.user.id },
+    select: { id: true },
+  });
+  if (!conv) return { ok: false, error: "Not found" };
+  await prisma.aiConversation.delete({ where: { id: conv.id } });
   revalidatePath("/ask-ai");
   return { ok: true };
 }
@@ -94,8 +141,6 @@ export async function uploadAiAttachment(
   if (!file.type.startsWith("image/")) return { ok: false, error: "Images only" };
   try {
     const saved = await saveImageUpload(file, "ai");
-    // saveImageUpload always re-encodes to WebP — Anthropic accepts WebP for
-    // vision, so we hard-code the mime type rather than echoing file.type.
     return {
       ok: true,
       data: {

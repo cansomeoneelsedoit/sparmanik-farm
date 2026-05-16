@@ -19,13 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Combobox } from "@/components/ui/combobox";
 import { createItem, updateItem } from "@/app/(app)/inventory/actions";
 
 const schema = z.object({
@@ -124,30 +118,20 @@ export function NewItemDialog({
             </div>
             <div className="grid grid-cols-2 gap-3">
               <Row label="Category">
-                <Select
-                  value={form.watch("categoryId") || ""}
-                  onValueChange={(v) => form.setValue("categoryId", v || undefined)}
-                >
-                  <SelectTrigger><SelectValue placeholder="Pick category" /></SelectTrigger>
-                  <SelectContent>
-                    {categories.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Combobox
+                  value={form.watch("categoryId") || null}
+                  onChange={(v) => form.setValue("categoryId", v ?? undefined)}
+                  placeholder="Pick category"
+                  options={categories.map((c) => ({ value: c.id, label: c.name }))}
+                />
               </Row>
               <Row label="Default supplier">
-                <Select
-                  value={form.watch("defaultSupplierId") || ""}
-                  onValueChange={(v) => form.setValue("defaultSupplierId", v || undefined)}
-                >
-                  <SelectTrigger><SelectValue placeholder="Pick supplier" /></SelectTrigger>
-                  <SelectContent>
-                    {suppliers.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Combobox
+                  value={form.watch("defaultSupplierId") || null}
+                  onChange={(v) => form.setValue("defaultSupplierId", v ?? undefined)}
+                  placeholder="Pick supplier"
+                  options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+                />
               </Row>
             </div>
             <Row label="Location">

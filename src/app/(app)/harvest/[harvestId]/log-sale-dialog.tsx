@@ -19,6 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Combobox } from "@/components/ui/combobox";
 import { logSale } from "@/app/(app)/harvest/actions";
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -63,12 +64,12 @@ export function LogSaleDialog({ harvestId, produces }: { harvestId: string; prod
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>Produce</Label>
-                <Select value={form.watch("produceId") ?? ""} onValueChange={(v) => form.setValue("produceId", v)}>
-                  <SelectTrigger><SelectValue placeholder="Pick produce" /></SelectTrigger>
-                  <SelectContent>
-                    {produces.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <Combobox
+                  value={form.watch("produceId") ?? null}
+                  onChange={(v) => form.setValue("produceId", v ?? "")}
+                  placeholder="Pick produce"
+                  options={produces.map((p) => ({ value: p.id, label: p.name }))}
+                />
               </div>
               <div className="space-y-2">
                 <Label>Grade</Label>

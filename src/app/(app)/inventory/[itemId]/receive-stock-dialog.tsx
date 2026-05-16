@@ -18,13 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Combobox } from "@/components/ui/combobox";
 import { receiveStock } from "@/app/(app)/inventory/actions";
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -129,12 +123,12 @@ export function ReceiveStockDialog({
               </div>
               <div className="space-y-2">
                 <Label>Supplier</Label>
-                <Select value={form.watch("supplierId") || ""} onValueChange={(v) => form.setValue("supplierId", v || undefined)}>
-                  <SelectTrigger><SelectValue placeholder="Pick supplier" /></SelectTrigger>
-                  <SelectContent>
-                    {suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <Combobox
+                  value={form.watch("supplierId") || null}
+                  onChange={(v) => form.setValue("supplierId", v ?? undefined)}
+                  placeholder="Pick supplier"
+                  options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+                />
               </div>
             </div>
             <div className="grid grid-cols-3 gap-3">

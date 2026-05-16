@@ -3,13 +3,12 @@
 import { useState, useTransition, useRef, useEffect, type ClipboardEvent, type DragEvent } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Paperclip, ArrowUp, X, Sparkles, Trash2 } from "lucide-react";
+import { Paperclip, ArrowUp, X, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { sendAiMessage, clearAiHistory, uploadAiAttachment } from "@/app/(app)/ask-ai/actions";
+import { sendAiMessage, uploadAiAttachment } from "@/app/(app)/ask-ai/actions";
 
 export type Attachment = { path: string; mimeType: string; width?: number; height?: number };
 export type AiProvider = "claude" | "gemini";
@@ -31,10 +30,12 @@ const SUGGESTIONS = [
 ];
 
 export function ChatPanel({
+  conversationId,
   initialMessages,
   providers,
   disabled,
 }: {
+  conversationId: string | null;
   initialMessages: Msg[];
   providers: AiProvider[];
   disabled: boolean;
@@ -149,8 +150,13 @@ export function ChatPanel({
     setDraft("");
     const sentAttachments = attachments;
     setAttachments([]);
+    if (!conversationId) {
+      toast.error("Open or start a chat to send messages.");
+      return;
+    }
     startT(async () => {
       const r = await sendAiMessage({
+        conversationId,
         content: trimmed,
         provider,
         attachments: sentAttachments.length > 0
@@ -275,53 +281,30 @@ export function ChatPanel({
         </div>
       </div>
 
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-        <div className="flex items-center gap-2">
-          {providers.length > 1 ? (
-            <div className="inline-flex overflow-hidden rounded-full border bg-card text-xs">
-              {providers.map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => pickProvider(p)}
-                  className={cn(
-                    "px-3 py-1 transition",
-                    provider === p
-                      ? "bg-foreground text-background"
-                      : "text-muted-foreground hover:bg-muted",
-                  )}
-                  title={`Use ${PROVIDER_LABELS[p]}`}
-                >
-                  {p === "claude" ? "Claude" : "Gemini"}
-                </button>
-              ))}
-            </div>
-          ) : providers.length === 1 ? (
-            <span>Using {PROVIDER_LABELS[providers[0]]}</span>
-          ) : null}
-          <span>Up to {MAX_ATTACHMENTS} images per message.</span>
-        </div>
-        {messages.length > 0 ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={pending}
-            onClick={() =>
-              startT(async () => {
-                const r = await clearAiHistory();
-                if (r.ok) {
-                  setMessages([]);
-                  router.refresh();
-                } else {
-                  toast.error(r.error);
-                }
-              })
-            }
-          >
-            <Trash2 className="mr-1 h-3 w-3" />
-            Clear history
-          </Button>
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        {providers.length > 1 ? (
+          <div className="inline-flex overflow-hidden rounded-full border bg-card text-xs">
+            {providers.map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => pickProvider(p)}
+                className={cn(
+                  "px-3 py-1 transition",
+                  provider === p
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:bg-muted",
+                )}
+                title={`Use ${PROVIDER_LABELS[p]}`}
+              >
+                {p === "claude" ? "Claude" : "Gemini"}
+              </button>
+            ))}
+          </div>
+        ) : providers.length === 1 ? (
+          <span>Using {PROVIDER_LABELS[providers[0]]}</span>
         ) : null}
+        <span>Up to {MAX_ATTACHMENTS} images per message.</span>
       </div>
     </div>
   );

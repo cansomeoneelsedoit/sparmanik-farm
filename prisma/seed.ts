@@ -182,6 +182,12 @@ async function main() {
     console.log(`[seed] Dev user: ${devEmail} / ${devPassword}`);
   }
 
+  // ---- Staff auto-login backfill ----
+  // Every staff member gets a login. Email is "<firstname>@sparmanikfarm.local"
+  // (numeric suffix on collision). Default password is "Jasper1.0!". Idempotent:
+  // existing staff with a user_id are skipped. The Dev User is untouched.
+  await ensureStaffUsers();
+
   // ---- Categories (default set; legacy will overwrite with its own) ----
   const defaultCategories = ["Nutrients", "Media", "Pots", "Irrigation", "Seeds", "Pesticides", "Instruments", "Lighting", "Equipment", "Packaging", "Tools", "Other"];
   for (const name of defaultCategories) {
@@ -484,6 +490,50 @@ async function main() {
   console.log(`[seed] ${legacy.videos.length} videos`);
 
   console.log("[seed] Legacy import complete");
+}
+
+/** Slug a staff member's first name into a stable email local-part. */
+function staffEmailLocal(name: string): string {
+  const first = name.trim().split(/\s+/)[0] ?? "staff";
+  return first
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, "")
+    .slice(0, 32) || "staff";
+}
+
+/** Ensure every Staff row has a linked User. Idempotent. */
+async function ensureStaffUsers() {
+  const DEFAULT_PASSWORD = "Jasper1.0!";
+  const passwordHash = await bcrypt.hash(DEFAULT_PASSWORD, 10);
+  const staff = await prisma.staff.findMany({ where: { userId: null } });
+  let created = 0;
+  for (const s of staff) {
+    const base = staffEmailLocal(s.name);
+    let email = `${base}@sparmanikfarm.local`;
+    let suffix = 2;
+    // If a user with this email already exists AND isn't linked to a staff,
+    // we'll attach it. Otherwise pick a non-clashing email.
+    let user = await prisma.user.findUnique({ where: { email } });
+    if (user) {
+      const linked = await prisma.staff.findFirst({ where: { userId: user.id } });
+      while (user && linked) {
+        email = `${base}${suffix}@sparmanikfarm.local`;
+        suffix += 1;
+        user = await prisma.user.findUnique({ where: { email } });
+      }
+    }
+    if (!user) {
+      user = await prisma.user.create({
+        data: { email, name: s.name, passwordHash },
+      });
+      created += 1;
+    }
+    await prisma.staff.update({ where: { id: s.id }, data: { userId: user.id } });
+  }
+  if (created > 0) {
+    console.log(`[seed] Created ${created} staff logins (default password: ${DEFAULT_PASSWORD})`);
+  }
 }
 
 main()

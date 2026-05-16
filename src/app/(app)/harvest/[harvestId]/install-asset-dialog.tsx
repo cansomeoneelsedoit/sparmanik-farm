@@ -25,6 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Combobox } from "@/components/ui/combobox";
 import { installHarvestAsset } from "@/app/(app)/harvest/actions";
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -115,16 +116,16 @@ export function InstallAssetDialog({
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>Item</Label>
-              <Select value={form.watch("itemId") ?? ""} onValueChange={(v) => form.setValue("itemId", v)}>
-                <SelectTrigger><SelectValue placeholder="Pick item with stock" /></SelectTrigger>
-                <SelectContent>
-                  {items.map((i) => (
-                    <SelectItem key={i.id} value={i.id}>
-                      {i.name} — {i.available} {i.unit} avail
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Combobox
+                value={form.watch("itemId")}
+                onChange={(v) => form.setValue("itemId", v ?? "")}
+                placeholder="Pick item with stock"
+                options={items.map((i) => ({
+                  value: i.id,
+                  label: i.name,
+                  description: `${i.available} ${i.unit} avail`,
+                }))}
+              />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">

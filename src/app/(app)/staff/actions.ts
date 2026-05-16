@@ -3,10 +3,44 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import bcrypt from "bcryptjs";
+
 import { prisma } from "@/server/prisma";
 import { auth } from "@/auth";
 import { recordAction } from "@/server/audit";
 import { Decimal, type TransactionClient } from "@/server/decimal";
+
+const STAFF_DEFAULT_PASSWORD = "Jasper1.0!";
+
+function staffEmailLocal(name: string): string {
+  const first = name.trim().split(/\s+/)[0] ?? "staff";
+  return first
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, "")
+    .slice(0, 32) || "staff";
+}
+
+/**
+ * Create a fresh User for a new Staff member. Email is "<firstname>@sparmanikfarm.local"
+ * (with a numeric suffix if that's already taken); password defaults to
+ * STAFF_DEFAULT_PASSWORD. Caller must link the resulting userId on the Staff row.
+ */
+async function provisionStaffUser(
+  tx: TransactionClient,
+  name: string,
+): Promise<{ id: string; email: string }> {
+  const base = staffEmailLocal(name);
+  const passwordHash = await bcrypt.hash(STAFF_DEFAULT_PASSWORD, 10);
+  let email = `${base}@sparmanikfarm.local`;
+  let suffix = 2;
+  while (await tx.user.findUnique({ where: { email } })) {
+    email = `${base}${suffix}@sparmanikfarm.local`;
+    suffix += 1;
+  }
+  const u = await tx.user.create({ data: { email, name, passwordHash } });
+  return { id: u.id, email };
+}
 
 export type ActionResult<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
@@ -28,11 +62,14 @@ export async function createStaff(input: unknown): Promise<ActionResult<{ id: st
   const userId = await uid();
   const initials = parsed.data.name.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
   const staff = await prisma.$transaction(async (tx: TransactionClient) => {
+    // Provision their login first so we can attach userId at staff-create time.
+    const login = await provisionStaffUser(tx, parsed.data.name);
     const s = await tx.staff.create({
       data: {
         name: parsed.data.name,
         role: parsed.data.role || null,
         avatar: parsed.data.avatar || initials,
+        userId: login.id,
         rates: {
           create: { rate: new Decimal(parsed.data.rate), effectiveFrom: new Date(parsed.data.effectiveFrom) },
         },
@@ -42,9 +79,9 @@ export async function createStaff(input: unknown): Promise<ActionResult<{ id: st
       type: "staff.create",
       entityType: "Staff",
       entityId: s.id,
-      description: `Added staff: ${s.name}`,
+      description: `Added staff: ${s.name} (login ${login.email})`,
       userId,
-      payload: { name: s.name },
+      payload: { name: s.name, loginEmail: login.email, defaultPassword: STAFF_DEFAULT_PASSWORD },
     });
     return s;
   });

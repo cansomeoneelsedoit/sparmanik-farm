@@ -2,7 +2,7 @@ import { prisma } from "@/server/prisma";
 import { auth } from "@/auth";
 import { availableProviders } from "@/server/ai";
 import { Card, CardContent } from "@/components/ui/card";
-import { ChatPanel, type Attachment } from "@/app/(app)/ask-ai/chat-panel";
+import { AskAiShell, type Attachment, type ConversationSummary } from "@/app/(app)/ask-ai/ask-ai-shell";
 
 export const dynamic = "force-dynamic";
 
@@ -32,13 +32,60 @@ function parseAttachments(raw: unknown): Attachment[] | undefined {
   return out.length > 0 ? out : undefined;
 }
 
-export default async function AskAiPage() {
+export default async function AskAiPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ c?: string }>;
+}) {
   const session = await auth();
-  const rows = session?.user?.id
+  const userId = session?.user?.id ?? null;
+  const { c: requestedConversationId } = await searchParams;
+
+  // Load conversations for the sidebar. Always show even with no key set, so
+  // the user can still browse old chats.
+  const conversations: ConversationSummary[] = userId
+    ? (
+        await prisma.aiConversation.findMany({
+          where: { userId },
+          orderBy: { updatedAt: "desc" },
+          take: 50,
+          select: { id: true, title: true, updatedAt: true, provider: true },
+        })
+      ).map((c) => ({
+        id: c.id,
+        title: c.title ?? "New chat",
+        updatedAt: c.updatedAt.toISOString(),
+        provider: c.provider ?? null,
+      }))
+    : [];
+
+  // Pick the active conversation: ?c=… if provided, else newest, else create
+  // a fresh empty one. The fresh case is so a brand-new user lands in a
+  // usable state without needing to click "New chat".
+  let activeConversationId: string | null = null;
+  if (userId) {
+    if (requestedConversationId && conversations.some((c) => c.id === requestedConversationId)) {
+      activeConversationId = requestedConversationId;
+    } else if (conversations.length > 0) {
+      activeConversationId = conversations[0].id;
+    } else {
+      const fresh = await prisma.aiConversation.create({ data: { userId } });
+      activeConversationId = fresh.id;
+      conversations.unshift({
+        id: fresh.id,
+        title: "New chat",
+        updatedAt: fresh.updatedAt.toISOString(),
+        provider: null,
+      });
+    }
+  }
+
+  // Load messages for the active conversation only.
+  const rows: PersistedMessage[] = activeConversationId
     ? ((await prisma.aiMessage.findMany({
-        where: { userId: session.user.id },
+        where: { conversationId: activeConversationId },
         orderBy: { createdAt: "asc" },
-        take: 100,
+        take: 200,
       })) as PersistedMessage[])
     : [];
 
@@ -63,7 +110,9 @@ export default async function AskAiPage() {
           </Card>
         </div>
       ) : null}
-      <ChatPanel
+      <AskAiShell
+        conversations={conversations}
+        activeConversationId={activeConversationId}
         initialMessages={initialMessages}
         providers={providers}
         disabled={!hasAnyProvider}

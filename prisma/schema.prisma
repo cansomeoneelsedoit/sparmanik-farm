@@ -21,10 +21,12 @@ model User {
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
-  accounts      Account[]
-  sessions      Session[]
-  aiMessages    AiMessage[]
-  auditActions  AuditAction[]
+  accounts        Account[]
+  sessions        Session[]
+  aiMessages      AiMessage[]
+  aiConversations AiConversation[]
+  auditActions    AuditAction[]
+  staff           Staff?
 
   @@map("users")
 }
@@ -361,9 +363,13 @@ model Staff {
   role      String?
   avatar    String?
   photoPath String?  @map("photo_path")
+  // Each staff member gets their own login. Seed/backfill auto-creates a
+  // User with email "<firstname>@sparmanikfarm.local" + the default password.
+  userId    String?  @unique @map("user_id")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  user        User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
   rates       StaffRate[]
   wageEntries WageEntry[]
   tasks       Task[]      @relation("AssignedTasks")
@@ -590,19 +596,41 @@ model AuditAction {
 
 // ---------- AI ----------
 
+model AiConversation {
+  id        String      @id @default(cuid())
+  userId    String      @map("user_id")
+  title     String?
+  // Tracks the last provider this conversation used so the sidebar can hint
+  // (and we can restore the toggle the next time it's opened).
+  provider  String?
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages AiMessage[]
+
+  @@index([userId, updatedAt])
+  @@map("ai_conversations")
+}
+
 model AiMessage {
-  id          String   @id @default(cuid())
-  userId      String   @map("user_id")
-  role        AiRole
-  content     String
+  id             String   @id @default(cuid())
+  userId         String   @map("user_id")
+  // conversationId is nullable so historical messages keep working until the
+  // backfill migration assigns them to a synthetic "Earlier chats" thread.
+  conversationId String?  @map("conversation_id")
+  role           AiRole
+  content        String
   // Optional list of attached images for vision: [{ path, mimeType, width, height }].
   // Only set on USER messages; ASSISTANT messages stay text-only.
-  attachments Json?
-  createdAt   DateTime @default(now()) @map("created_at")
+  attachments    Json?
+  createdAt      DateTime @default(now()) @map("created_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation AiConversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
+  @@index([conversationId, createdAt])
   @@map("ai_messages")
 }
 

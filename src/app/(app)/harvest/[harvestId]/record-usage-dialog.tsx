@@ -19,6 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Combobox } from "@/components/ui/combobox";
 import { recordHarvestUsage } from "@/app/(app)/harvest/actions";
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -61,12 +62,12 @@ export function RecordUsageDialog({ harvestId, items }: { harvestId: string; ite
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>Item</Label>
-              <Select value={form.watch("itemId") ?? ""} onValueChange={(v) => form.setValue("itemId", v)}>
-                <SelectTrigger><SelectValue placeholder="Pick item" /></SelectTrigger>
-                <SelectContent>
-                  {items.map((i) => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <Combobox
+                value={form.watch("itemId")}
+                onChange={(v) => form.setValue("itemId", v ?? "")}
+                placeholder="Pick item"
+                options={items.map((i) => ({ value: i.id, label: i.name, description: i.unit }))}
+              />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
