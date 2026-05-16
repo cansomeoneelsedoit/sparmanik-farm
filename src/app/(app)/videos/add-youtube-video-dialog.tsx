@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { addYoutubeVideo } from "@/app/(app)/videos/actions";
+import { addYoutubeVideo, updateYoutubeVideo } from "@/app/(app)/videos/actions";
 
 const schema = z.object({
   titleEn: z.string().min(1),
@@ -28,19 +28,36 @@ const schema = z.object({
 });
 type Form = z.infer<typeof schema>;
 
-export function AddYoutubeVideoDialog({ trigger }: { trigger: ReactNode }) {
+export function AddYoutubeVideoDialog({
+  trigger,
+  existing,
+}: {
+  trigger: ReactNode;
+  existing?: { id: string; titleEn: string; titleId: string; category: string | null; url: string | null };
+}) {
   const [open, setOpen] = useState(false);
   const [pending, startT] = useTransition();
   const router = useRouter();
-  const form = useForm<Form>({ resolver: zodResolver(schema) });
+  const isEdit = !!existing;
+  const form = useForm<Form>({
+    resolver: zodResolver(schema),
+    defaultValues: existing
+      ? {
+          titleEn: existing.titleEn,
+          titleId: existing.titleId,
+          category: existing.category ?? "",
+          url: existing.url ?? "",
+        }
+      : undefined,
+  });
 
   function onSubmit(v: Form) {
     startT(async () => {
-      const r = await addYoutubeVideo(v);
+      const r = isEdit ? await updateYoutubeVideo(existing.id, v) : await addYoutubeVideo(v);
       if (r.ok) {
-        toast.success("Video added");
+        toast.success(isEdit ? "Saved" : "Video added");
         setOpen(false);
-        form.reset();
+        if (!isEdit) form.reset();
         router.refresh();
       } else toast.error(r.error);
     });
@@ -51,7 +68,7 @@ export function AddYoutubeVideoDialog({ trigger }: { trigger: ReactNode }) {
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent>
         <form onSubmit={form.handleSubmit(onSubmit)}>
-          <DialogHeader><DialogTitle>Add YouTube video</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{isEdit ? "Edit video" : "Add YouTube video"}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2"><Label>Title (EN)</Label><Input {...form.register("titleEn")} /></div>
@@ -62,7 +79,7 @@ export function AddYoutubeVideoDialog({ trigger }: { trigger: ReactNode }) {
           </div>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={pending}>Cancel</Button>
-            <Button type="submit" disabled={pending}>{pending ? "Adding…" : "Add"}</Button>
+            <Button type="submit" disabled={pending}>{pending ? "Saving…" : isEdit ? "Save" : "Add"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

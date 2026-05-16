@@ -66,6 +66,41 @@ export async function createItem(input: unknown): Promise<ActionResult<{ id: str
   return { ok: true, data: { id: item.id } };
 }
 
+export async function updateItem(id: string, input: unknown): Promise<ActionResult> {
+  const parsed = newItemSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+  await prisma.item.update({
+    where: { id },
+    data: {
+      name: parsed.data.name,
+      categoryId: parsed.data.categoryId || null,
+      unit: parsed.data.unit,
+      subUnit: parsed.data.subUnit || null,
+      subFactor: parsed.data.subFactor ? new Decimal(parsed.data.subFactor) : null,
+      location: parsed.data.location || null,
+      reusable: parsed.data.reusable ?? false,
+      reorder: new Decimal(parsed.data.reorder),
+      shopeeUrl: parsed.data.shopeeUrl || null,
+      defaultSupplierId: parsed.data.defaultSupplierId || null,
+    },
+  });
+  revalidatePath("/inventory");
+  revalidatePath(`/inventory/${id}`);
+  return { ok: true };
+}
+
+export async function deleteBatch(id: string): Promise<ActionResult> {
+  try {
+    await prisma.batch.delete({ where: { id } });
+  } catch {
+    return { ok: false, error: "Can't delete a batch that's been consumed by harvests" };
+  }
+  revalidatePath("/inventory");
+  return { ok: true };
+}
+
 const receiveStockSchema = z.object({
   itemId: z.string(),
   date: z.string(), // YYYY-MM-DD

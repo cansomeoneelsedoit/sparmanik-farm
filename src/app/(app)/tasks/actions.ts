@@ -54,6 +54,25 @@ export async function createTask(input: unknown): Promise<ActionResult<{ id: str
   return { ok: true, data: { id: task.id } };
 }
 
+export async function updateTask(id: string, input: unknown): Promise<ActionResult> {
+  const parsed = newSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Validation failed" };
+  await prisma.task.update({
+    where: { id },
+    data: {
+      title: parsed.data.title,
+      assigneeStaffId: parsed.data.assigneeStaffId || null,
+      dueDate: new Date(parsed.data.dueDate),
+      priority: parsed.data.priority,
+      harvestId: parsed.data.harvestId || null,
+      description: parsed.data.description || null,
+      instructions: parsed.data.instructions || null,
+    },
+  });
+  revalidatePath("/tasks");
+  return { ok: true };
+}
+
 export async function setTaskStatus(
   id: string,
   status: "PENDING" | "IN_PROGRESS" | "COMPLETED",

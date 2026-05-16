@@ -52,6 +52,65 @@ export async function createStaff(input: unknown): Promise<ActionResult<{ id: st
   return { ok: true, data: { id: staff.id } };
 }
 
+const updateStaffSchema = z.object({
+  name: z.string().min(1),
+  role: z.string().optional().default(""),
+  avatar: z.string().optional().default(""),
+});
+
+export async function updateStaff(id: string, input: unknown): Promise<ActionResult> {
+  const parsed = updateStaffSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Validation failed" };
+  await prisma.staff.update({
+    where: { id },
+    data: {
+      name: parsed.data.name,
+      role: parsed.data.role || null,
+      avatar: parsed.data.avatar || null,
+    },
+  });
+  revalidatePath("/staff");
+  return { ok: true };
+}
+
+export async function deleteStaff(id: string): Promise<ActionResult> {
+  try {
+    await prisma.staff.delete({ where: { id } });
+  } catch {
+    return { ok: false, error: "Can't delete staff who have wage entries — delete those first" };
+  }
+  revalidatePath("/staff");
+  return { ok: true };
+}
+
+const updateRateSchema = z.object({
+  rate: z.string().regex(/^[0-9.]+$/),
+  effectiveFrom: z.string().min(1),
+});
+
+export async function updateStaffRate(id: string, input: unknown): Promise<ActionResult> {
+  const parsed = updateRateSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Validation failed" };
+  await prisma.staffRate.update({
+    where: { id },
+    data: { rate: new Decimal(parsed.data.rate), effectiveFrom: new Date(parsed.data.effectiveFrom) },
+  });
+  revalidatePath("/staff");
+  return { ok: true };
+}
+
+export async function deleteStaffRate(id: string): Promise<ActionResult> {
+  await prisma.staffRate.delete({ where: { id } });
+  revalidatePath("/staff");
+  return { ok: true };
+}
+
+export async function deleteWageEntry(id: string): Promise<ActionResult> {
+  await prisma.wageEntry.delete({ where: { id } });
+  revalidatePath("/staff");
+  return { ok: true };
+}
+
 const rateSchema = z.object({
   staffId: z.string(),
   rate: z.string().regex(/^[0-9.]+$/),

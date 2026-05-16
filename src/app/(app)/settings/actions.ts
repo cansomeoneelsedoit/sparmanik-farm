@@ -23,6 +23,19 @@ export async function addCategory(input: unknown): Promise<ActionResult> {
   return { ok: true };
 }
 
+export async function updateCategory(id: string, input: unknown): Promise<ActionResult> {
+  const parsed = catSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Invalid name" };
+  try {
+    await prisma.category.update({ where: { id }, data: { name: parsed.data.name } });
+  } catch {
+    return { ok: false, error: "Name already exists" };
+  }
+  revalidatePath("/settings/categories");
+  revalidatePath("/inventory");
+  return { ok: true };
+}
+
 export async function deleteCategory(id: string): Promise<ActionResult> {
   await prisma.category.delete({ where: { id } });
   revalidatePath("/settings/categories");
@@ -36,6 +49,17 @@ export async function addProduce(input: unknown): Promise<ActionResult> {
   const parsed = produceSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Invalid" };
   await prisma.produce.create({
+    data: { name: parsed.data.name, barcode: parsed.data.barcode || null },
+  });
+  revalidatePath("/settings/produce");
+  return { ok: true };
+}
+
+export async function updateProduce(id: string, input: unknown): Promise<ActionResult> {
+  const parsed = produceSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Invalid" };
+  await prisma.produce.update({
+    where: { id },
     data: { name: parsed.data.name, barcode: parsed.data.barcode || null },
   });
   revalidatePath("/settings/produce");
@@ -60,6 +84,22 @@ export async function addGreenhouse(input: unknown): Promise<ActionResult> {
   const parsed = ghSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Invalid" };
   await prisma.greenhouse.create({
+    data: {
+      name: parsed.data.name,
+      location: parsed.data.location || null,
+      type: parsed.data.type || null,
+      notes: parsed.data.notes || null,
+    },
+  });
+  revalidatePath("/settings/greenhouses");
+  return { ok: true };
+}
+
+export async function updateGreenhouse(id: string, input: unknown): Promise<ActionResult> {
+  const parsed = ghSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Invalid" };
+  await prisma.greenhouse.update({
+    where: { id },
     data: {
       name: parsed.data.name,
       location: parsed.data.location || null,

@@ -8,6 +8,7 @@ import { Money } from "@/components/shared/money";
 import { AddStaffDialog } from "@/app/(app)/staff/add-staff-dialog";
 import { NewWageEntryDialog } from "@/app/(app)/staff/new-wage-entry-dialog";
 import { AddPayRiseButton } from "@/app/(app)/staff/add-pay-rise-button";
+import { StaffCardActions } from "@/app/(app)/staff/staff-card-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -63,12 +64,15 @@ export default async function StaffPage() {
             return (
               <Card key={s.id}>
                 <CardContent className="space-y-3 p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 font-semibold text-accent">{s.avatar ?? s.name[0]}</div>
-                    <div>
-                      <div className="font-medium">{s.name}</div>
-                      <div className="text-xs text-muted-foreground">{s.role ?? "—"}</div>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 font-semibold text-accent">{s.avatar ?? s.name[0]}</div>
+                      <div>
+                        <div className="font-medium">{s.name}</div>
+                        <div className="text-xs text-muted-foreground">{s.role ?? "—"}</div>
+                      </div>
                     </div>
+                    <StaffCardActions staff={{ id: s.id, name: s.name, role: s.role, avatar: s.avatar }} />
                   </div>
                   <div className="grid grid-cols-3 gap-2 border-t pt-3 text-center text-xs">
                     <div><div className="text-muted-foreground">Rate</div><div className="font-medium"><Money value={String(currentRate)} /></div></div>

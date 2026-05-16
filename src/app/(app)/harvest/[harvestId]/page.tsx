@@ -20,12 +20,18 @@ import { Decimal } from "@/server/decimal";
 import { RecordUsageDialog } from "@/app/(app)/harvest/[harvestId]/record-usage-dialog";
 import { LogSaleDialog } from "@/app/(app)/harvest/[harvestId]/log-sale-dialog";
 import { EndHarvestButton } from "@/app/(app)/harvest/[harvestId]/end-harvest-button";
+import { StartHarvestDialog } from "@/app/(app)/harvest/start-harvest-dialog";
+import { DeleteHarvestButton } from "@/app/(app)/harvest/[harvestId]/harvest-actions";
+import {
+  DeleteSaleButton,
+  DeleteUsageButton,
+} from "@/app/(app)/harvest/[harvestId]/row-actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function HarvestDetailPage({ params }: { params: Promise<{ harvestId: string }> }) {
   const { harvestId } = await params;
-  const [harvest, items, produces] = await Promise.all([
+  const [harvest, items, produces, greenhouses] = await Promise.all([
     prisma.harvest.findUnique({
       where: { id: harvestId },
       include: {
@@ -38,6 +44,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
     }),
     prisma.item.findMany({ orderBy: { name: "asc" } }),
     prisma.produce.findMany({ orderBy: { name: "asc" } }),
+    prisma.greenhouse.findMany({ orderBy: { name: "asc" } }),
   ]);
 
   if (!harvest) notFound();
@@ -67,6 +74,22 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
             produces={produces.map((p: { id: string; name: string }) => p)}
           />
           {harvest.status === "LIVE" ? <EndHarvestButton id={harvest.id} /> : null}
+          <StartHarvestDialog
+            greenhouses={greenhouses.map((g: { id: string; name: string }) => g)}
+            produces={produces.map((p: { id: string; name: string }) => p)}
+            existing={{
+              id: harvest.id,
+              name: harvest.name,
+              greenhouseId: harvest.greenhouseId,
+              produceId: harvest.produceId,
+              variety: harvest.variety,
+              startDate: harvest.startDate.toISOString().slice(0, 10),
+              endDate: harvest.endDate ? harvest.endDate.toISOString().slice(0, 10) : null,
+              status: harvest.status,
+            }}
+            trigger={<Button variant="outline">Edit</Button>}
+          />
+          <DeleteHarvestButton id={harvest.id} name={harvest.name} />
         </div>
       </header>
 
@@ -98,6 +121,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                   <TableHead className="text-right">Weight (kg)</TableHead>
                   <TableHead className="text-right">Price/kg</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
+                  <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -111,6 +135,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                     <TableCell className="text-right">{Number(s.weight)}</TableCell>
                     <TableCell className="text-right"><Money value={s.pricePerKg.toFixed(4)} /></TableCell>
                     <TableCell className="text-right font-medium"><Money value={s.amount.toFixed(4)} /></TableCell>
+                    <TableCell className="p-0"><DeleteSaleButton id={s.id} /></TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -132,6 +157,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                   <TableHead>Item</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
                   <TableHead className="text-right">Cost</TableHead>
+                  <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -143,6 +169,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                       <TableCell>{u.item.name}</TableCell>
                       <TableCell className="text-right">{u.displayQty || `${Number(u.qty)} ${u.item.unit}`}</TableCell>
                       <TableCell className="text-right"><Money value={cost.toFixed(4)} /></TableCell>
+                      <TableCell className="p-0"><DeleteUsageButton id={u.id} /></TableCell>
                     </TableRow>
                   );
                 })}

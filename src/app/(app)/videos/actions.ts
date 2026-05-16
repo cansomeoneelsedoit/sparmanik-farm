@@ -41,6 +41,24 @@ export async function addYoutubeVideo(input: unknown): Promise<ActionResult> {
   return { ok: true };
 }
 
+export async function updateYoutubeVideo(id: string, input: unknown): Promise<ActionResult> {
+  const parsed = youtubeSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Validation failed" };
+  const ytId = parseYoutubeId(parsed.data.url);
+  await prisma.video.update({
+    where: { id },
+    data: {
+      titleEn: parsed.data.titleEn,
+      titleId: parsed.data.titleId,
+      category: parsed.data.category || null,
+      url: parsed.data.url,
+      thumbnailPath: ytId ? `https://i.ytimg.com/vi/${ytId}/mqdefault.jpg` : null,
+    },
+  });
+  revalidatePath("/videos");
+  return { ok: true };
+}
+
 export async function deleteVideo(id: string): Promise<ActionResult> {
   await prisma.video.delete({ where: { id } });
   revalidatePath("/videos");

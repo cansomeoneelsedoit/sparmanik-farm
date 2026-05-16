@@ -54,6 +54,93 @@ export async function startHarvest(input: unknown): Promise<ActionResult<{ id: s
   return { ok: true, data: { id: h.id } };
 }
 
+const updateHarvestSchema = z.object({
+  name: z.string().min(1),
+  variety: z.string().optional().default(""),
+  greenhouseId: z.string().min(1),
+  produceId: z.string().optional().nullable(),
+  startDate: z.string().min(1),
+  endDate: z.string().optional().nullable(),
+  status: z.enum(["LIVE", "CLOSED"]).default("LIVE"),
+});
+
+export async function updateHarvest(id: string, input: unknown): Promise<ActionResult> {
+  const parsed = updateHarvestSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Validation failed" };
+  await prisma.harvest.update({
+    where: { id },
+    data: {
+      name: parsed.data.name,
+      variety: parsed.data.variety || null,
+      greenhouseId: parsed.data.greenhouseId,
+      produceId: parsed.data.produceId || null,
+      startDate: new Date(parsed.data.startDate),
+      endDate: parsed.data.endDate ? new Date(parsed.data.endDate) : null,
+      status: parsed.data.status,
+    },
+  });
+  revalidatePath("/harvest");
+  revalidatePath(`/harvest/${id}`);
+  return { ok: true };
+}
+
+export async function deleteHarvest(id: string): Promise<ActionResult> {
+  await prisma.harvest.delete({ where: { id } });
+  revalidatePath("/harvest");
+  return { ok: true };
+}
+
+export async function deleteSale(id: string): Promise<ActionResult> {
+  const sale = await prisma.sale.findUnique({ where: { id }, select: { harvestId: true } });
+  await prisma.sale.delete({ where: { id } });
+  if (sale?.harvestId) revalidatePath(`/harvest/${sale.harvestId}`);
+  revalidatePath("/sales");
+  return { ok: true };
+}
+
+const updateSaleSchema = z.object({
+  produceId: z.string(),
+  date: z.string(),
+  grade: z.enum(["A", "B", "C", "D"]),
+  weight: z.string(),
+  pricePerKg: z.string(),
+});
+
+export async function updateSale(id: string, input: unknown): Promise<ActionResult> {
+  const parsed = updateSaleSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Validation failed" };
+  const weight = new Decimal(parsed.data.weight);
+  const price = new Decimal(parsed.data.pricePerKg);
+  const sale = await prisma.sale.update({
+    where: { id },
+    data: {
+      produceId: parsed.data.produceId,
+      date: new Date(parsed.data.date),
+      grade: parsed.data.grade,
+      weight,
+      pricePerKg: price,
+      amount: weight.times(price),
+    },
+  });
+  revalidatePath(`/harvest/${sale.harvestId}`);
+  revalidatePath("/sales");
+  return { ok: true };
+}
+
+export async function deleteHarvestUsage(id: string): Promise<ActionResult> {
+  const usage = await prisma.harvestUsage.findUnique({ where: { id }, select: { harvestId: true } });
+  await prisma.harvestUsage.delete({ where: { id } });
+  if (usage?.harvestId) revalidatePath(`/harvest/${usage.harvestId}`);
+  return { ok: true };
+}
+
+export async function deleteHarvestAsset(id: string): Promise<ActionResult> {
+  const asset = await prisma.harvestAsset.findUnique({ where: { id }, select: { harvestId: true } });
+  await prisma.harvestAsset.delete({ where: { id } });
+  if (asset?.harvestId) revalidatePath(`/harvest/${asset.harvestId}`);
+  return { ok: true };
+}
+
 export async function endHarvest(harvestId: string): Promise<ActionResult> {
   const userId = await uid();
   await prisma.$transaction(async (tx: TransactionClient) => {

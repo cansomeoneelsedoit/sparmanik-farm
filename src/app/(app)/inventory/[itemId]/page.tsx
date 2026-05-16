@@ -17,12 +17,15 @@ import {
 import { Money } from "@/components/shared/money";
 import { ReceiveStockDialog } from "@/app/(app)/inventory/[itemId]/receive-stock-dialog";
 import { UseStockDialog } from "@/app/(app)/inventory/[itemId]/use-stock-dialog";
+import { NewItemDialog } from "@/app/(app)/inventory/new-item-dialog";
+import { DeleteItemButton } from "@/app/(app)/inventory/[itemId]/item-actions";
+import { DeleteBatchButton } from "@/app/(app)/inventory/[itemId]/batch-actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function ItemDetailPage({ params }: { params: Promise<{ itemId: string }> }) {
   const { itemId } = await params;
-  const [item, suppliers] = await Promise.all([
+  const [item, suppliers, categories] = await Promise.all([
     prisma.item.findUnique({
       where: { id: itemId },
       include: {
@@ -35,6 +38,7 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
       },
     }),
     prisma.supplier.findMany({ orderBy: { name: "asc" } }),
+    prisma.category.findMany({ orderBy: { name: "asc" } }),
   ]);
 
   if (!item) notFound();
@@ -75,6 +79,23 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
             defaultSupplierId={item.defaultSupplierId ?? undefined}
           />
           <UseStockDialog itemId={item.id} maxQty={totalStock.toString()} unit={item.unit} />
+          <NewItemDialog
+            trigger={<Button variant="outline">Edit</Button>}
+            categories={categories.map((c: { id: string; name: string }) => c)}
+            suppliers={suppliers.map((s: { id: string; name: string }) => s)}
+            existing={{
+              id: item.id,
+              name: item.name,
+              unit: item.unit,
+              categoryId: item.categoryId,
+              defaultSupplierId: item.defaultSupplierId,
+              reorder: item.reorder.toFixed(4),
+              location: item.location,
+              reusable: item.reusable,
+              shopeeUrl: item.shopeeUrl,
+            }}
+          />
+          <DeleteItemButton id={item.id} name={item.name} />
         </div>
       </header>
 
@@ -110,6 +131,7 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
                   <TableHead className="text-right">Remaining</TableHead>
                   <TableHead className="text-right">Unit price</TableHead>
                   <TableHead className="text-right">Batch value</TableHead>
+                  <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -121,6 +143,7 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
                     <TableCell className="text-right">{b.remaining.toFixed(0)} {item.unit}</TableCell>
                     <TableCell className="text-right"><Money value={b.price.toFixed(4)} /></TableCell>
                     <TableCell className="text-right font-medium"><Money value={b.remaining.times(b.price).toFixed(4)} /></TableCell>
+                    <TableCell className="p-0"><DeleteBatchButton id={b.id} /></TableCell>
                   </TableRow>
                 ))}
               </TableBody>

@@ -13,7 +13,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Pencil } from "lucide-react";
+
 import { setTaskStatus, assignTask, deleteTask } from "@/app/(app)/tasks/actions";
+import { AddTaskDialog } from "@/app/(app)/tasks/add-task-dialog";
 
 type Task = {
   id: string;
@@ -27,7 +30,15 @@ type Task = {
   harvest: { id: string; name: string } | null;
 };
 
-export function TaskCard({ task, staff }: { task: Task; staff: { id: string; name: string }[] }) {
+export function TaskCard({
+  task,
+  staff,
+  harvests,
+}: {
+  task: Task;
+  staff: { id: string; name: string }[];
+  harvests: { id: string; name: string }[];
+}) {
   const [pending, startT] = useTransition();
   const router = useRouter();
   const priorityColour = task.priority === "HIGH" ? "destructive" : task.priority === "MEDIUM" ? "accent" : "secondary";
@@ -74,6 +85,20 @@ export function TaskCard({ task, staff }: { task: Task; staff: { id: string; nam
           {staff.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
         </SelectContent>
       </Select>
+      <AddTaskDialog
+        staff={staff}
+        harvests={harvests}
+        existing={{
+          id: task.id,
+          title: task.title,
+          dueDate: task.dueDate.toISOString().slice(0, 10),
+          priority: task.priority,
+          assigneeStaffId: task.assigneeStaffId,
+          harvestId: task.harvest?.id ?? null,
+          description: task.description,
+        }}
+        trigger={<Button size="icon" variant="ghost" title="Edit"><Pencil className="h-4 w-4" /></Button>}
+      />
       <Button
         size="icon"
         variant="ghost"

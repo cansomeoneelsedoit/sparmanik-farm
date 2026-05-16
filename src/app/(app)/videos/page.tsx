@@ -1,4 +1,4 @@
-import { Plus } from "lucide-react";
+import { Plus, Pencil } from "lucide-react";
 
 import { prisma } from "@/server/prisma";
 import { Button } from "@/components/ui/button";
@@ -38,7 +38,15 @@ export default async function VideosPage() {
                 </div>
                 <div className="flex items-center justify-between">
                   {v.category ? <Badge variant="outline">{v.category}</Badge> : <span />}
-                  <VideoPlayButton id={v.id} type={v.type} url={v.url} />
+                  <div className="flex items-center gap-1">
+                    {v.type === "YOUTUBE" ? (
+                      <AddYoutubeVideoDialog
+                        existing={{ id: v.id, titleEn: v.titleEn, titleId: v.titleId, category: v.category, url: v.url }}
+                        trigger={<Button size="icon" variant="ghost" title="Edit"><Pencil className="h-4 w-4" /></Button>}
+                      />
+                    ) : null}
+                    <VideoPlayButton id={v.id} type={v.type} url={v.url} />
+                  </div>
                 </div>
               </CardContent>
             </Card>

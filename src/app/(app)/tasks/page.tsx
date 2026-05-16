@@ -57,10 +57,10 @@ export default async function TasksPage() {
         <Stat label="Completed" count={completed.length} accent="green" />
       </div>
 
-      <Section title="Overdue" border="border-l-destructive" tasks={overdue} staff={staff} />
-      <Section title="Due today" border="border-l-yellow-500" tasks={dueToday} staff={staff} />
-      <Section title="Upcoming" border="border-l-blue-500" tasks={upcoming} staff={staff} />
-      <Section title="Completed" border="border-l-green-500" tasks={completed} staff={staff} muted />
+      <Section title="Overdue" border="border-l-destructive" tasks={overdue} staff={staff} harvests={harvests} />
+      <Section title="Due today" border="border-l-yellow-500" tasks={dueToday} staff={staff} harvests={harvests} />
+      <Section title="Upcoming" border="border-l-blue-500" tasks={upcoming} staff={staff} harvests={harvests} />
+      <Section title="Completed" border="border-l-green-500" tasks={completed} staff={staff} harvests={harvests} muted />
     </div>
   );
 }
@@ -77,7 +77,7 @@ function Stat({ label, count, accent }: { label: string; count: number; accent: 
   );
 }
 
-function Section({ title, border, tasks, staff, muted }: { title: string; border: string; tasks: TaskRow[]; staff: { id: string; name: string }[]; muted?: boolean }) {
+function Section({ title, border, tasks, staff, harvests, muted }: { title: string; border: string; tasks: TaskRow[]; staff: { id: string; name: string }[]; harvests: { id: string; name: string }[]; muted?: boolean }) {
   if (tasks.length === 0) return null;
   return (
     <Card className={`border-l-4 ${border} ${muted ? "opacity-70" : ""}`}>
@@ -85,7 +85,7 @@ function Section({ title, border, tasks, staff, muted }: { title: string; border
         <CardTitle className="text-base">{title} <Badge variant="secondary" className="ml-2">{tasks.length}</Badge></CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">
-        {tasks.map((t) => <TaskCard key={t.id} task={t} staff={staff} />)}
+        {tasks.map((t) => <TaskCard key={t.id} task={t} staff={staff} harvests={harvests} />)}
       </CardContent>
     </Card>
   );

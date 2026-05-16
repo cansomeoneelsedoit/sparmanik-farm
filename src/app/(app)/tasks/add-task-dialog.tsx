@@ -20,7 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { createTask } from "@/app/(app)/tasks/actions";
+import { createTask, updateTask } from "@/app/(app)/tasks/actions";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const schema = z.object({
@@ -37,30 +37,51 @@ export function AddTaskDialog({
   trigger,
   staff,
   harvests,
+  existing,
 }: {
   trigger: ReactNode;
   staff: { id: string; name: string }[];
   harvests: { id: string; name: string }[];
+  existing?: {
+    id: string;
+    title: string;
+    dueDate: string;
+    priority: "LOW" | "MEDIUM" | "HIGH";
+    assigneeStaffId: string | null;
+    harvestId: string | null;
+    description: string | null;
+  };
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startT] = useTransition();
   const router = useRouter();
+  const isEdit = !!existing;
   const form = useForm<Form>({
     resolver: zodResolver(schema),
-    defaultValues: { title: "", dueDate: today(), priority: "MEDIUM" },
+    defaultValues: existing
+      ? {
+          title: existing.title,
+          dueDate: existing.dueDate,
+          priority: existing.priority,
+          assigneeStaffId: existing.assigneeStaffId ?? undefined,
+          harvestId: existing.harvestId ?? undefined,
+          description: existing.description ?? "",
+        }
+      : { title: "", dueDate: today(), priority: "MEDIUM" },
   });
 
   function onSubmit(v: Form) {
     startT(async () => {
-      const r = await createTask({
+      const payload = {
         ...v,
         assigneeStaffId: v.assigneeStaffId || null,
         harvestId: v.harvestId || null,
-      });
+      };
+      const r = isEdit ? await updateTask(existing.id, payload) : await createTask(payload);
       if (r.ok) {
-        toast.success("Task added");
+        toast.success(isEdit ? "Saved" : "Task added");
         setOpen(false);
-        form.reset({ title: "", dueDate: today(), priority: "MEDIUM" });
+        if (!isEdit) form.reset({ title: "", dueDate: today(), priority: "MEDIUM" });
         router.refresh();
       } else {
         toast.error(r.error);
@@ -73,7 +94,7 @@ export function AddTaskDialog({
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent>
         <form onSubmit={form.handleSubmit(onSubmit)}>
-          <DialogHeader><DialogTitle>Add task</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{isEdit ? "Edit task" : "Add task"}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>Title</Label>
@@ -123,7 +144,7 @@ export function AddTaskDialog({
           </div>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={pending}>Cancel</Button>
-            <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Add"}</Button>
+            <Button type="submit" disabled={pending}>{pending ? "Saving…" : isEdit ? "Save" : "Add"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
