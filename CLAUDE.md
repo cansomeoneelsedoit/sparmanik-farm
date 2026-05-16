@@ -99,8 +99,11 @@ prisma/
 
 ## Schema highlights
 
-~17 domain models + Auth.js tables + AI conversation. See `prisma/schema.prisma`. Key concepts:
+~17 domain models + Auth.js tables + AI conversation + multi-org tables. See `prisma/schema.prisma`. Key concepts:
 
+- **Multi-tenant via `Organization` + `OrganizationMembership`**. Three fixed orgs seeded: `org_sparmanik` (all legacy data), `org_andre` (Andre Melon, empty), `org_kevin` (Kevin Farm, empty). The active org is held in the `activeOrgId` cookie; Boyd (superuser / Dev User) is the only OWNER across all three.
+- **Auto-scoping via Prisma `$extends`** in `src/lib/prisma.ts`. The extension reads `activeOrgId` from the request cookie (dynamic `import("next/headers")`) and injects `where: { organizationId }` on reads/updates/deletes and `data: { organizationId }` on creates for every model in `ORG_SCOPED_MODELS` (18 tenant tables: Category, Produce, Greenhouse, Supplier, Item, Batch, Staff, Harvest, HarvestAsset, HarvestUsage, Sale, Task, NutrientRecipe, Sop, Video, AuditAction, AiConversation, AiMessage). Non-request contexts (seed, CLI scripts) skip scoping — they must stamp `organizationId` explicitly. **Implication**: `organizationId` is `String?` in the Prisma schema (so `prisma.x.create({ data: {…} })` typechecks without the field) but **`NOT NULL` in the DB** via migration; if the extension doesn't fire, the FK fails — safe failure.
+- **Active-org plumbing**: `src/server/org.ts` (`listMyOrgs`, `getActiveOrgId`, `requireActiveOrgId`), `src/server/org-actions.ts` (`setActiveOrg`), `src/components/shared/org-switcher.tsx` (Xero-style dropdown in topbar). Single-org users see a static label; multi-org users see the chevron + dropdown.
 - **FIFO inventory** via `Batch` + `BatchConsumption`. Remaining = `qty − Σ(consumptions.qty)`. **No denormalised `remaining` column** — recompute on read.
 - **Depreciable assets** (cocopeat, rockwool, grow bags): `Batch.maxUses / useCount / amortisedCostPerUse / returned`. Each harvest gets charged `amortisedCharge = qty × amortisedCostPerUse`; at end-harvest, batches with remaining uses return as `price=0` batches (same `amortisedCostPerUse`) so future harvests still get charged a fair share without further cash leaving the business. Invariant: `Σ(amortised_charge) + (remaining_uses × cost_per_use × remaining_qty) = original_price`. See `src/server/fifo.ts`, `src/server/pl.ts`.
 - **Multi-produce harvests**: `HarvestProduce` join table. A harvest can grow multiple crops simultaneously. `Harvest.produceId` stays as the "primary" for backward compat; canonical list is `harvest.produces`.
@@ -187,7 +190,9 @@ prisma/
     root and the CMD pre-creates + chmods the upload dir before
     starting the app. Don't add `USER nextjs` back.
 
-14. **Browser caches stale `/ask-ai` HTML across deploys.** The
+14. **Multi-org auto-scoping silently drops queries when no `activeOrgId` cookie is set in a request context.** The extension reads the cookie; if it's missing on a logged-in user (e.g. cookie expired, first visit before middleware runs) reads return empty and creates fail the NOT NULL FK. The fix is to ensure `setActiveOrg` runs before the first scoped query — `src/proxy.ts` would be the right place if this ever bites users in practice. Today it doesn't because `listMyOrgs()` in the topbar falls back to the user's first membership and `OrgSwitcher` sets the cookie on first render. Seed and CLI scripts bypass scoping deliberately (no `next/headers` in scope → `getActiveOrgIdFromCookie` returns `null`) so they must stamp `organizationId` explicitly on every `data:` payload.
+
+15. **Browser caches stale `/ask-ai` HTML across deploys.** The
     server-rendered `<Card>` saying "Set ANTHROPIC_API_KEY…" sticks
     around in the browser after the env var is added on Railway. Open
     a fresh tab or hard-refresh (Ctrl+Shift+R). Curl-against-prod also
@@ -268,10 +273,6 @@ npm run check:i18n         # diff EN vs ID keysets
 
 ## Currently deferred / TODO
 
-- **Multi-organisation switcher (in-flight)** — three orgs requested
-  (Sparmanik Farm + Andre Melon + Kevin Farm). Needs `Organization` +
-  `OrganizationMembership`, `organizationId` on every domain table,
-  active-org cookie, scoped queries, topbar switcher. Substantial.
 - In-app password change screen (currently superuser-resets via
   `/admin/users` only).
 - Disconnect the two stale Railway projects from the GitHub repo so
@@ -327,6 +328,14 @@ npm run check:i18n         # diff EN vs ID keysets
   - Lockfile drift fix: pinned `@swc/helpers@^0.5.17` as a top-level
     devDep to satisfy `next-intl`'s `@swc/core` peer dep that Next 16's
     bundled 0.5.15 doesn't.
+  - **Multi-organisation switcher** shipped (`b1e6803`). Three orgs
+    seeded (`org_sparmanik` with all legacy data, `org_andre` empty,
+    `org_kevin` empty). `Organization` + `OrganizationMembership`
+    tables; `organizationId` added to 18 tenant tables (NOT NULL in
+    DB, optional in Prisma schema so creates typecheck without it).
+    Auto-scoping via Prisma `$extends` in `src/lib/prisma.ts` reads
+    `activeOrgId` cookie and stamps every query. Xero-style topbar
+    switcher (`OrgSwitcher`) lets Boyd flip between orgs.
 
 ## When in doubt
 
