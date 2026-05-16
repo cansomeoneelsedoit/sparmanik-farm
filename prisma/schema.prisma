@@ -128,13 +128,32 @@ model Category {
 }
 
 model Produce {
-  id       String    @id @default(cuid())
-  name     String
-  barcode  String?   @unique
-  harvests Harvest[]
-  sales    Sale[]
+  id        String           @id @default(cuid())
+  name      String
+  barcode   String?          @unique
+  harvests  Harvest[]
+  sales     Sale[]
+  // Many-to-many: a harvest in a greenhouse may grow multiple produces (e.g.
+  // melon + chilli inter-cropped). See HarvestProduce.
+  inCrops   HarvestProduce[]
 
   @@map("produce")
+}
+
+// Join table for multi-produce harvests. The legacy `Harvest.produceId` is
+// kept as the "primary" produce (first one selected at creation) for
+// backward compat with reports, but the canonical list lives here.
+model HarvestProduce {
+  harvestId String   @map("harvest_id")
+  produceId String   @map("produce_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  harvest Harvest @relation(fields: [harvestId], references: [id], onDelete: Cascade)
+  produce Produce @relation(fields: [produceId], references: [id])
+
+  @@id([harvestId, produceId])
+  @@index([produceId])
+  @@map("harvest_produces")
 }
 
 model Greenhouse {
@@ -257,6 +276,9 @@ model Harvest {
 
   greenhouse  Greenhouse        @relation(fields: [greenhouseId], references: [id])
   produce     Produce?          @relation(fields: [produceId], references: [id])
+  // All produces grown in this harvest — see HarvestProduce. The legacy
+  // produceId stays as a denormalised "primary" for older queries.
+  produces    HarvestProduce[]
   assets      HarvestAsset[]
   usages      HarvestUsage[]
   sales       Sale[]

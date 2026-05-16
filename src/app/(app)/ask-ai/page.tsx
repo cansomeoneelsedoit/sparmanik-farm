@@ -1,5 +1,6 @@
 import { prisma } from "@/server/prisma";
 import { auth } from "@/auth";
+import { availableProviders } from "@/server/ai";
 import { Card, CardContent } from "@/components/ui/card";
 import { ChatPanel, type Attachment } from "@/app/(app)/ask-ai/chat-panel";
 
@@ -48,20 +49,25 @@ export default async function AskAiPage() {
     attachments: parseAttachments(m.attachments),
   }));
 
-  const hasKey = !!process.env.ANTHROPIC_API_KEY;
+  const providers = availableProviders();
+  const hasAnyProvider = providers.length > 0;
 
   return (
     <div className="flex h-[calc(100vh-6rem)] flex-col">
-      {!hasKey ? (
+      {!hasAnyProvider ? (
         <div className="mx-auto w-full max-w-3xl px-4 pt-4">
           <Card>
             <CardContent className="p-4 text-sm text-muted-foreground">
-              Set <code>ANTHROPIC_API_KEY</code> in your environment to enable the Claude assistant.
+              Set <code>ANTHROPIC_API_KEY</code> or <code>GEMINI_API_KEY</code> in your environment to enable Ask AI.
             </CardContent>
           </Card>
         </div>
       ) : null}
-      <ChatPanel initialMessages={initialMessages} disabled={!hasKey} />
+      <ChatPanel
+        initialMessages={initialMessages}
+        providers={providers}
+        disabled={!hasAnyProvider}
+      />
     </div>
   );
 }

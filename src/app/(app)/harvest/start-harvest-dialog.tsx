@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
+import { X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -19,13 +20,16 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { startHarvest, updateHarvest } from "@/app/(app)/harvest/actions";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const schema = z.object({
   name: z.string().min(1),
   greenhouseId: z.string().min(1),
-  produceId: z.string().optional(),
+  // produceIds drives the join table; produceId stays in sync as the primary.
+  produceIds: z.array(z.string()).default([]),
   variety: z.string().optional(),
   startDate: z.string().min(1),
   endDate: z.string().optional(),
@@ -46,7 +50,7 @@ export function StartHarvestDialog({
     id: string;
     name: string;
     greenhouseId: string;
-    produceId: string | null;
+    produceIds: string[];
     variety: string | null;
     startDate: string;
     endDate: string | null;
@@ -63,32 +67,47 @@ export function StartHarvestDialog({
       ? {
           name: existing.name,
           greenhouseId: existing.greenhouseId,
-          produceId: existing.produceId ?? undefined,
+          produceIds: existing.produceIds,
           variety: existing.variety ?? "",
           startDate: existing.startDate,
           endDate: existing.endDate ?? "",
           status: existing.status,
         }
-      : { name: "", startDate: today() },
+      : { name: "", startDate: today(), produceIds: [] },
   });
+
+  const selectedProduceIds = form.watch("produceIds") ?? [];
+
+  function toggleProduce(id: string) {
+    const next = selectedProduceIds.includes(id)
+      ? selectedProduceIds.filter((x) => x !== id)
+      : [...selectedProduceIds, id];
+    form.setValue("produceIds", next);
+  }
 
   function onSubmit(v: Form) {
     startT(async () => {
+      const ids = v.produceIds ?? [];
       if (isEdit) {
         const r = await updateHarvest(existing.id, {
           ...v,
-          produceId: v.produceId || null,
+          produceIds: ids,
+          produceId: ids[0] ?? null,
           endDate: v.endDate || null,
           status: v.status ?? "LIVE",
         });
         if (r.ok) { toast.success("Saved"); setOpen(false); router.refresh(); }
         else toast.error(r.error);
       } else {
-        const r = await startHarvest({ ...v, produceId: v.produceId || null });
+        const r = await startHarvest({
+          ...v,
+          produceIds: ids,
+          produceId: ids[0] ?? null,
+        });
         if (r.ok) {
           toast.success("Harvest started");
           setOpen(false);
-          form.reset({ name: "", startDate: today() });
+          form.reset({ name: "", startDate: today(), produceIds: [] });
           router.refresh();
         } else toast.error(r.error);
       }
@@ -117,24 +136,63 @@ export function StartHarvestDialog({
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Produce</Label>
-                <Select value={form.watch("produceId") ?? ""} onValueChange={(v) => form.setValue("produceId", v || undefined)}>
-                  <SelectTrigger><SelectValue placeholder="Optional" /></SelectTrigger>
-                  <SelectContent>
-                    {produces.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
                 <Label>Variety</Label>
                 <Input {...form.register("variety")} placeholder="Yellow Melon" />
               </div>
-              <div className="space-y-2">
-                <Label>Start date</Label>
-                <Input type="date" {...form.register("startDate")} />
+            </div>
+            <div className="space-y-2">
+              <Label>Produces grown</Label>
+              <p className="text-xs text-muted-foreground">
+                Pick one or more — a single harvest can intercrop e.g. melon + chilli.
+              </p>
+              <div className="flex flex-wrap gap-1.5 rounded-md border p-2">
+                {produces.length === 0 ? (
+                  <span className="text-xs text-muted-foreground">No produces yet. Add them in Settings → Produce.</span>
+                ) : (
+                  produces.map((p) => {
+                    const on = selectedProduceIds.includes(p.id);
+                    return (
+                      <button
+                        type="button"
+                        key={p.id}
+                        onClick={() => toggleProduce(p.id)}
+                        className={cn(
+                          "rounded-full border px-3 py-1 text-xs transition",
+                          on
+                            ? "border-accent bg-accent/15 text-foreground"
+                            : "border-border bg-background text-muted-foreground hover:border-accent/60",
+                        )}
+                      >
+                        {p.name}
+                      </button>
+                    );
+                  })
+                )}
               </div>
+              {selectedProduceIds.length > 0 ? (
+                <div className="flex flex-wrap gap-1">
+                  {selectedProduceIds.map((id) => {
+                    const p = produces.find((x) => x.id === id);
+                    if (!p) return null;
+                    return (
+                      <Badge key={id} variant="secondary" className="gap-1">
+                        {p.name}
+                        <button
+                          type="button"
+                          onClick={() => toggleProduce(id)}
+                          className="ml-0.5 opacity-60 hover:opacity-100"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+            <div className="space-y-2">
+              <Label>Start date</Label>
+              <Input type="date" {...form.register("startDate")} />
             </div>
             {isEdit ? (
               <div className="grid grid-cols-2 gap-3">

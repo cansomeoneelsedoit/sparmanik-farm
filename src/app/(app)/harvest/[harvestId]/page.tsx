@@ -41,6 +41,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
       include: {
         greenhouse: true,
         produce: true,
+        produces: { include: { produce: true }, orderBy: { createdAt: "asc" } },
         sales: { orderBy: { date: "desc" }, include: { produce: true } },
         usages: { orderBy: { date: "desc" }, include: { item: true, consumptions: true } },
         assets: { orderBy: { date: "desc" }, include: { item: true, consumptions: true } },
@@ -60,6 +61,18 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
   ]);
 
   if (!harvest) notFound();
+
+  // Normalise the harvest's produces from the join table; fall back to the
+  // legacy single produce field if the join table is empty (e.g. older
+  // harvests created before the multi-produce migration).
+  type JoinedProduce = { produce: { id: string; name: string } };
+  const joinedProduces = (harvest.produces as JoinedProduce[]) ?? [];
+  const harvestProduceList: { id: string; name: string }[] =
+    joinedProduces.length > 0
+      ? joinedProduces.map((p) => ({ id: p.produce.id, name: p.produce.name }))
+      : harvest.produce
+        ? [{ id: harvest.produce.id, name: harvest.produce.name }]
+        : [];
 
   const pl = await getHarvestPL(harvest.id);
   const totalExpenses = (
@@ -210,7 +223,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
               id: harvest.id,
               name: harvest.name,
               greenhouseId: harvest.greenhouseId,
-              produceId: harvest.produceId,
+              produceIds: harvestProduceList.map((p) => p.id),
               variety: harvest.variety,
               startDate: harvest.startDate.toISOString().slice(0, 10),
               endDate: harvest.endDate ? harvest.endDate.toISOString().slice(0, 10) : null,
@@ -222,10 +235,22 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
         </div>
       </header>
 
-      <div className="text-sm text-muted-foreground">
-        {harvest.greenhouse.name}{harvest.variety ? ` · ${harvest.variety}` : ""}{" "}
-        · {harvest.startDate.toISOString().slice(0, 10)}
-        {harvest.endDate ? ` → ${harvest.endDate.toISOString().slice(0, 10)}` : ""}
+      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+        <span>{harvest.greenhouse.name}</span>
+        {harvestProduceList.length > 0 ? (
+          <>
+            <span>·</span>
+            <span className="flex flex-wrap gap-1">
+              {harvestProduceList.map((p) => (
+                <Badge key={p.id} variant="outline">{p.name}</Badge>
+              ))}
+            </span>
+          </>
+        ) : null}
+        {harvest.variety ? <><span>·</span><span>{harvest.variety}</span></> : null}
+        <span>·</span>
+        <span>{harvest.startDate.toISOString().slice(0, 10)}</span>
+        {harvest.endDate ? <><span>→</span><span>{harvest.endDate.toISOString().slice(0, 10)}</span></> : null}
       </div>
 
       <div className="grid gap-4 md:grid-cols-5">

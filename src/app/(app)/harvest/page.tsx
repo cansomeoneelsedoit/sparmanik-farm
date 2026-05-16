@@ -15,16 +15,34 @@ export default async function HarvestPage() {
   const [harvests, greenhouses, produces] = await Promise.all([
     prisma.harvest.findMany({
       orderBy: [{ status: "asc" }, { startDate: "desc" }],
-      include: { greenhouse: true, produce: true },
+      include: {
+        greenhouse: true,
+        produce: true,
+        produces: { include: { produce: true }, orderBy: { createdAt: "asc" } },
+      },
     }),
     prisma.greenhouse.findMany({ orderBy: { name: "asc" } }),
     prisma.produce.findMany({ orderBy: { name: "asc" } }),
   ]);
 
+  type HarvestRow = {
+    id: string;
+    name: string;
+    variety: string | null;
+    status: "LIVE" | "CLOSED";
+    startDate: Date;
+    endDate: Date | null;
+    greenhouse: { name: string };
+    produce: { id: string; name: string } | null;
+    produces: { produce: { id: string; name: string } }[];
+  };
   const enriched = await Promise.all(
-    (harvests as { id: string; name: string; variety: string | null; status: "LIVE" | "CLOSED"; startDate: Date; endDate: Date | null; greenhouse: { name: string }; produce: { name: string } | null }[]).map(async (h) => {
+    (harvests as HarvestRow[]).map(async (h) => {
       const pl = await getHarvestPL(h.id);
-      return { ...h, pl };
+      const produceList = h.produces.length > 0
+        ? h.produces.map((p) => p.produce)
+        : h.produce ? [h.produce] : [];
+      return { ...h, pl, produceList };
     }),
   );
 
@@ -57,6 +75,13 @@ export default async function HarvestPage() {
                       <Badge variant="accent">Live</Badge>
                     </div>
                     <div className="text-xs text-muted-foreground">{h.greenhouse.name}{h.variety ? ` · ${h.variety}` : ""}</div>
+                    {h.produceList.length > 0 ? (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {h.produceList.map((p) => (
+                          <Badge key={p.id} variant="outline" className="text-xs">{p.name}</Badge>
+                        ))}
+                      </div>
+                    ) : null}
                   </CardHeader>
                   <CardContent className="space-y-2 text-sm">
                     <Stat label="Revenue" value={<Money value={h.pl.revenue} />} positive />

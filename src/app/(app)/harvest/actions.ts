@@ -19,7 +19,12 @@ async function uid() {
 
 const startSchema = z.object({
   greenhouseId: z.string().min(1),
+  // Legacy single-produce field — kept as the "primary" for backward compat.
   produceId: z.string().optional().nullable(),
+  // New multi-produce field. If provided, replaces the join table content.
+  // When both are present, produceIds wins; produceId is overwritten to the
+  // first element so old reports still work.
+  produceIds: z.array(z.string()).optional(),
   name: z.string().min(1),
   variety: z.string().optional().default(""),
   startDate: z.string().min(1),
@@ -29,24 +34,32 @@ export async function startHarvest(input: unknown): Promise<ActionResult<{ id: s
   const parsed = startSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
   const userId = await uid();
+  const ids = parsed.data.produceIds ?? (parsed.data.produceId ? [parsed.data.produceId] : []);
+  const primary = ids[0] ?? null;
   const h = await prisma.$transaction(async (tx: TransactionClient) => {
     const created = await tx.harvest.create({
       data: {
         greenhouseId: parsed.data.greenhouseId,
-        produceId: parsed.data.produceId || null,
+        produceId: primary,
         name: parsed.data.name,
         variety: parsed.data.variety || null,
         startDate: new Date(parsed.data.startDate),
         status: "LIVE",
       },
     });
+    if (ids.length > 0) {
+      await tx.harvestProduce.createMany({
+        data: ids.map((produceId) => ({ harvestId: created.id, produceId })),
+        skipDuplicates: true,
+      });
+    }
     await recordAction(tx, {
       type: "harvest.start",
       entityType: "Harvest",
       entityId: created.id,
       description: `Started harvest: ${created.name}`,
       userId,
-      payload: {},
+      payload: { produceIds: ids },
     });
     return created;
   });
@@ -59,6 +72,7 @@ const updateHarvestSchema = z.object({
   variety: z.string().optional().default(""),
   greenhouseId: z.string().min(1),
   produceId: z.string().optional().nullable(),
+  produceIds: z.array(z.string()).optional(),
   startDate: z.string().min(1),
   endDate: z.string().optional().nullable(),
   status: z.enum(["LIVE", "CLOSED"]).default("LIVE"),
@@ -67,17 +81,31 @@ const updateHarvestSchema = z.object({
 export async function updateHarvest(id: string, input: unknown): Promise<ActionResult> {
   const parsed = updateHarvestSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
-  await prisma.harvest.update({
-    where: { id },
-    data: {
-      name: parsed.data.name,
-      variety: parsed.data.variety || null,
-      greenhouseId: parsed.data.greenhouseId,
-      produceId: parsed.data.produceId || null,
-      startDate: new Date(parsed.data.startDate),
-      endDate: parsed.data.endDate ? new Date(parsed.data.endDate) : null,
-      status: parsed.data.status,
-    },
+  const ids = parsed.data.produceIds ?? (parsed.data.produceId ? [parsed.data.produceId] : []);
+  const primary = ids[0] ?? null;
+  await prisma.$transaction(async (tx: TransactionClient) => {
+    await tx.harvest.update({
+      where: { id },
+      data: {
+        name: parsed.data.name,
+        variety: parsed.data.variety || null,
+        greenhouseId: parsed.data.greenhouseId,
+        produceId: primary,
+        startDate: new Date(parsed.data.startDate),
+        endDate: parsed.data.endDate ? new Date(parsed.data.endDate) : null,
+        status: parsed.data.status,
+      },
+    });
+    // Replace the join table contents wholesale.
+    if (parsed.data.produceIds !== undefined) {
+      await tx.harvestProduce.deleteMany({ where: { harvestId: id } });
+      if (ids.length > 0) {
+        await tx.harvestProduce.createMany({
+          data: ids.map((produceId) => ({ harvestId: id, produceId })),
+          skipDuplicates: true,
+        });
+      }
+    }
   });
   revalidatePath("/harvest");
   revalidatePath(`/harvest/${id}`);

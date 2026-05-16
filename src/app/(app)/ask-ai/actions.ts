@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { prisma } from "@/server/prisma";
 import { auth } from "@/auth";
-import { askClaude, type ChatMessage, type ChatAttachment } from "@/server/ai";
+import { askAi, type AiProvider, type ChatMessage, type ChatAttachment } from "@/server/ai";
 import { saveImageUpload } from "@/server/uploads";
 
 export type ActionResult<T = void> = { ok: true; data?: T } | { ok: false; error: string };
@@ -20,11 +20,12 @@ const attachmentSchema = z.object({
 const schema = z.object({
   content: z.string().max(8000),
   attachments: z.array(attachmentSchema).max(4).optional(),
+  provider: z.enum(["claude", "gemini"]).default("claude"),
 });
 
 export async function sendAiMessage(
   input: unknown,
-): Promise<ActionResult<{ reply: string }>> {
+): Promise<ActionResult<{ reply: string; provider: AiProvider }>> {
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Invalid input" };
   if (!parsed.data.content.trim() && (!parsed.data.attachments || parsed.data.attachments.length === 0)) {
@@ -63,13 +64,13 @@ export async function sendAiMessage(
         : undefined,
     }));
 
-    const reply = await askClaude(chat);
+    const reply = await askAi(parsed.data.provider, chat);
     await prisma.aiMessage.create({
       data: { userId: session.user.id, role: "ASSISTANT", content: reply },
     });
 
     revalidatePath("/ask-ai");
-    return { ok: true, data: { reply } };
+    return { ok: true, data: { reply, provider: parsed.data.provider } };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "AI request failed" };
   }

@@ -12,9 +12,16 @@ import { cn } from "@/lib/utils";
 import { sendAiMessage, clearAiHistory, uploadAiAttachment } from "@/app/(app)/ask-ai/actions";
 
 export type Attachment = { path: string; mimeType: string; width?: number; height?: number };
+export type AiProvider = "claude" | "gemini";
 type Msg = { id: string; role: "user" | "assistant"; content: string; attachments?: Attachment[] };
 
 const MAX_ATTACHMENTS = 4;
+const PROVIDER_STORAGE_KEY = "askai.provider";
+
+const PROVIDER_LABELS: Record<AiProvider, string> = {
+  claude: "Claude (Sonnet 4.6)",
+  gemini: "Gemini 2.5 Flash-Lite",
+};
 
 const SUGGESTIONS = [
   "What's running in the greenhouses right now?",
@@ -25,9 +32,11 @@ const SUGGESTIONS = [
 
 export function ChatPanel({
   initialMessages,
+  providers,
   disabled,
 }: {
   initialMessages: Msg[];
+  providers: AiProvider[];
   disabled: boolean;
 }) {
   const [messages, setMessages] = useState<Msg[]>(initialMessages);
@@ -36,10 +45,32 @@ export function ChatPanel({
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [provider, setProvider] = useState<AiProvider>(() => providers[0] ?? "claude");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+
+  // Restore the last-used provider from localStorage on mount (only if it
+  // matches a currently available provider).
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(PROVIDER_STORAGE_KEY) as AiProvider | null;
+      if (saved && providers.includes(saved)) setProvider(saved);
+    } catch {
+      // localStorage disabled — no-op.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function pickProvider(p: AiProvider) {
+    setProvider(p);
+    try {
+      window.localStorage.setItem(PROVIDER_STORAGE_KEY, p);
+    } catch {
+      // ignore
+    }
+  }
 
   // Auto-grow the textarea up to a fixed cap.
   useEffect(() => {
@@ -121,6 +152,7 @@ export function ChatPanel({
     startT(async () => {
       const r = await sendAiMessage({
         content: trimmed,
+        provider,
         attachments: sentAttachments.length > 0
           ? sentAttachments.map((a) => ({ path: a.path, mimeType: a.mimeType }))
           : undefined,
@@ -226,7 +258,7 @@ export function ChatPanel({
                 if (canSend) submit();
               }
             }}
-            placeholder={disabled ? "Set ANTHROPIC_API_KEY to enable Ask AI." : "Ask anything about your farm…"}
+            placeholder={disabled ? "Set ANTHROPIC_API_KEY or GEMINI_API_KEY to enable Ask AI." : "Ask anything about your farm…"}
             rows={1}
             disabled={disabled || pending}
             className="min-h-[36px] max-h-[200px] flex-1 resize-none bg-transparent px-1 py-2 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50"
@@ -243,8 +275,32 @@ export function ChatPanel({
         </div>
       </div>
 
-      <div className="mb-3 flex items-center justify-between text-xs text-muted-foreground">
-        <span>Claude can review images and answer questions about your farm. Up to {MAX_ATTACHMENTS} per message.</span>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+        <div className="flex items-center gap-2">
+          {providers.length > 1 ? (
+            <div className="inline-flex overflow-hidden rounded-full border bg-card text-xs">
+              {providers.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => pickProvider(p)}
+                  className={cn(
+                    "px-3 py-1 transition",
+                    provider === p
+                      ? "bg-foreground text-background"
+                      : "text-muted-foreground hover:bg-muted",
+                  )}
+                  title={`Use ${PROVIDER_LABELS[p]}`}
+                >
+                  {p === "claude" ? "Claude" : "Gemini"}
+                </button>
+              ))}
+            </div>
+          ) : providers.length === 1 ? (
+            <span>Using {PROVIDER_LABELS[providers[0]]}</span>
+          ) : null}
+          <span>Up to {MAX_ATTACHMENTS} images per message.</span>
+        </div>
         {messages.length > 0 ? (
           <Button
             variant="ghost"

@@ -93,14 +93,38 @@ async function buildMessageContent(m: ChatMessage): Promise<Anthropic.Messages.M
   return { role: "user", content: blocks };
 }
 
-export async function askClaude(messages: ChatMessage[]): Promise<string> {
+export type AiProvider = "claude" | "gemini";
+
+export function availableProviders(): AiProvider[] {
+  const out: AiProvider[] = [];
+  if (process.env.ANTHROPIC_API_KEY) out.push("claude");
+  if (process.env.GEMINI_API_KEY) out.push("gemini");
+  return out;
+}
+
+export async function askAi(
+  provider: AiProvider,
+  messages: ChatMessage[],
+): Promise<string> {
+  const context = await buildFarmContext();
+  if (provider === "gemini") {
+    const { askGemini } = await import("@/server/gemini");
+    return askGemini(messages, context);
+  }
+  return askClaude(messages, context);
+}
+
+export async function askClaude(
+  messages: ChatMessage[],
+  precomputedContext?: string,
+): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     throw new Error("ANTHROPIC_API_KEY not configured. Set it in your .env to enable Ask AI.");
   }
 
   const client = new Anthropic({ apiKey });
-  const context = await buildFarmContext();
+  const context = precomputedContext ?? (await buildFarmContext());
 
   const anthropicMessages = await Promise.all(messages.map(buildMessageContent));
 
