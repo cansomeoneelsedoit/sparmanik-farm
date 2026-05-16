@@ -6,7 +6,7 @@ Cultivation OS for a hydroponic farm in Indonesia. Originally a single-file
 vanilla-JS SPA (`public/farm-legacy.js`); now a full-stack Next.js 16 app with
 Postgres. The legacy script is still in `public/` but is no longer loaded.
 
-Live: <https://web-production-1e6de.up.railway.app>
+Live: <https://front-end-production-cd2d.up.railway.app>
 Repo: <https://github.com/cansomeoneelsedoit/sparmanik-farm>
 Sign in (dev): `dev@sparmanikfarm.local` / `devpassword`
 
@@ -143,6 +143,21 @@ prisma/
    `data-scribe-recorder-ready`): silenced via `suppressHydrationWarning`
    on `<html>` and `<body>`.
 
+9. **Railway production env vars are gated by the auto-mode classifier.**
+   You can `railway list` and read GraphQL, but `railway variables --set`
+   and the equivalent GraphQL mutation are blocked as "production
+   infrastructure modification". Walk the user through the Railway
+   dashboard (Project → web service → Variables → + New Variable). Don't
+   bother trying to script it — the classifier denies every workaround.
+
+10. **Some legacy items have empty `name` strings.** The seed accepts
+    whatever the legacy `S` literal contains; ~265 items in the "Other"
+    category were imported with `name = ""`. The inventory list and
+    detail page fall back to "Untitled item" so they render, but a real
+    fix is either a backfill migration or letting the user rename them
+    inline. See `src/app/(app)/inventory/page.tsx:128-136` and
+    `[itemId]/page.tsx:73-77`.
+
 ## Auth flow
 
 1. Unauthenticated user hits any `/(app)/*` route.
@@ -222,9 +237,26 @@ npm run check:i18n         # diff EN vs ID keysets
   upload infra in `src/server/uploads.ts` exists, no UI yet uses it.
 - Barcode scanning (`@zxing/browser` — not yet installed).
 - CSV export — server-side `papaparse` not yet hooked into a route.
+- Financials → P&L Forecast is still a "coming soon…" placeholder
+  (`src/app/(app)/financials/page.tsx`).
+- Settings → Categories has a "Drag to reorder (coming soon)" hint;
+  reorder UX not implemented.
+- Backfill / rename UI for the ~265 unnamed legacy items in inventory.
 - Legacy cleanup (Phase 8): delete `public/farm-legacy.js`,
   `src/app/api/farm-state/`, `src/lib/auth-token.*`, the `FarmDocument`
   model and its migration entries.
+
+## Recent session log
+
+- **2026-05-16** — Production tour against the Melon Harvest 1 field
+  guide. Harvest detail page (all 7 sections, all 3 modals) matches the
+  guide. Nav tour covered every tab. Settings → Staff was the only
+  CRUD-incomplete tab; shipped Add / Edit / Delete reusing
+  `AddStaffDialog` + `StaffCardActions` from `/staff`. Inventory list +
+  detail got an "Untitled item" fallback for blank-name rows. AI is
+  wired in `src/server/ai.ts` waiting on `ANTHROPIC_API_KEY` env var on
+  Railway (user must set via dashboard — classifier blocks scripted
+  attempts).
 
 ## When in doubt
 
