@@ -7,7 +7,7 @@ import { prisma } from "@/server/prisma";
 import { auth } from "@/auth";
 import { recordAction } from "@/server/audit";
 import { consumeFifo } from "@/server/fifo";
-import { Decimal } from "@/server/decimal";
+import { Decimal, type TransactionClient } from "@/server/decimal";
 
 export type ActionResult<T = void> =
   | { ok: true; data?: T }
@@ -37,7 +37,7 @@ export async function createItem(input: unknown): Promise<ActionResult<{ id: str
     return { ok: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
   }
   const uid = await userId();
-  const item = await prisma.$transaction(async (tx: typeof prisma) => {
+  const item = await prisma.$transaction(async (tx: TransactionClient) => {
     const created = await tx.item.create({
       data: {
         name: parsed.data.name,
@@ -81,7 +81,7 @@ export async function receiveStock(input: unknown): Promise<ActionResult<{ batch
     return { ok: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
   }
   const uid = await userId();
-  const result = await prisma.$transaction(async (tx: typeof prisma) => {
+  const result = await prisma.$transaction(async (tx: TransactionClient) => {
     const batch = await tx.batch.create({
       data: {
         itemId: parsed.data.itemId,
@@ -120,7 +120,7 @@ export async function consumeItem(input: unknown): Promise<ActionResult<{ action
   }
   const uid = await userId();
   try {
-    const result = await prisma.$transaction(async (tx: typeof prisma) => {
+    const result = await prisma.$transaction(async (tx: TransactionClient) => {
       const item = await tx.item.findUnique({ where: { id: parsed.data.itemId }, select: { name: true } });
       if (!item) throw new Error("Item not found");
 
@@ -157,7 +157,7 @@ export async function consumeItem(input: unknown): Promise<ActionResult<{ action
 
 export async function deleteItem(id: string): Promise<ActionResult> {
   const uid = await userId();
-  await prisma.$transaction(async (tx: typeof prisma) => {
+  await prisma.$transaction(async (tx: TransactionClient) => {
     const item = await tx.item.findUnique({ where: { id } });
     if (!item) throw new Error("Item not found");
     await tx.item.delete({ where: { id } });

@@ -7,7 +7,7 @@ import { prisma } from "@/server/prisma";
 import { auth } from "@/auth";
 import { recordAction } from "@/server/audit";
 import { consumeFifo } from "@/server/fifo";
-import { Decimal } from "@/server/decimal";
+import { Decimal, type TransactionClient } from "@/server/decimal";
 
 export type ActionResult<T = void> =
   | { ok: true; data?: T }
@@ -29,7 +29,7 @@ export async function startHarvest(input: unknown): Promise<ActionResult<{ id: s
   const parsed = startSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
   const userId = await uid();
-  const h = await prisma.$transaction(async (tx: typeof prisma) => {
+  const h = await prisma.$transaction(async (tx: TransactionClient) => {
     const created = await tx.harvest.create({
       data: {
         greenhouseId: parsed.data.greenhouseId,
@@ -56,7 +56,7 @@ export async function startHarvest(input: unknown): Promise<ActionResult<{ id: s
 
 export async function endHarvest(harvestId: string): Promise<ActionResult> {
   const userId = await uid();
-  await prisma.$transaction(async (tx: typeof prisma) => {
+  await prisma.$transaction(async (tx: TransactionClient) => {
     const h = await tx.harvest.findUnique({ where: { id: harvestId } });
     if (!h) throw new Error("Harvest not found");
     await tx.harvest.update({
@@ -90,7 +90,7 @@ export async function recordHarvestUsage(input: unknown): Promise<ActionResult> 
   if (!parsed.success) return { ok: false, error: "Validation failed" };
   const userId = await uid();
   try {
-    await prisma.$transaction(async (tx: typeof prisma) => {
+    await prisma.$transaction(async (tx: TransactionClient) => {
       const usage = await tx.harvestUsage.create({
         data: {
           harvestId: parsed.data.harvestId,
@@ -143,7 +143,7 @@ export async function installHarvestAsset(input: unknown): Promise<ActionResult>
   if (!parsed.success) return { ok: false, error: "Validation failed" };
   const userId = await uid();
   try {
-    await prisma.$transaction(async (tx: typeof prisma) => {
+    await prisma.$transaction(async (tx: TransactionClient) => {
       const asset = await tx.harvestAsset.create({
         data: {
           harvestId: parsed.data.harvestId,
@@ -196,7 +196,7 @@ export async function logSale(input: unknown): Promise<ActionResult> {
   const parsed = saleSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
   const userId = await uid();
-  await prisma.$transaction(async (tx: typeof prisma) => {
+  await prisma.$transaction(async (tx: TransactionClient) => {
     const weight = new Decimal(parsed.data.weight);
     const price = new Decimal(parsed.data.pricePerKg);
     const sale = await tx.sale.create({

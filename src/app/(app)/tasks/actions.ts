@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { prisma } from "@/server/prisma";
+import type { TransactionClient } from "@/server/decimal";
 import { auth } from "@/auth";
 import { recordAction } from "@/server/audit";
 
@@ -27,7 +28,7 @@ export async function createTask(input: unknown): Promise<ActionResult<{ id: str
   const parsed = newSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
   const userId = await uid();
-  const task = await prisma.$transaction(async (tx: typeof prisma) => {
+  const task = await prisma.$transaction(async (tx: TransactionClient) => {
     const created = await tx.task.create({
       data: {
         title: parsed.data.title,
@@ -58,7 +59,7 @@ export async function setTaskStatus(
   status: "PENDING" | "IN_PROGRESS" | "COMPLETED",
 ): Promise<ActionResult> {
   const userId = await uid();
-  await prisma.$transaction(async (tx: typeof prisma) => {
+  await prisma.$transaction(async (tx: TransactionClient) => {
     const before = await tx.task.findUnique({ where: { id } });
     if (!before) throw new Error("Task not found");
     await tx.task.update({ where: { id }, data: { status } });
@@ -107,7 +108,7 @@ export async function addTaskComment(input: unknown): Promise<ActionResult> {
 
 export async function deleteTask(id: string): Promise<ActionResult> {
   const userId = await uid();
-  await prisma.$transaction(async (tx: typeof prisma) => {
+  await prisma.$transaction(async (tx: TransactionClient) => {
     const t = await tx.task.findUnique({ where: { id } });
     if (!t) throw new Error("Task not found");
     await tx.task.delete({ where: { id } });

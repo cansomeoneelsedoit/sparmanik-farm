@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { prisma } from "@/server/prisma";
-import { Decimal } from "@/server/decimal";
+import { Decimal, type TransactionClient } from "@/server/decimal";
 
 export type ActionResult<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
@@ -87,7 +87,7 @@ export async function updateGeneralSettings(input: unknown): Promise<ActionResul
   const parsed = generalSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Invalid" };
   const rate = new Decimal(parsed.data.exchangeRate);
-  await prisma.$transaction(async (tx: typeof prisma) => {
+  await prisma.$transaction(async (tx: TransactionClient) => {
     await tx.setting.update({
       where: { id: "singleton" },
       data: { farmName: parsed.data.farmName, exchangeRate: rate },

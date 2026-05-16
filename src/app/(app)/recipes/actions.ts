@@ -6,7 +6,7 @@ import { z } from "zod";
 import { prisma } from "@/server/prisma";
 import { auth } from "@/auth";
 import { recordAction } from "@/server/audit";
-import { Decimal } from "@/server/decimal";
+import { Decimal, type TransactionClient } from "@/server/decimal";
 
 export type ActionResult<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
@@ -28,7 +28,7 @@ export async function createRecipe(input: unknown): Promise<ActionResult<{ id: s
   const parsed = recipeSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
   const userId = await uid();
-  const r = await prisma.$transaction(async (tx: typeof prisma) => {
+  const r = await prisma.$transaction(async (tx: TransactionClient) => {
     const recipe = await tx.nutrientRecipe.create({
       data: {
         name: parsed.data.name,
@@ -57,7 +57,7 @@ export async function createRecipe(input: unknown): Promise<ActionResult<{ id: s
 export async function updateRecipe(id: string, input: unknown): Promise<ActionResult> {
   const parsed = recipeSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
-  await prisma.$transaction(async (tx: typeof prisma) => {
+  await prisma.$transaction(async (tx: TransactionClient) => {
     await tx.recipeIngredient.deleteMany({ where: { recipeId: id } });
     await tx.nutrientRecipe.update({
       where: { id },

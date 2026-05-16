@@ -6,7 +6,7 @@ import { z } from "zod";
 import { prisma } from "@/server/prisma";
 import { auth } from "@/auth";
 import { recordAction } from "@/server/audit";
-import { Decimal } from "@/server/decimal";
+import { Decimal, type TransactionClient } from "@/server/decimal";
 
 export type ActionResult<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
@@ -27,7 +27,7 @@ export async function createStaff(input: unknown): Promise<ActionResult<{ id: st
   if (!parsed.success) return { ok: false, error: "Validation failed" };
   const userId = await uid();
   const initials = parsed.data.name.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
-  const staff = await prisma.$transaction(async (tx: typeof prisma) => {
+  const staff = await prisma.$transaction(async (tx: TransactionClient) => {
     const s = await tx.staff.create({
       data: {
         name: parsed.data.name,
@@ -62,7 +62,7 @@ export async function addStaffRate(input: unknown): Promise<ActionResult> {
   const parsed = rateSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
   const userId = await uid();
-  await prisma.$transaction(async (tx: typeof prisma) => {
+  await prisma.$transaction(async (tx: TransactionClient) => {
     const r = await tx.staffRate.create({
       data: {
         staffId: parsed.data.staffId,
@@ -101,7 +101,7 @@ export async function createWageEntry(input: unknown): Promise<ActionResult> {
   if (!parsed.success) return { ok: false, error: "Validation failed" };
   const userId = await uid();
   const totalHours = parsed.data.lines.reduce((s, l) => s + Number(l.hours), 0);
-  await prisma.$transaction(async (tx: typeof prisma) => {
+  await prisma.$transaction(async (tx: TransactionClient) => {
     const e = await tx.wageEntry.create({
       data: {
         staffId: parsed.data.staffId,

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { prisma } from "@/server/prisma";
+import type { TransactionClient } from "@/server/decimal";
 
 export type ActionResult<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
@@ -36,7 +37,7 @@ export async function createSop(input: unknown): Promise<ActionResult<{ id: stri
 export async function updateSop(id: string, input: unknown): Promise<ActionResult> {
   const parsed = sopSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
-  await prisma.$transaction(async (tx: typeof prisma) => {
+  await prisma.$transaction(async (tx: TransactionClient) => {
     await tx.sopStep.deleteMany({ where: { sopId: id } });
     await tx.sop.update({
       where: { id },

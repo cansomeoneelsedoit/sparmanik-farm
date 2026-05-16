@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { prisma } from "@/server/prisma";
+import type { TransactionClient } from "@/server/decimal";
 import { recordAction } from "@/server/audit";
 import { auth } from "@/auth";
 
@@ -32,7 +33,7 @@ export async function createSupplier(input: unknown): Promise<ActionResult<{ id:
     return { ok: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
   }
   const userId = await currentUserId();
-  const supplier = await prisma.$transaction(async (tx: typeof prisma) => {
+  const supplier = await prisma.$transaction(async (tx: TransactionClient) => {
     const s = await tx.supplier.create({ data: parsed.data });
     await recordAction(tx, {
       type: "supplier.create",
@@ -54,7 +55,7 @@ export async function updateSupplier(id: string, input: unknown): Promise<Action
     return { ok: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
   }
   const userId = await currentUserId();
-  await prisma.$transaction(async (tx: typeof prisma) => {
+  await prisma.$transaction(async (tx: TransactionClient) => {
     const before = await tx.supplier.findUnique({ where: { id } });
     if (!before) throw new Error("Supplier not found");
     await tx.supplier.update({ where: { id }, data: parsed.data });
@@ -74,7 +75,7 @@ export async function updateSupplier(id: string, input: unknown): Promise<Action
 
 export async function deleteSupplier(id: string): Promise<ActionResult> {
   const userId = await currentUserId();
-  await prisma.$transaction(async (tx: typeof prisma) => {
+  await prisma.$transaction(async (tx: TransactionClient) => {
     const supplier = await tx.supplier.findUnique({ where: { id } });
     if (!supplier) throw new Error("Supplier not found");
     await tx.supplier.delete({ where: { id } });

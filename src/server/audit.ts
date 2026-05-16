@@ -44,7 +44,7 @@ export function registerUndoHandler(type: string, handler: UndoHandler) {
 }
 
 export async function undoAction(actionId: string): Promise<{ ok: true } | { ok: false; reason: string }> {
-  return prisma.$transaction(async (tx: typeof prisma) => {
+  return prisma.$transaction(async (tx: TransactionClient) => {
     const action = await tx.auditAction.findUnique({ where: { id: actionId } });
     if (!action) return { ok: false as const, reason: "Action not found" };
     if (action.undone) return { ok: false as const, reason: "Already undone" };
