@@ -30,6 +30,7 @@ model User {
   aiConversations AiConversation[]
   auditActions    AuditAction[]
   staff           Staff?
+  memberships     OrganizationMembership[]
 
   @@map("users")
 }
@@ -127,26 +128,91 @@ enum UserRole {
   SUPERUSER
 }
 
+enum OrgRole {
+  OWNER
+  MEMBER
+}
+
+// ---------- Multi-organisation ----------
+
+// One row per company/farm. Every tenant-scoped table carries an
+// `organizationId` FK back to this. Users belong to one or more orgs via
+// OrganizationMembership; the active org is tracked via a cookie and
+// auto-applied by the Prisma client extension in src/lib/prisma.ts.
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  memberships     OrganizationMembership[]
+  categories      Category[]
+  produces        Produce[]
+  greenhouses    Greenhouse[]
+  suppliers       Supplier[]
+  items           Item[]
+  batches         Batch[]
+  staff           Staff[]
+  harvests        Harvest[]
+  harvestUsages   HarvestUsage[]
+  harvestAssets   HarvestAsset[]
+  sales           Sale[]
+  tasks           Task[]
+  nutrientRecipes NutrientRecipe[]
+  sops            Sop[]
+  videos          Video[]
+  auditActions    AuditAction[]
+  aiConversations AiConversation[]
+  aiMessages      AiMessage[]
+
+  @@map("organizations")
+}
+
+model OrganizationMembership {
+  userId         String   @map("user_id")
+  organizationId String   @map("organization_id")
+  role           OrgRole  @default(MEMBER)
+  joinedAt       DateTime @default(now()) @map("joined_at")
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@id([userId, organizationId])
+  @@index([organizationId])
+  @@map("organization_memberships")
+}
+
 // ---------- Lookup tables ----------
 
 model Category {
-  id    String @id @default(cuid())
-  name  String @unique
-  items Item[]
+  id             String       @id @default(cuid())
+  organizationId String?       @map("organization_id")
+  name           String
+  items          Item[]
 
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
   @@map("categories")
 }
 
 model Produce {
-  id        String           @id @default(cuid())
-  name      String
-  barcode   String?          @unique
-  harvests  Harvest[]
-  sales     Sale[]
-  // Many-to-many: a harvest in a greenhouse may grow multiple produces (e.g.
-  // melon + chilli inter-cropped). See HarvestProduce.
-  inCrops   HarvestProduce[]
+  id             String           @id @default(cuid())
+  organizationId String?           @map("organization_id")
+  name           String
+  // Barcode global-unique stays — a physical barcode is unique to a product
+  // worldwide; if two orgs happen to scan the same barcode that's the same
+  // produce, so we keep one row globally.
+  barcode        String?          @unique
+  harvests       Harvest[]
+  sales          Sale[]
+  inCrops        HarvestProduce[]
 
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
   @@map("produce")
 }
 
@@ -167,29 +233,37 @@ model HarvestProduce {
 }
 
 model Greenhouse {
-  id           String           @id @default(cuid())
-  name         String
-  location     String?
-  type         String?
-  notes        String?
-  harvests     Harvest[]
-  wageEntries  WageEntryLine[]
+  id             String           @id @default(cuid())
+  organizationId String?           @map("organization_id")
+  name           String
+  location       String?
+  type           String?
+  notes          String?
+  harvests       Harvest[]
+  wageEntries    WageEntryLine[]
 
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
   @@map("greenhouses")
 }
 
 model Supplier {
-  id           String   @id @default(cuid())
-  name         String
-  phone        String?
-  email        String?
-  notes        String?
-  shopUrl      String?  @map("shop_url")
-  items        Item[]
-  batches      Batch[]
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  id             String   @id @default(cuid())
+  organizationId String?   @map("organization_id")
+  name           String
+  phone          String?
+  email          String?
+  notes          String?
+  shopUrl        String?  @map("shop_url")
+  items          Item[]
+  batches        Batch[]
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
   @@map("suppliers")
 }
 
@@ -197,6 +271,7 @@ model Supplier {
 
 model Item {
   id                String   @id @default(cuid())
+  organizationId    String?   @map("organization_id")
   name              String
   categoryId        String?  @map("category_id")
   unit              String
@@ -210,12 +285,14 @@ model Item {
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
+  organization     Organization?    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   category         Category?       @relation(fields: [categoryId], references: [id])
   defaultSupplier  Supplier?       @relation(fields: [defaultSupplierId], references: [id])
   batches          Batch[]
   harvestAssets    HarvestAsset[]
   harvestUsages    HarvestUsage[]
 
+  @@index([organizationId])
   @@index([categoryId])
   @@index([defaultSupplierId])
   @@map("items")
@@ -223,6 +300,7 @@ model Item {
 
 model Batch {
   id                    String   @id @default(cuid())
+  organizationId        String?   @map("organization_id")
   itemId                String   @map("item_id")
   supplierId            String?  @map("supplier_id")
   date                  DateTime @db.Date
@@ -242,10 +320,12 @@ model Batch {
   returned              Boolean  @default(false)
   createdAt             DateTime @default(now()) @map("created_at")
 
+  organization  Organization?       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   item          Item               @relation(fields: [itemId], references: [id], onDelete: Cascade)
   supplier      Supplier?          @relation(fields: [supplierId], references: [id])
   consumptions  BatchConsumption[]
 
+  @@index([organizationId])
   @@index([itemId, date])
   @@map("batches")
 }
@@ -273,46 +353,42 @@ model BatchConsumption {
 // ---------- Harvests ----------
 
 model Harvest {
-  id           String        @id @default(cuid())
-  greenhouseId String        @map("greenhouse_id")
-  produceId    String?       @map("produce_id")
-  name         String
-  variety      String?
-  startDate    DateTime      @db.Date @map("start_date")
-  endDate      DateTime?     @db.Date @map("end_date")
-  status       HarvestStatus @default(LIVE)
-  createdAt    DateTime      @default(now()) @map("created_at")
-  updatedAt    DateTime      @updatedAt @map("updated_at")
+  id             String        @id @default(cuid())
+  organizationId String?        @map("organization_id")
+  greenhouseId   String        @map("greenhouse_id")
+  produceId      String?       @map("produce_id")
+  name           String
+  variety        String?
+  startDate      DateTime      @db.Date @map("start_date")
+  endDate        DateTime?     @db.Date @map("end_date")
+  status         HarvestStatus @default(LIVE)
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
 
-  greenhouse  Greenhouse        @relation(fields: [greenhouseId], references: [id])
-  produce     Produce?          @relation(fields: [produceId], references: [id])
-  // All produces grown in this harvest — see HarvestProduce. The legacy
-  // produceId stays as a denormalised "primary" for older queries.
-  produces    HarvestProduce[]
-  assets      HarvestAsset[]
-  usages      HarvestUsage[]
-  sales       Sale[]
-  wageLines   WageEntryLine[]
-  tasks       Task[]
+  organization Organization?      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  greenhouse   Greenhouse        @relation(fields: [greenhouseId], references: [id])
+  produce      Produce?          @relation(fields: [produceId], references: [id])
+  produces     HarvestProduce[]
+  assets       HarvestAsset[]
+  usages       HarvestUsage[]
+  sales        Sale[]
+  wageLines    WageEntryLine[]
+  tasks        Task[]
 
+  @@index([organizationId])
   @@index([status, startDate])
   @@map("harvests")
 }
 
 model HarvestAsset {
   id              String   @id @default(cuid())
+  organizationId  String?   @map("organization_id")
   harvestId       String   @map("harvest_id")
   itemId          String   @map("item_id")
   qty             Decimal  @db.Decimal(18, 4)
   date            DateTime @db.Date
   reusable        Boolean  @default(false)
   condition       String?
-  // --- Depreciation snapshot from the source batch(es) at install time ---
-  // depreciable = true when at least one consumed batch has maxUses > 1.
-  // amortisedCharge is what this harvest's P&L is charged (NOT fifo_cost).
-  // useCount / maxUses are snapshotted from the dominant source batch for
-  // display ("use N of M"). End-harvest decisions use the live BatchConsumption
-  // → Batch chain rather than these snapshots.
   depreciable     Boolean  @default(false)
   amortisedCharge Decimal? @db.Decimal(18, 4) @map("amortised_charge")
   maxUses         Int      @default(1) @map("max_uses")
@@ -320,45 +396,53 @@ model HarvestAsset {
   discarded       Boolean  @default(false)
   createdAt       DateTime @default(now()) @map("created_at")
 
+  organization Organization?       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   harvest      Harvest            @relation(fields: [harvestId], references: [id], onDelete: Cascade)
   item         Item               @relation(fields: [itemId], references: [id])
   consumptions BatchConsumption[]
 
+  @@index([organizationId])
   @@index([harvestId])
   @@map("harvest_assets")
 }
 
 model HarvestUsage {
-  id          String   @id @default(cuid())
-  harvestId   String   @map("harvest_id")
-  itemId      String   @map("item_id")
-  qty         Decimal  @db.Decimal(18, 4)
-  displayQty  String?  @map("display_qty")
-  date        DateTime @db.Date
-  createdAt   DateTime @default(now()) @map("created_at")
+  id             String   @id @default(cuid())
+  organizationId String?   @map("organization_id")
+  harvestId      String   @map("harvest_id")
+  itemId         String   @map("item_id")
+  qty            Decimal  @db.Decimal(18, 4)
+  displayQty     String?  @map("display_qty")
+  date           DateTime @db.Date
+  createdAt      DateTime @default(now()) @map("created_at")
 
+  organization Organization?       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   harvest      Harvest            @relation(fields: [harvestId], references: [id], onDelete: Cascade)
   item         Item               @relation(fields: [itemId], references: [id])
   consumptions BatchConsumption[]
 
+  @@index([organizationId])
   @@index([harvestId])
   @@map("harvest_usages")
 }
 
 model Sale {
-  id          String    @id @default(cuid())
-  harvestId   String    @map("harvest_id")
-  produceId   String    @map("produce_id")
-  date        DateTime  @db.Date
-  grade       SaleGrade
-  weight      Decimal   @db.Decimal(18, 4)
-  pricePerKg  Decimal   @db.Decimal(18, 4) @map("price_per_kg")
-  amount      Decimal   @db.Decimal(18, 4)
-  createdAt   DateTime  @default(now()) @map("created_at")
+  id             String    @id @default(cuid())
+  organizationId String?    @map("organization_id")
+  harvestId      String    @map("harvest_id")
+  produceId      String    @map("produce_id")
+  date           DateTime  @db.Date
+  grade          SaleGrade
+  weight         Decimal   @db.Decimal(18, 4)
+  pricePerKg     Decimal   @db.Decimal(18, 4) @map("price_per_kg")
+  amount         Decimal   @db.Decimal(18, 4)
+  createdAt      DateTime  @default(now()) @map("created_at")
 
-  harvest  Harvest @relation(fields: [harvestId], references: [id], onDelete: Cascade)
-  produce  Produce @relation(fields: [produceId], references: [id])
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  harvest      Harvest      @relation(fields: [harvestId], references: [id], onDelete: Cascade)
+  produce      Produce      @relation(fields: [produceId], references: [id])
 
+  @@index([organizationId])
   @@index([harvestId, date])
   @@map("sales")
 }
@@ -366,22 +450,23 @@ model Sale {
 // ---------- Staff & Wages ----------
 
 model Staff {
-  id        String   @id @default(cuid())
-  name      String
-  role      String?
-  avatar    String?
-  photoPath String?  @map("photo_path")
-  // Each staff member gets their own login. Seed/backfill auto-creates a
-  // User with email "<firstname>@sparmanikfarm.local" + the default password.
-  userId    String?  @unique @map("user_id")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id             String   @id @default(cuid())
+  organizationId String?   @map("organization_id")
+  name           String
+  role           String?
+  avatar         String?
+  photoPath      String?  @map("photo_path")
+  userId         String?  @unique @map("user_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
-  user        User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
-  rates       StaffRate[]
-  wageEntries WageEntry[]
-  tasks       Task[]      @relation("AssignedTasks")
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  rates        StaffRate[]
+  wageEntries  WageEntry[]
+  tasks        Task[]       @relation("AssignedTasks")
 
+  @@index([organizationId])
   @@map("staff")
 }
 
@@ -433,6 +518,7 @@ model WageEntryLine {
 
 model Task {
   id              String       @id @default(cuid())
+  organizationId  String?       @map("organization_id")
   title           String
   assigneeStaffId String?      @map("assignee_staff_id")
   dueDate         DateTime     @db.Date @map("due_date")
@@ -445,11 +531,13 @@ model Task {
   createdAt       DateTime     @default(now()) @map("created_at")
   updatedAt       DateTime     @updatedAt @map("updated_at")
 
-  assignee  Staff?        @relation("AssignedTasks", fields: [assigneeStaffId], references: [id])
-  harvest   Harvest?      @relation(fields: [harvestId], references: [id])
-  comments  TaskComment[]
-  photos    TaskPhoto[]
+  organization Organization?  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignee     Staff?        @relation("AssignedTasks", fields: [assigneeStaffId], references: [id])
+  harvest      Harvest?      @relation(fields: [harvestId], references: [id])
+  comments     TaskComment[]
+  photos       TaskPhoto[]
 
+  @@index([organizationId])
   @@index([status, dueDate])
   @@index([harvestId])
   @@map("tasks")
@@ -484,18 +572,21 @@ model TaskPhoto {
 // ---------- Knowledge ----------
 
 model NutrientRecipe {
-  id        String   @id @default(cuid())
-  name      String
-  crop      String?
-  stage     String?
-  ec        Decimal? @db.Decimal(8, 4)
-  ph        String?
-  notes     String?
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id             String   @id @default(cuid())
+  organizationId String?   @map("organization_id")
+  name           String
+  crop           String?
+  stage          String?
+  ec             Decimal? @db.Decimal(8, 4)
+  ph             String?
+  notes          String?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
-  ingredients RecipeIngredient[]
+  organization Organization?       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ingredients  RecipeIngredient[]
 
+  @@index([organizationId])
   @@map("nutrient_recipes")
 }
 
@@ -513,6 +604,7 @@ model RecipeIngredient {
 
 model Sop {
   id             String    @id @default(cuid())
+  organizationId String?    @map("organization_id")
   titleEn        String    @map("title_en")
   titleId        String    @map("title_id")
   descriptionEn  String?   @map("description_en")
@@ -524,8 +616,10 @@ model Sop {
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  steps SopStep[]
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  steps        SopStep[]
 
+  @@index([organizationId])
   @@index([status])
   @@map("sops")
 }
@@ -545,17 +639,21 @@ model SopStep {
 }
 
 model Video {
-  id            String    @id @default(cuid())
-  titleEn       String    @map("title_en")
-  titleId       String    @map("title_id")
-  category      String?
-  duration      String?
-  type          VideoType
-  url           String?
-  path          String?
-  thumbnailPath String?   @map("thumbnail_path")
-  createdAt     DateTime  @default(now()) @map("created_at")
+  id             String    @id @default(cuid())
+  organizationId String?    @map("organization_id")
+  titleEn        String    @map("title_en")
+  titleId        String    @map("title_id")
+  category       String?
+  duration       String?
+  type           VideoType
+  url            String?
+  path           String?
+  thumbnailPath  String?   @map("thumbnail_path")
+  createdAt      DateTime  @default(now()) @map("created_at")
 
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
   @@map("videos")
 }
 
@@ -583,19 +681,22 @@ model ExchangeRateHistory {
 // ---------- Audit ----------
 
 model AuditAction {
-  id          String    @id @default(cuid())
-  type        String
-  entityType  String    @map("entity_type")
-  entityId    String    @map("entity_id")
-  userId      String?   @map("user_id")
-  description String
-  payload     Json
-  undone      Boolean   @default(false)
-  undoneAt    DateTime? @map("undone_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
+  id             String    @id @default(cuid())
+  organizationId String?    @map("organization_id")
+  type           String
+  entityType     String    @map("entity_type")
+  entityId       String    @map("entity_id")
+  userId         String?   @map("user_id")
+  description    String
+  payload        Json
+  undone         Boolean   @default(false)
+  undoneAt       DateTime? @map("undone_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
 
-  user User? @relation(fields: [userId], references: [id])
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id])
 
+  @@index([organizationId])
   @@index([entityType, entityId, createdAt])
   @@index([userId, createdAt])
   @@index([undone, createdAt])
@@ -605,38 +706,38 @@ model AuditAction {
 // ---------- AI ----------
 
 model AiConversation {
-  id        String      @id @default(cuid())
-  userId    String      @map("user_id")
-  title     String?
-  // Tracks the last provider this conversation used so the sidebar can hint
-  // (and we can restore the toggle the next time it's opened).
-  provider  String?
-  createdAt DateTime    @default(now()) @map("created_at")
-  updatedAt DateTime    @updatedAt @map("updated_at")
+  id             String      @id @default(cuid())
+  organizationId String?      @map("organization_id")
+  userId         String      @map("user_id")
+  title          String?
+  provider       String?
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
 
-  user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages AiMessage[]
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages     AiMessage[]
 
+  @@index([organizationId])
   @@index([userId, updatedAt])
   @@map("ai_conversations")
 }
 
 model AiMessage {
   id             String   @id @default(cuid())
+  organizationId String?   @map("organization_id")
   userId         String   @map("user_id")
-  // conversationId is nullable so historical messages keep working until the
-  // backfill migration assigns them to a synthetic "Earlier chats" thread.
   conversationId String?  @map("conversation_id")
   role           AiRole
   content        String
-  // Optional list of attached images for vision: [{ path, mimeType, width, height }].
-  // Only set on USER messages; ASSISTANT messages stay text-only.
   attachments    Json?
   createdAt      DateTime @default(now()) @map("created_at")
 
+  organization Organization?    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   conversation AiConversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
+  @@index([organizationId])
   @@index([userId, createdAt])
   @@index([conversationId, createdAt])
   @@map("ai_messages")

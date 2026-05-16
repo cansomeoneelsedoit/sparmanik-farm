@@ -51,7 +51,7 @@ export default async function AskAiPage({
           take: 50,
           select: { id: true, title: true, updatedAt: true, provider: true },
         })
-      ).map((c) => ({
+      ).map((c: { id: string; title: string | null; updatedAt: Date; provider: string | null }) => ({
         id: c.id,
         title: c.title ?? "New chat",
         updatedAt: c.updatedAt.toISOString(),

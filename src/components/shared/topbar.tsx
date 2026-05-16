@@ -3,10 +3,12 @@ import { signOut } from "@/auth";
 import { prisma } from "@/server/prisma";
 import { getAlerts } from "@/server/alerts";
 import { recentActions } from "@/server/audit";
+import { listMyOrgs, getActiveOrgId } from "@/server/org";
 import { LangToggle } from "@/components/shared/lang-toggle";
 import { ThemeToggle } from "@/components/shared/theme-toggle";
 import { AlertBell } from "@/components/shared/alert-bell";
 import { AuditHistorySheet } from "@/components/shared/audit-history-sheet";
+import { OrgSwitcher } from "@/components/shared/org-switcher";
 import { Button } from "@/components/ui/button";
 
 async function getCurrentRate() {
@@ -17,10 +19,12 @@ async function getCurrentRate() {
 export async function Topbar({ userName }: { userName?: string | null }) {
   const t = await getTranslations("topbar");
   const tCommon = await getTranslations("common");
-  const [rate, alerts, actions] = await Promise.all([
+  const [rate, alerts, actions, orgs, activeOrgId] = await Promise.all([
     getCurrentRate(),
     getAlerts(),
     recentActions(50),
+    listMyOrgs(),
+    getActiveOrgId(),
   ]);
 
   async function doSignOut() {
@@ -31,6 +35,7 @@ export async function Topbar({ userName }: { userName?: string | null }) {
   return (
     <header className="flex h-14 items-center justify-between border-b bg-background px-4">
       <div className="flex items-center gap-3 text-sm">
+        <OrgSwitcher orgs={orgs} activeId={activeOrgId} />
         <span className="text-muted-foreground">{tCommon("welcome")}</span>
         <span className="font-medium">{userName ?? ""}</span>
       </div>

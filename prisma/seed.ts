@@ -167,12 +167,32 @@ async function main() {
     create: { id: "singleton", farmName: "Sparmanik Farm", exchangeRate: D(10200), defaultLocale: "en" },
   });
 
+  // ---- Organisations (3 fixed: Sparmanik + Andre Melon + Kevin Farm) ----
+  // Migration creates them, but we upsert here too for idempotency on dev
+  // databases where the rows might have been created by hand.
+  await prisma.organization.upsert({
+    where: { id: "org_sparmanik" },
+    update: { name: "Sparmanik Farm", slug: "sparmanik" },
+    create: { id: "org_sparmanik", name: "Sparmanik Farm", slug: "sparmanik" },
+  });
+  await prisma.organization.upsert({
+    where: { id: "org_andre" },
+    update: { name: "Andre Melon", slug: "andre" },
+    create: { id: "org_andre", name: "Andre Melon", slug: "andre" },
+  });
+  await prisma.organization.upsert({
+    where: { id: "org_kevin" },
+    update: { name: "Kevin Farm", slug: "kevin" },
+    create: { id: "org_kevin", name: "Kevin Farm", slug: "kevin" },
+  });
+
   // ---- Dev user ----
   const devEmail = "dev@sparmanikfarm.local";
   const devPassword = "devpassword";
   const existingUser = await prisma.user.findUnique({ where: { email: devEmail } });
+  let devUserId = existingUser?.id;
   if (!existingUser) {
-    await prisma.user.create({
+    const created = await prisma.user.create({
       data: {
         email: devEmail,
         name: "Dev User",
@@ -180,12 +200,35 @@ async function main() {
         role: "SUPERUSER",
       },
     });
+    devUserId = created.id;
     console.log(`[seed] Dev user: ${devEmail} / ${devPassword} (SUPERUSER)`);
   } else if (existingUser.role !== "SUPERUSER") {
-    // Idempotent re-promote in case the column was added after the Dev User
-    // was created (e.g. on the first deploy of the user_role migration).
     await prisma.user.update({ where: { id: existingUser.id }, data: { role: "SUPERUSER" } });
     console.log(`[seed] Dev user promoted to SUPERUSER`);
+  }
+
+  // Dev User membership in all three orgs (OWNER everywhere).
+  if (devUserId) {
+    for (const orgId of ["org_sparmanik", "org_andre", "org_kevin"] as const) {
+      await prisma.organizationMembership.upsert({
+        where: { userId_organizationId: { userId: devUserId, organizationId: orgId } },
+        update: { role: "OWNER" },
+        create: { userId: devUserId, organizationId: orgId, role: "OWNER" },
+      });
+    }
+  }
+
+  // Every other existing user → membership in Sparmanik only.
+  const otherUsers = await prisma.user.findMany({
+    where: { email: { not: devEmail } },
+    select: { id: true },
+  });
+  for (const u of otherUsers) {
+    await prisma.organizationMembership.upsert({
+      where: { userId_organizationId: { userId: u.id, organizationId: "org_sparmanik" } },
+      update: {},
+      create: { userId: u.id, organizationId: "org_sparmanik", role: "MEMBER" },
+    });
   }
 
   // ---- Staff auto-login backfill ----
@@ -194,10 +237,21 @@ async function main() {
   // existing staff with a user_id are skipped. The Dev User is untouched.
   await ensureStaffUsers();
 
-  // ---- Categories (default set; legacy will overwrite with its own) ----
-  const defaultCategories = ["Nutrients", "Media", "Pots", "Irrigation", "Seeds", "Pesticides", "Instruments", "Lighting", "Equipment", "Packaging", "Tools", "Other"];
-  for (const name of defaultCategories) {
-    await prisma.category.upsert({ where: { name }, update: {}, create: { name } });
+  // ---- Default categories per org (so new orgs start usable) ----
+  // Sparmanik already has its categories from the legacy import; the upsert
+  // is no-op for them. Andre / Kevin get the full default set on first boot.
+  const defaultCategories = [
+    "Nutrients", "Media", "Pots", "Irrigation", "Seeds", "Pesticides",
+    "Instruments", "Lighting", "Equipment", "Packaging", "Tools", "Other",
+  ];
+  for (const orgId of ["org_sparmanik", "org_andre", "org_kevin"] as const) {
+    for (const name of defaultCategories) {
+      await prisma.category.upsert({
+        where: { organizationId_name: { organizationId: orgId, name } },
+        update: {},
+        create: { organizationId: orgId, name },
+      });
+    }
   }
 
   // ---- Legacy import (idempotent: skip if already imported) ----
@@ -215,19 +269,29 @@ async function main() {
 
   console.log("[seed] Importing legacy data…");
 
+  // Every legacy entity belongs to Sparmanik Farm by definition — this is
+  // the org the existing data ships with.
+  const SPARMANIK = "org_sparmanik";
+
   // ---- Categories from legacy (just upsert any extras) ----
   for (const name of legacy.categories) {
-    await prisma.category.upsert({ where: { name }, update: {}, create: { name } });
+    await prisma.category.upsert({
+      where: { organizationId_name: { organizationId: SPARMANIK, name } },
+      update: {},
+      create: { organizationId: SPARMANIK, name },
+    });
   }
   const categoryIdByName = new Map<string, string>();
-  for (const c of await prisma.category.findMany()) {
+  for (const c of await prisma.category.findMany({ where: { organizationId: SPARMANIK } })) {
     categoryIdByName.set(c.name, c.id);
   }
 
   // ---- Greenhouses ----
   const ghIdByLegacyId = new Map<number, string>();
   for (const g of legacy.greenhouses) {
-    const created = await prisma.greenhouse.create({ data: { name: g.name } });
+    const created = await prisma.greenhouse.create({
+      data: { organizationId: SPARMANIK, name: g.name },
+    });
     ghIdByLegacyId.set(g.id, created.id);
   }
   console.log(`[seed] ${legacy.greenhouses.length} greenhouses`);
@@ -235,7 +299,9 @@ async function main() {
   // ---- Produce ----
   const produceIdByLegacyId = new Map<number, string>();
   for (const p of legacy.produce) {
-    const created = await prisma.produce.create({ data: { name: p.name, barcode: p.barcode || null } });
+    const created = await prisma.produce.create({
+      data: { organizationId: SPARMANIK, name: p.name, barcode: p.barcode || null },
+    });
     produceIdByLegacyId.set(p.id, created.id);
   }
   console.log(`[seed] ${legacy.produce.length} produce`);
@@ -246,6 +312,7 @@ async function main() {
   for (const s of legacy.suppliers) {
     const created = await prisma.supplier.create({
       data: {
+        organizationId: SPARMANIK,
         name: s.name,
         phone: s.phone || null,
         email: s.email || null,
@@ -264,6 +331,7 @@ async function main() {
   for (const st of legacy.staff) {
     const created = await prisma.staff.create({
       data: {
+        organizationId: SPARMANIK,
         name: st.name,
         role: st.role || null,
         avatar: st.avatar || null,
@@ -286,6 +354,7 @@ async function main() {
   for (const it of legacy.items) {
     const created = await prisma.item.create({
       data: {
+        organizationId: SPARMANIK,
         name: it.name,
         categoryId: categoryIdByName.get(it.cat) ?? null,
         unit: it.unit,
@@ -298,6 +367,7 @@ async function main() {
         defaultSupplierId: supplierIdByName.get(it.defaultSupplier) ?? null,
         batches: {
           create: it.batches.map((b) => ({
+            organizationId: SPARMANIK,
             date: date(b.date),
             supplierId: supplierIdByName.get(b.supplier) ?? null,
             qty: D(b.qty),
@@ -326,6 +396,7 @@ async function main() {
     if (!ghId) continue;
     const harvest = await prisma.harvest.create({
       data: {
+        organizationId: SPARMANIK,
         greenhouseId: ghId,
         name: h.name,
         variety: h.variety || null,
@@ -334,6 +405,7 @@ async function main() {
         status: statusMap[h.status],
         sales: {
           create: h.sales.map((s) => ({
+            organizationId: SPARMANIK,
             produceId: produceIdByLegacyId.get(s.produceId) ?? Array.from(produceIdByLegacyId.values())[0],
             date: date(s.date),
             grade: s.grade,
@@ -348,6 +420,7 @@ async function main() {
               const itemId = itemIdByLegacyId.get(u.itemId);
               if (!itemId) return null;
               return {
+                organizationId: SPARMANIK,
                 itemId,
                 qty: D(u.qty),
                 displayQty: u.displayQty || null,
@@ -362,6 +435,7 @@ async function main() {
               const itemId = itemIdByLegacyId.get(a.itemId);
               if (!itemId) return null;
               return {
+                organizationId: SPARMANIK,
                 itemId,
                 qty: D(a.qty),
                 date: date(a.date),
@@ -412,6 +486,7 @@ async function main() {
   for (const t of legacy.tasks) {
     await prisma.task.create({
       data: {
+        organizationId: SPARMANIK,
         title: t.title,
         assigneeStaffId: staffIdByName.get(t.assignee) ?? null,
         dueDate: date(t.dueDate),
@@ -437,6 +512,7 @@ async function main() {
   for (const r of legacy.nutrientRecipes) {
     await prisma.nutrientRecipe.create({
       data: {
+        organizationId: SPARMANIK,
         name: r.name,
         crop: r.crop || null,
         stage: r.stage || null,
@@ -453,6 +529,7 @@ async function main() {
   for (const s of legacy.sops) {
     await prisma.sop.create({
       data: {
+        organizationId: SPARMANIK,
         titleEn: s.title,
         titleId: s.titleId,
         descriptionEn: s.description || null,
@@ -483,6 +560,7 @@ async function main() {
     const ytId = v.type === "youtube" ? parseYoutubeId(v.url) : null;
     await prisma.video.create({
       data: {
+        organizationId: SPARMANIK,
         titleEn: v.title,
         titleId: v.titleId,
         category: v.category || null,
