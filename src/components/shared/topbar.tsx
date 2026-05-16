@@ -4,6 +4,7 @@ import { prisma } from "@/server/prisma";
 import { getAlerts } from "@/server/alerts";
 import { recentActions } from "@/server/audit";
 import { LangToggle } from "@/components/shared/lang-toggle";
+import { ThemeToggle } from "@/components/shared/theme-toggle";
 import { AlertBell } from "@/components/shared/alert-bell";
 import { AuditHistorySheet } from "@/components/shared/audit-history-sheet";
 import { Button } from "@/components/ui/button";
@@ -38,6 +39,7 @@ export async function Topbar({ userName }: { userName?: string | null }) {
           {t("rateLabel")}: <span className="font-medium text-foreground">{rate}</span> {t("rateUnit")}
         </span>
         <LangToggle />
+        <ThemeToggle />
         <AlertBell alerts={alerts} />
         <AuditHistorySheet
           entries={actions.map((a: { id: string; type: string; description: string; createdAt: Date; undone: boolean }) => ({

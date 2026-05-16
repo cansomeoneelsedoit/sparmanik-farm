@@ -30,7 +30,16 @@ export default async function RecipeDetailPage({ params }: { params: Promise<{ r
         </div>
         <div className="flex gap-2">
           <RecipeFormDialog
-            existing={{ ...r, ec: r.ec ?? null, ingredients: r.ingredients.map((i: { name: string; amount: string }) => ({ name: i.name, amount: i.amount })) }}
+            existing={{
+              id: r.id,
+              name: r.name,
+              crop: r.crop,
+              stage: r.stage,
+              ec: r.ec ? r.ec.toFixed(4) : null,
+              ph: r.ph,
+              notes: r.notes,
+              ingredients: r.ingredients.map((i: { name: string; amount: string }) => ({ name: i.name, amount: i.amount })),
+            }}
             trigger={<Button variant="outline">Edit</Button>}
           />
           <DeleteRecipeButton id={r.id} name={r.name} />

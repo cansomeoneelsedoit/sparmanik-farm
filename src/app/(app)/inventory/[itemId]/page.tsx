@@ -81,8 +81,8 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
           <UseStockDialog itemId={item.id} maxQty={totalStock.toString()} unit={item.unit} />
           <NewItemDialog
             trigger={<Button variant="outline">Edit</Button>}
-            categories={categories.map((c: { id: string; name: string }) => c)}
-            suppliers={suppliers.map((s: { id: string; name: string }) => s)}
+            categories={categories.map((c: { id: string; name: string }) => ({ id: c.id, name: c.name }))}
+            suppliers={suppliers.map((s: { id: string; name: string }) => ({ id: s.id, name: s.name }))}
             existing={{
               id: item.id,
               name: item.name,

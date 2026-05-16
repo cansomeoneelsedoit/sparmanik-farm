@@ -41,8 +41,8 @@ export default async function StaffPage() {
         <div className="flex gap-2">
           <NewWageEntryDialog
             staff={(staff as StaffRow[]).map((s) => ({ id: s.id, name: s.name }))}
-            harvests={harvests.map((h: { id: string; name: string }) => h)}
-            greenhouses={greenhouses.map((g: { id: string; name: string }) => g)}
+            harvests={harvests.map((h: { id: string; name: string }) => ({ id: h.id, name: h.name }))}
+            greenhouses={greenhouses.map((g: { id: string; name: string }) => ({ id: g.id, name: g.name }))}
           />
           <AddStaffDialog trigger={<Button><Plus className="h-4 w-4" /> Add staff</Button>} />
         </div>

@@ -50,7 +50,14 @@ export default async function SupplierDetailPage({ params }: { params: Promise<{
         </div>
         <div className="flex gap-2">
           <SupplierFormDialog
-            existing={supplier}
+            existing={{
+              id: supplier.id,
+              name: supplier.name,
+              phone: supplier.phone,
+              email: supplier.email,
+              notes: supplier.notes,
+              shopUrl: supplier.shopUrl,
+            }}
             trigger={<Button variant="outline">Edit</Button>}
           />
           <SupplierDeleteButton id={supplier.id} name={supplier.name} />

@@ -37,7 +37,7 @@ export function RecipeFormDialog({
   existing,
 }: {
   trigger: ReactNode;
-  existing?: { id: string; name: string; crop: string | null; stage: string | null; ec: { toString(): string } | null; ph: string | null; notes: string | null; ingredients: { name: string; amount: string }[] };
+  existing?: { id: string; name: string; crop: string | null; stage: string | null; ec: string | null; ph: string | null; notes: string | null; ingredients: { name: string; amount: string }[] };
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startT] = useTransition();
@@ -49,7 +49,7 @@ export function RecipeFormDialog({
       name: existing?.name ?? "",
       crop: existing?.crop ?? "",
       stage: existing?.stage ?? "",
-      ec: existing?.ec?.toString() ?? "",
+      ec: existing?.ec ?? "",
       ph: existing?.ph ?? "",
       notes: existing?.notes ?? "",
       ingredients: existing?.ingredients ?? [{ name: "", amount: "" }],

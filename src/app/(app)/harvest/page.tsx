@@ -36,8 +36,8 @@ export default async function HarvestPage() {
       <header className="flex items-center justify-between">
         <h1 className="font-serif text-3xl">Harvests</h1>
         <StartHarvestDialog
-          greenhouses={greenhouses.map((g: { id: string; name: string }) => g)}
-          produces={produces.map((p: { id: string; name: string }) => p)}
+          greenhouses={greenhouses.map((g: { id: string; name: string }) => ({ id: g.id, name: g.name }))}
+          produces={produces.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }))}
           trigger={<Button><Plus className="h-4 w-4" /> Start harvest</Button>}
         />
       </header>

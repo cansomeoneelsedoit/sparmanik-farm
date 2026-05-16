@@ -27,13 +27,25 @@ export default async function TasksPage() {
   const [tasks, staff, harvests] = await Promise.all([
     prisma.task.findMany({
       orderBy: [{ status: "asc" }, { dueDate: "asc" }],
-      include: { assignee: true, harvest: { select: { id: true, name: true } } },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        priority: true,
+        status: true,
+        dueDate: true,
+        assigneeStaffId: true,
+        assignee: { select: { id: true, name: true } },
+        harvest: { select: { id: true, name: true } },
+      },
     }),
     prisma.staff.findMany({ orderBy: { name: "asc" } }),
     prisma.harvest.findMany({ where: { status: "LIVE" }, select: { id: true, name: true } }),
   ]);
 
   const rows = tasks as TaskRow[];
+  const staffList = staff.map((s: { id: string; name: string }) => ({ id: s.id, name: s.name }));
+  const harvestList = harvests.map((h: { id: string; name: string }) => ({ id: h.id, name: h.name }));
   const overdue = rows.filter((t) => t.status !== "COMPLETED" && t.dueDate < today);
   const dueToday = rows.filter((t) => t.status !== "COMPLETED" && t.dueDate.toISOString().slice(0, 10) === today.toISOString().slice(0, 10));
   const upcoming = rows.filter((t) => t.status !== "COMPLETED" && t.dueDate > today);
@@ -44,8 +56,8 @@ export default async function TasksPage() {
       <header className="flex items-center justify-between">
         <h1 className="font-serif text-3xl">Tasks</h1>
         <AddTaskDialog
-          staff={staff.map((s: { id: string; name: string }) => s)}
-          harvests={harvests.map((h: { id: string; name: string }) => h)}
+          staff={staff.map((s: { id: string; name: string }) => ({ id: s.id, name: s.name }))}
+          harvests={harvests.map((h: { id: string; name: string }) => ({ id: h.id, name: h.name }))}
           trigger={<Button><Plus className="h-4 w-4" /> Add task</Button>}
         />
       </header>
@@ -57,10 +69,10 @@ export default async function TasksPage() {
         <Stat label="Completed" count={completed.length} accent="green" />
       </div>
 
-      <Section title="Overdue" border="border-l-destructive" tasks={overdue} staff={staff} harvests={harvests} />
-      <Section title="Due today" border="border-l-yellow-500" tasks={dueToday} staff={staff} harvests={harvests} />
-      <Section title="Upcoming" border="border-l-blue-500" tasks={upcoming} staff={staff} harvests={harvests} />
-      <Section title="Completed" border="border-l-green-500" tasks={completed} staff={staff} harvests={harvests} muted />
+      <Section title="Overdue" border="border-l-destructive" tasks={overdue} staff={staffList} harvests={harvestList} />
+      <Section title="Due today" border="border-l-yellow-500" tasks={dueToday} staff={staffList} harvests={harvestList} />
+      <Section title="Upcoming" border="border-l-blue-500" tasks={upcoming} staff={staffList} harvests={harvestList} />
+      <Section title="Completed" border="border-l-green-500" tasks={completed} staff={staffList} harvests={harvestList} muted />
     </div>
   );
 }

@@ -8,10 +8,16 @@ import { prisma } from "@/server/prisma";
 export type ActionResult<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
 function parseYoutubeId(url: string): string | null {
-  const m1 = url.match(/youtu\.be\/([\w-]{11})/);
+  const m1 = url.match(/[?&]v=([\w-]{11})/);
   if (m1) return m1[1];
-  const m2 = url.match(/[?&]v=([\w-]{11})/);
+  const m2 = url.match(/youtu\.be\/([\w-]{11})/);
   if (m2) return m2[1];
+  const m3 = url.match(/youtube\.com\/shorts\/([\w-]{11})/);
+  if (m3) return m3[1];
+  const m4 = url.match(/youtube\.com\/embed\/([\w-]{11})/);
+  if (m4) return m4[1];
+  const m5 = url.match(/youtube\.com\/live\/([\w-]{11})/);
+  if (m5) return m5[1];
   return null;
 }
 
