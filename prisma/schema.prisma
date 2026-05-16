@@ -18,6 +18,9 @@ model User {
   emailVerified DateTime? @map("email_verified")
   image         String?
   passwordHash  String?   @map("password_hash")
+  // Authorisation tier. SUPERUSER can manage other users (create / edit /
+  // reset password / delete) via /admin/users. USER is the default.
+  role          UserRole  @default(USER)
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
@@ -117,6 +120,11 @@ enum CommentRole {
 enum AiRole {
   USER
   ASSISTANT
+}
+
+enum UserRole {
+  USER
+  SUPERUSER
 }
 
 // ---------- Lookup tables ----------

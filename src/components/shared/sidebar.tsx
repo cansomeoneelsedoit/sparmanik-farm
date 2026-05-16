@@ -25,10 +25,16 @@ const NAV_ITEMS: NavItem[] = [
   { key: "askAi", href: "/ask-ai" },
 ];
 
-export function Sidebar() {
+export function Sidebar({ isSuperuser = false }: { isSuperuser?: boolean }) {
   const t = useTranslations("nav");
   const tCommon = useTranslations("common");
   const pathname = usePathname();
+
+  // The "Users" admin link only appears for superusers — it's the gateway to
+  // /admin/users (create / edit / reset password / delete other users).
+  const items: NavItem[] = isSuperuser
+    ? [...NAV_ITEMS, { key: "users", href: "/admin/users" }]
+    : NAV_ITEMS;
 
   return (
     <aside className="hidden w-64 shrink-0 flex-col border-r bg-card md:flex">
@@ -42,9 +48,11 @@ export function Sidebar() {
         </div>
       </div>
       <nav className="flex-1 overflow-y-auto p-2">
-        {NAV_ITEMS.map((item) => {
+        {items.map((item) => {
           const active =
             item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(item.href + "/");
+          // The "users" key isn't in the i18n catalog; fall back to a literal.
+          const label = item.key === "users" ? "Users" : t(item.key);
           return (
             <Link
               key={item.key}
@@ -56,7 +64,7 @@ export function Sidebar() {
                   : "text-muted-foreground hover:bg-accent/5 hover:text-foreground",
               )}
             >
-              {t(item.key)}
+              {label}
             </Link>
           );
         })}

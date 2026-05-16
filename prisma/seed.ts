@@ -177,9 +177,15 @@ async function main() {
         email: devEmail,
         name: "Dev User",
         passwordHash: await bcrypt.hash(devPassword, 10),
+        role: "SUPERUSER",
       },
     });
-    console.log(`[seed] Dev user: ${devEmail} / ${devPassword}`);
+    console.log(`[seed] Dev user: ${devEmail} / ${devPassword} (SUPERUSER)`);
+  } else if (existingUser.role !== "SUPERUSER") {
+    // Idempotent re-promote in case the column was added after the Dev User
+    // was created (e.g. on the first deploy of the user_role migration).
+    await prisma.user.update({ where: { id: existingUser.id }, data: { role: "SUPERUSER" } });
+    console.log(`[seed] Dev user promoted to SUPERUSER`);
   }
 
   // ---- Staff auto-login backfill ----

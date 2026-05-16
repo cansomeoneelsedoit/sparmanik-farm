@@ -11,11 +11,21 @@ export default {
   providers: [],
   callbacks: {
     jwt: ({ token, user }) => {
-      if (user) token.id = user.id;
+      if (user) {
+        token.id = user.id;
+        // user.role is populated by the Credentials.authorize callback in
+        // src/auth.ts. Default to "USER" so middleware never sees undefined.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const r = (user as any).role as "USER" | "SUPERUSER" | undefined;
+        token.role = r ?? "USER";
+      }
       return token;
     },
     session: ({ session, token }) => {
-      if (session.user && token.id) session.user.id = token.id as string;
+      if (session.user) {
+        if (token.id) session.user.id = token.id as string;
+        session.user.role = (token.role as "USER" | "SUPERUSER" | undefined) ?? "USER";
+      }
       return session;
     },
   },

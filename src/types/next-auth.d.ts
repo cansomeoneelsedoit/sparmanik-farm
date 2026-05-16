@@ -8,12 +8,18 @@ declare module "next-auth" {
       email?: string | null;
       name?: string | null;
       image?: string | null;
+      role?: "USER" | "SUPERUSER";
     };
+  }
+
+  interface User {
+    role?: "USER" | "SUPERUSER";
   }
 }
 
 declare module "next-auth/jwt" {
   interface JWT {
     id?: string;
+    role?: "USER" | "SUPERUSER";
   }
 }
