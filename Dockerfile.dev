@@ -1,0 +1,10 @@
+# Dev image. Source is bind-mounted from the host so changes hot-reload.
+FROM node:22-alpine
+WORKDIR /app
+RUN apk add --no-cache libc6-compat openssl
+# Install deps once; the bind mount will overlay source files at runtime.
+COPY package.json package-lock.json ./
+COPY prisma ./prisma
+RUN npm ci --no-audit --no-fund
+EXPOSE 3000
+CMD ["sh", "-c", "npx prisma migrate deploy && (npm run db:seed || true) && npm run dev"]

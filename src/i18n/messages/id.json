@@ -1,0 +1,48 @@
+{
+  "common": {
+    "appName": "Sparmanik Farm",
+    "appTagline": "Cultivation OS",
+    "signIn": "Masuk",
+    "signOut": "Keluar",
+    "email": "Email",
+    "password": "Kata Sandi",
+    "welcome": "Selamat datang kembali",
+    "cancel": "Batal",
+    "save": "Simpan",
+    "delete": "Hapus",
+    "edit": "Ubah",
+    "create": "Buat",
+    "search": "Cari",
+    "loading": "Memuat",
+    "error": "Terjadi kesalahan"
+  },
+  "nav": {
+    "dashboard": "Dasbor",
+    "calendar": "Kalender",
+    "sales": "Penjualan",
+    "harvest": "Panen",
+    "tasks": "Tugas",
+    "inventory": "Inventaris",
+    "recipes": "Resep Nutrisi",
+    "sops": "SOP",
+    "videos": "Video",
+    "suppliers": "Pemasok",
+    "staff": "Staf",
+    "financials": "Keuangan",
+    "settings": "Pengaturan",
+    "askAi": "Tanya AI"
+  },
+  "topbar": {
+    "rateLabel": "Kurs",
+    "rateUnit": "IDR/AUD",
+    "alerts": "Peringatan",
+    "history": "Riwayat",
+    "noAlerts": "Tidak ada peringatan"
+  },
+  "signin": {
+    "title": "Masuk ke Sparmanik Farm",
+    "subtitle": "Cultivation OS untuk lahan Anda",
+    "submit": "Masuk",
+    "invalid": "Email atau kata sandi salah"
+  }
+}

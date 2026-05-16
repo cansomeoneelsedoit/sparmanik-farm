@@ -1,0 +1,572 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// Auth.js (NextAuth v5) Prisma adapter models
+// ============================================================================
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime? @map("email_verified")
+  image         String?
+  passwordHash  String?   @map("password_hash")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  accounts      Account[]
+  sessions      Session[]
+  aiMessages    AiMessage[]
+  auditActions  AuditAction[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ============================================================================
+// Sparmanik Farm domain
+// ============================================================================
+
+enum HarvestStatus {
+  LIVE
+  CLOSED
+}
+
+enum SaleGrade {
+  A
+  B
+  C
+  D
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum SopStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum VideoType {
+  YOUTUBE
+  UPLOAD
+}
+
+enum CommentRole {
+  ADMIN
+  STAFF
+}
+
+enum AiRole {
+  USER
+  ASSISTANT
+}
+
+// ---------- Lookup tables ----------
+
+model Category {
+  id    String @id @default(cuid())
+  name  String @unique
+  items Item[]
+
+  @@map("categories")
+}
+
+model Produce {
+  id       String    @id @default(cuid())
+  name     String
+  barcode  String?   @unique
+  harvests Harvest[]
+  sales    Sale[]
+
+  @@map("produce")
+}
+
+model Greenhouse {
+  id           String           @id @default(cuid())
+  name         String
+  location     String?
+  type         String?
+  notes        String?
+  harvests     Harvest[]
+  wageEntries  WageEntryLine[]
+
+  @@map("greenhouses")
+}
+
+model Supplier {
+  id           String   @id @default(cuid())
+  name         String
+  phone        String?
+  email        String?
+  notes        String?
+  shopUrl      String?  @map("shop_url")
+  items        Item[]
+  batches      Batch[]
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("suppliers")
+}
+
+// ---------- Inventory ----------
+
+model Item {
+  id                String   @id @default(cuid())
+  name              String
+  categoryId        String?  @map("category_id")
+  unit              String
+  subUnit           String?  @map("sub_unit")
+  subFactor         Decimal? @db.Decimal(18, 4) @map("sub_factor")
+  location          String?
+  reusable          Boolean  @default(false)
+  reorder           Decimal  @default(0) @db.Decimal(18, 4)
+  shopeeUrl         String?  @map("shopee_url")
+  defaultSupplierId String?  @map("default_supplier_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  category         Category?       @relation(fields: [categoryId], references: [id])
+  defaultSupplier  Supplier?       @relation(fields: [defaultSupplierId], references: [id])
+  batches          Batch[]
+  harvestAssets    HarvestAsset[]
+  harvestUsages    HarvestUsage[]
+
+  @@index([categoryId])
+  @@index([defaultSupplierId])
+  @@map("items")
+}
+
+model Batch {
+  id            String   @id @default(cuid())
+  itemId        String   @map("item_id")
+  supplierId    String?  @map("supplier_id")
+  date          DateTime @db.Date
+  qty           Decimal  @db.Decimal(18, 4)
+  price         Decimal  @db.Decimal(18, 4)
+  exchangeRate  Decimal  @db.Decimal(12, 4) @map("exchange_rate")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  item          Item               @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  supplier      Supplier?          @relation(fields: [supplierId], references: [id])
+  consumptions  BatchConsumption[]
+
+  @@index([itemId, date])
+  @@map("batches")
+}
+
+// Source of truth for FIFO consumption. remaining(batch) = batch.qty - SUM(consumptions.qty).
+model BatchConsumption {
+  id              String   @id @default(cuid())
+  batchId         String   @map("batch_id")
+  qty             Decimal  @db.Decimal(18, 4)
+  unitCost        Decimal  @db.Decimal(18, 4) @map("unit_cost")
+  harvestAssetId  String?  @map("harvest_asset_id")
+  harvestUsageId  String?  @map("harvest_usage_id")
+  consumedAt      DateTime @default(now()) @map("consumed_at")
+
+  batch         Batch         @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  harvestAsset  HarvestAsset? @relation(fields: [harvestAssetId], references: [id], onDelete: Cascade)
+  harvestUsage  HarvestUsage? @relation(fields: [harvestUsageId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+  @@index([harvestAssetId])
+  @@index([harvestUsageId])
+  @@map("batch_consumptions")
+}
+
+// ---------- Harvests ----------
+
+model Harvest {
+  id           String        @id @default(cuid())
+  greenhouseId String        @map("greenhouse_id")
+  produceId    String?       @map("produce_id")
+  name         String
+  variety      String?
+  startDate    DateTime      @db.Date @map("start_date")
+  endDate      DateTime?     @db.Date @map("end_date")
+  status       HarvestStatus @default(LIVE)
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  greenhouse  Greenhouse        @relation(fields: [greenhouseId], references: [id])
+  produce     Produce?          @relation(fields: [produceId], references: [id])
+  assets      HarvestAsset[]
+  usages      HarvestUsage[]
+  sales       Sale[]
+  wageLines   WageEntryLine[]
+  tasks       Task[]
+
+  @@index([status, startDate])
+  @@map("harvests")
+}
+
+model HarvestAsset {
+  id         String   @id @default(cuid())
+  harvestId  String   @map("harvest_id")
+  itemId     String   @map("item_id")
+  qty        Decimal  @db.Decimal(18, 4)
+  date       DateTime @db.Date
+  reusable   Boolean  @default(false)
+  condition  String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  harvest      Harvest            @relation(fields: [harvestId], references: [id], onDelete: Cascade)
+  item         Item               @relation(fields: [itemId], references: [id])
+  consumptions BatchConsumption[]
+
+  @@index([harvestId])
+  @@map("harvest_assets")
+}
+
+model HarvestUsage {
+  id          String   @id @default(cuid())
+  harvestId   String   @map("harvest_id")
+  itemId      String   @map("item_id")
+  qty         Decimal  @db.Decimal(18, 4)
+  displayQty  String?  @map("display_qty")
+  date        DateTime @db.Date
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  harvest      Harvest            @relation(fields: [harvestId], references: [id], onDelete: Cascade)
+  item         Item               @relation(fields: [itemId], references: [id])
+  consumptions BatchConsumption[]
+
+  @@index([harvestId])
+  @@map("harvest_usages")
+}
+
+model Sale {
+  id          String    @id @default(cuid())
+  harvestId   String    @map("harvest_id")
+  produceId   String    @map("produce_id")
+  date        DateTime  @db.Date
+  grade       SaleGrade
+  weight      Decimal   @db.Decimal(18, 4)
+  pricePerKg  Decimal   @db.Decimal(18, 4) @map("price_per_kg")
+  amount      Decimal   @db.Decimal(18, 4)
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  harvest  Harvest @relation(fields: [harvestId], references: [id], onDelete: Cascade)
+  produce  Produce @relation(fields: [produceId], references: [id])
+
+  @@index([harvestId, date])
+  @@map("sales")
+}
+
+// ---------- Staff & Wages ----------
+
+model Staff {
+  id        String   @id @default(cuid())
+  name      String
+  role      String?
+  avatar    String?
+  photoPath String?  @map("photo_path")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  rates       StaffRate[]
+  wageEntries WageEntry[]
+  tasks       Task[]      @relation("AssignedTasks")
+
+  @@map("staff")
+}
+
+model StaffRate {
+  id            String   @id @default(cuid())
+  staffId       String   @map("staff_id")
+  rate          Decimal  @db.Decimal(18, 4)
+  effectiveFrom DateTime @db.Date @map("effective_from")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  staff Staff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([staffId, effectiveFrom])
+  @@map("staff_rates")
+}
+
+model WageEntry {
+  id         String   @id @default(cuid())
+  staffId    String   @map("staff_id")
+  date       DateTime @db.Date
+  totalHours Decimal  @db.Decimal(8, 2) @map("total_hours")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  staff Staff           @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  lines WageEntryLine[]
+
+  @@index([staffId, date])
+  @@map("wage_entries")
+}
+
+model WageEntryLine {
+  id           String  @id @default(cuid())
+  wageEntryId  String  @map("wage_entry_id")
+  harvestId    String? @map("harvest_id")
+  greenhouseId String? @map("greenhouse_id")
+  hours        Decimal @db.Decimal(8, 2)
+  task         String?
+
+  wageEntry  WageEntry   @relation(fields: [wageEntryId], references: [id], onDelete: Cascade)
+  harvest    Harvest?    @relation(fields: [harvestId], references: [id])
+  greenhouse Greenhouse? @relation(fields: [greenhouseId], references: [id])
+
+  @@index([wageEntryId])
+  @@index([harvestId])
+  @@map("wage_entry_lines")
+}
+
+// ---------- Tasks ----------
+
+model Task {
+  id              String       @id @default(cuid())
+  title           String
+  assigneeStaffId String?      @map("assignee_staff_id")
+  dueDate         DateTime     @db.Date @map("due_date")
+  priority        TaskPriority @default(MEDIUM)
+  status          TaskStatus   @default(PENDING)
+  harvestId       String?      @map("harvest_id")
+  notes           String?
+  description     String?
+  instructions    String?
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  assignee  Staff?        @relation("AssignedTasks", fields: [assigneeStaffId], references: [id])
+  harvest   Harvest?      @relation(fields: [harvestId], references: [id])
+  comments  TaskComment[]
+  photos    TaskPhoto[]
+
+  @@index([status, dueDate])
+  @@index([harvestId])
+  @@map("tasks")
+}
+
+model TaskComment {
+  id        String      @id @default(cuid())
+  taskId    String      @map("task_id")
+  author    String
+  text      String
+  role      CommentRole @default(STAFF)
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@map("task_comments")
+}
+
+model TaskPhoto {
+  id        String   @id @default(cuid())
+  taskId    String   @map("task_id")
+  path      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@map("task_photos")
+}
+
+// ---------- Knowledge ----------
+
+model NutrientRecipe {
+  id        String   @id @default(cuid())
+  name      String
+  crop      String?
+  stage     String?
+  ec        Decimal? @db.Decimal(8, 4)
+  ph        String?
+  notes     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  ingredients RecipeIngredient[]
+
+  @@map("nutrient_recipes")
+}
+
+model RecipeIngredient {
+  id       String @id @default(cuid())
+  recipeId String @map("recipe_id")
+  name     String
+  amount   String // Preserves the "7ml/L" / "0.5g/L" format
+
+  recipe NutrientRecipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@index([recipeId])
+  @@map("recipe_ingredients")
+}
+
+model Sop {
+  id             String    @id @default(cuid())
+  titleEn        String    @map("title_en")
+  titleId        String    @map("title_id")
+  descriptionEn  String?   @map("description_en")
+  descriptionId  String?   @map("description_id")
+  category       String?
+  version        Int       @default(1)
+  status         SopStatus @default(ACTIVE)
+  coverPhotoPath String?   @map("cover_photo_path")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  steps SopStep[]
+
+  @@index([status])
+  @@map("sops")
+}
+
+model SopStep {
+  id        String @id @default(cuid())
+  sopId     String @map("sop_id")
+  position  Int
+  bodyEn    String @map("body_en")
+  bodyId    String @map("body_id")
+  photoPath String? @map("photo_path")
+
+  sop Sop @relation(fields: [sopId], references: [id], onDelete: Cascade)
+
+  @@unique([sopId, position])
+  @@map("sop_steps")
+}
+
+model Video {
+  id            String    @id @default(cuid())
+  titleEn       String    @map("title_en")
+  titleId       String    @map("title_id")
+  category      String?
+  duration      String?
+  type          VideoType
+  url           String?
+  path          String?
+  thumbnailPath String?   @map("thumbnail_path")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@map("videos")
+}
+
+// ---------- Settings ----------
+
+model Setting {
+  id            String  @id @default("singleton") // single-row table
+  farmName      String  @default("Sparmanik Farm") @map("farm_name")
+  exchangeRate  Decimal @db.Decimal(12, 4) @default(10200) @map("exchange_rate")
+  defaultLocale String  @default("en") @map("default_locale")
+
+  @@map("settings")
+}
+
+model ExchangeRateHistory {
+  id            String   @id @default(cuid())
+  rate          Decimal  @db.Decimal(12, 4)
+  effectiveFrom DateTime @map("effective_from")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([effectiveFrom])
+  @@map("exchange_rate_history")
+}
+
+// ---------- Audit ----------
+
+model AuditAction {
+  id          String    @id @default(cuid())
+  type        String
+  entityType  String    @map("entity_type")
+  entityId    String    @map("entity_id")
+  userId      String?   @map("user_id")
+  description String
+  payload     Json
+  undone      Boolean   @default(false)
+  undoneAt    DateTime? @map("undone_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId, createdAt])
+  @@index([userId, createdAt])
+  @@index([undone, createdAt])
+  @@map("audit_actions")
+}
+
+// ---------- AI ----------
+
+model AiMessage {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  role      AiRole
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("ai_messages")
+}
+
+// ============================================================================
+// Legacy — to be dropped in Phase 8 cutover
+// ============================================================================
+
+model FarmDocument {
+  id        Int      @id @default(1)
+  state     Json     @default("{}")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("farm_document")
+}

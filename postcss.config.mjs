@@ -1,6 +1,7 @@
-/** Farm UI uses plain CSS; no PostCSS plugins required. */
 const config = {
-  plugins: {},
+  plugins: {
+    "@tailwindcss/postcss": {},
+  },
 };
 
 export default config;

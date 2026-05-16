@@ -1,0 +1,48 @@
+{
+  "common": {
+    "appName": "Sparmanik Farm",
+    "appTagline": "Cultivation OS",
+    "signIn": "Sign in",
+    "signOut": "Sign out",
+    "email": "Email",
+    "password": "Password",
+    "welcome": "Welcome back",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "search": "Search",
+    "loading": "Loading",
+    "error": "Something went wrong"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "calendar": "Calendar",
+    "sales": "Sales",
+    "harvest": "Harvest",
+    "tasks": "Tasks",
+    "inventory": "Inventory",
+    "recipes": "Nutrient Recipes",
+    "sops": "SOPs",
+    "videos": "Videos",
+    "suppliers": "Suppliers",
+    "staff": "Staff",
+    "financials": "Financials",
+    "settings": "Settings",
+    "askAi": "Ask AI"
+  },
+  "topbar": {
+    "rateLabel": "Rate",
+    "rateUnit": "IDR/AUD",
+    "alerts": "Alerts",
+    "history": "History",
+    "noAlerts": "No alerts"
+  },
+  "signin": {
+    "title": "Sign in to Sparmanik Farm",
+    "subtitle": "Cultivation OS for your farm",
+    "submit": "Sign in",
+    "invalid": "Invalid email or password"
+  }
+}
