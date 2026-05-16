@@ -1,5 +1,6 @@
 import { prisma } from "@/server/prisma";
 import { auth } from "@/auth";
+import { getActiveOrgId } from "@/server/org";
 import { availableProviders } from "@/server/ai";
 import { Card, CardContent } from "@/components/ui/card";
 import { AskAiShell, type Attachment, type ConversationSummary } from "@/app/(app)/ask-ai/ask-ai-shell";
@@ -69,7 +70,13 @@ export default async function AskAiPage({
     } else if (conversations.length > 0) {
       activeConversationId = conversations[0].id;
     } else {
-      const fresh = await prisma.aiConversation.create({ data: { userId } });
+      // Stamp organizationId explicitly: the prisma extension reads from the
+      // activeOrgId cookie which may not be set on first render. getActiveOrgId
+      // falls back to the user's first membership.
+      const activeOrgId = await getActiveOrgId();
+      const fresh = await prisma.aiConversation.create({
+        data: { userId, organizationId: activeOrgId ?? undefined },
+      });
       activeConversationId = fresh.id;
       conversations.unshift({
         id: fresh.id,
