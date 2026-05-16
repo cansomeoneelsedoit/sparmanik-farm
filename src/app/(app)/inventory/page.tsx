@@ -125,8 +125,13 @@ export default async function InventoryPage({
                   return (
                     <TableRow key={r.id}>
                       <TableCell>
-                        <Link href={`/inventory/${r.id}`} className="font-medium hover:underline">
-                          {r.name}
+                        <Link
+                          href={`/inventory/${r.id}`}
+                          className="font-medium text-foreground hover:underline"
+                        >
+                          {r.name?.trim() || (
+                            <span className="italic text-muted-foreground">Untitled item</span>
+                          )}
                         </Link>
                       </TableCell>
                       <TableCell className="text-muted-foreground">{r.category?.name ?? "—"}</TableCell>

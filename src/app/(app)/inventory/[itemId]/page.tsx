@@ -70,7 +70,11 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
           <Button asChild variant="ghost" size="sm">
             <Link href="/inventory"><ArrowLeft className="h-4 w-4" /> Inventory</Link>
           </Button>
-          <h1 className="font-serif text-3xl">{item.name}</h1>
+          <h1 className="font-serif text-3xl">
+            {item.name?.trim() || (
+              <span className="italic text-muted-foreground">Untitled item</span>
+            )}
+          </h1>
         </div>
         <div className="flex gap-2">
           <ReceiveStockDialog
