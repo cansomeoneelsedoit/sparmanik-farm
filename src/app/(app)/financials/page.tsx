@@ -12,21 +12,22 @@ export default async function FinancialsPage() {
   let revenue = 0;
   let usageCost = 0;
   let labourCost = 0;
-  let assetCost = 0;
+  let depreciationCost = 0;
   for (const p of pls) {
     revenue += Number(p.pl.revenue);
     usageCost += Number(p.pl.usageCost);
     labourCost += Number(p.pl.labourCost);
-    assetCost += Number(p.pl.assetCost);
+    depreciationCost += Number(p.pl.depreciationCost);
   }
-  const net = revenue - usageCost - labourCost - assetCost;
+  const net = revenue - usageCost - labourCost - depreciationCost;
 
   return (
     <div className="space-y-6">
       <h1 className="font-serif text-3xl">Financials</h1>
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-5">
         <Stat label="Revenue" value={revenue.toFixed(4)} colour="green" />
         <Stat label="Usage expense" value={usageCost.toFixed(4)} colour="red" />
+        <Stat label="Depreciation" value={depreciationCost.toFixed(4)} colour="red" />
         <Stat label="Labour expense" value={labourCost.toFixed(4)} colour="red" />
         <Stat label="Net P&L" value={net.toFixed(4)} colour={net >= 0 ? "green" : "red"} />
       </div>

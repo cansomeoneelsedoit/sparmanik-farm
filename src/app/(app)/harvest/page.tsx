@@ -60,7 +60,7 @@ export default async function HarvestPage() {
                   </CardHeader>
                   <CardContent className="space-y-2 text-sm">
                     <Stat label="Revenue" value={<Money value={h.pl.revenue} />} positive />
-                    <Stat label="Expenses" value={<Money value={String(Number(h.pl.usageCost) + Number(h.pl.labourCost) + Number(h.pl.assetCost))} />} />
+                    <Stat label="Expenses" value={<Money value={String(Number(h.pl.usageCost) + Number(h.pl.labourCost) + Number(h.pl.depreciationCost))} />} />
                     <Stat label="Net" value={<Money value={h.pl.netProfit} />} highlight />
                   </CardContent>
                 </Card>

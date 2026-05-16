@@ -4,6 +4,15 @@ export type FifoConsumption = {
   batchId: string;
   qty: string;
   unitCost: string;
+  // --- Depreciation metadata snapshot from the source batch ---
+  // batchMaxUses is always present (defaults to 1 for non-depreciable batches).
+  // batchUseCountBefore is the batch's useCount BEFORE this consumption — the
+  // caller increments it on install, and a HarvestAsset's snapshot useCount
+  // becomes batchUseCountBefore + 1.
+  // amortisedCostPerUse is null when maxUses = 1.
+  batchMaxUses: number;
+  batchUseCountBefore: number;
+  amortisedCostPerUse: string | null;
 };
 
 export type FifoResult = {
@@ -13,8 +22,14 @@ export type FifoResult = {
 
 /**
  * Consume `qtyNeeded` of `itemId` using FIFO, drawing from the oldest batches
- * with remaining quantity. Returns a list of {batchId, qty, unitCost} entries
- * which the caller persists into BatchConsumption rows.
+ * with remaining quantity. Returns a list of {batchId, qty, unitCost, ...}
+ * entries which the caller persists into BatchConsumption rows.
+ *
+ * Each entry also carries the source batch's depreciation snapshot so the
+ * caller can:
+ *   - decide whether the install creates a depreciable HarvestAsset
+ *   - compute amortised_charge = Σ(qty * amortisedCostPerUse)
+ *   - increment batch.useCount on install
  *
  * Throws if there is insufficient stock.
  */
@@ -53,6 +68,11 @@ export async function consumeFifo(
       batchId: batch.id,
       qty: take.toFixed(4),
       unitCost: unitCost.toFixed(4),
+      batchMaxUses: batch.maxUses ?? 1,
+      batchUseCountBefore: batch.useCount ?? 0,
+      amortisedCostPerUse: batch.amortisedCostPerUse
+        ? new Decimal(batch.amortisedCostPerUse).toFixed(4)
+        : null,
     });
     totalCost = totalCost.plus(lineCost);
     remainingNeeded = remainingNeeded.minus(take);

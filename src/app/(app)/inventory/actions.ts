@@ -108,6 +108,10 @@ const receiveStockSchema = z.object({
   qty: z.string(),
   price: z.string(),
   exchangeRate: z.string(),
+  // maxUses=1 (default) means non-depreciable — existing behaviour preserved.
+  // maxUses>1 enables depreciation: amortisedCostPerUse = price / maxUses,
+  // locked at receive time, never recalculated for this batch.
+  maxUses: z.coerce.number().int().min(1).default(1),
 });
 
 export async function receiveStock(input: unknown): Promise<ActionResult<{ batchId: string }>> {
@@ -116,6 +120,9 @@ export async function receiveStock(input: unknown): Promise<ActionResult<{ batch
     return { ok: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
   }
   const uid = await userId();
+  const price = new Decimal(parsed.data.price);
+  const amortisedCostPerUse =
+    parsed.data.maxUses > 1 ? price.div(parsed.data.maxUses) : null;
   const result = await prisma.$transaction(async (tx: TransactionClient) => {
     const batch = await tx.batch.create({
       data: {
@@ -123,8 +130,11 @@ export async function receiveStock(input: unknown): Promise<ActionResult<{ batch
         date: new Date(parsed.data.date),
         supplierId: parsed.data.supplierId || null,
         qty: new Decimal(parsed.data.qty),
-        price: new Decimal(parsed.data.price),
+        price,
         exchangeRate: new Decimal(parsed.data.exchangeRate),
+        maxUses: parsed.data.maxUses,
+        useCount: 0,
+        amortisedCostPerUse: amortisedCostPerUse,
       },
       include: { item: { select: { name: true } } },
     });
@@ -134,7 +144,12 @@ export async function receiveStock(input: unknown): Promise<ActionResult<{ batch
       entityId: batch.id,
       description: `Received ${parsed.data.qty} of ${batch.item.name}`,
       userId: uid,
-      payload: { batchId: batch.id, itemId: batch.itemId, qty: parsed.data.qty },
+      payload: {
+        batchId: batch.id,
+        itemId: batch.itemId,
+        qty: parsed.data.qty,
+        maxUses: parsed.data.maxUses,
+      },
     });
     return batch;
   });

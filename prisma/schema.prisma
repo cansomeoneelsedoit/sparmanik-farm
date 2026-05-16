@@ -193,14 +193,25 @@ model Item {
 }
 
 model Batch {
-  id            String   @id @default(cuid())
-  itemId        String   @map("item_id")
-  supplierId    String?  @map("supplier_id")
-  date          DateTime @db.Date
-  qty           Decimal  @db.Decimal(18, 4)
-  price         Decimal  @db.Decimal(18, 4)
-  exchangeRate  Decimal  @db.Decimal(12, 4) @map("exchange_rate")
-  createdAt     DateTime @default(now()) @map("created_at")
+  id                    String   @id @default(cuid())
+  itemId                String   @map("item_id")
+  supplierId            String?  @map("supplier_id")
+  date                  DateTime @db.Date
+  qty                   Decimal  @db.Decimal(18, 4)
+  price                 Decimal  @db.Decimal(18, 4)
+  exchangeRate          Decimal  @db.Decimal(12, 4) @map("exchange_rate")
+  // --- Depreciation fields (cocopeat / rockwool / grow bags etc) ---
+  // maxUses = 1 means the batch is NOT depreciable (existing behaviour).
+  // maxUses > 1 means each harvest gets charged amortisedCostPerUse * qty,
+  // and useCount increments per install. See docs in `src/server/fifo.ts`.
+  maxUses               Int      @default(1) @map("max_uses")
+  useCount              Int      @default(0) @map("use_count")
+  amortisedCostPerUse   Decimal? @db.Decimal(18, 4) @map("amortised_cost_per_use")
+  // Returned batches were created at end-harvest with price=0 because the
+  // original purchase cost is already on Business P&L. The amortised charge
+  // still follows the batch via amortisedCostPerUse.
+  returned              Boolean  @default(false)
+  createdAt             DateTime @default(now()) @map("created_at")
 
   item          Item               @relation(fields: [itemId], references: [id], onDelete: Cascade)
   supplier      Supplier?          @relation(fields: [supplierId], references: [id])
@@ -257,14 +268,25 @@ model Harvest {
 }
 
 model HarvestAsset {
-  id         String   @id @default(cuid())
-  harvestId  String   @map("harvest_id")
-  itemId     String   @map("item_id")
-  qty        Decimal  @db.Decimal(18, 4)
-  date       DateTime @db.Date
-  reusable   Boolean  @default(false)
-  condition  String?
-  createdAt  DateTime @default(now()) @map("created_at")
+  id              String   @id @default(cuid())
+  harvestId       String   @map("harvest_id")
+  itemId          String   @map("item_id")
+  qty             Decimal  @db.Decimal(18, 4)
+  date            DateTime @db.Date
+  reusable        Boolean  @default(false)
+  condition       String?
+  // --- Depreciation snapshot from the source batch(es) at install time ---
+  // depreciable = true when at least one consumed batch has maxUses > 1.
+  // amortisedCharge is what this harvest's P&L is charged (NOT fifo_cost).
+  // useCount / maxUses are snapshotted from the dominant source batch for
+  // display ("use N of M"). End-harvest decisions use the live BatchConsumption
+  // → Batch chain rather than these snapshots.
+  depreciable     Boolean  @default(false)
+  amortisedCharge Decimal? @db.Decimal(18, 4) @map("amortised_charge")
+  maxUses         Int      @default(1) @map("max_uses")
+  useCount        Int      @default(0) @map("use_count")
+  discarded       Boolean  @default(false)
+  createdAt       DateTime @default(now()) @map("created_at")
 
   harvest      Harvest            @relation(fields: [harvestId], references: [id], onDelete: Cascade)
   item         Item               @relation(fields: [itemId], references: [id])

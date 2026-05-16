@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 
 import { prisma } from "@/server/prisma";
 import { Decimal } from "@/server/decimal";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -50,12 +51,22 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
     price: Decimal;
     consumptions: { qty: Decimal }[];
     supplier: { name: string } | null;
+    maxUses: number;
+    useCount: number;
+    amortisedCostPerUse: Decimal | null;
+    returned: boolean;
   };
 
   const batchesWithRemaining = (item.batches as BatchRow[]).map((b) => {
     const consumed = b.consumptions.reduce((s: Decimal, c) => s.plus(c.qty), new Decimal(0));
     const remaining = new Decimal(b.qty).minus(consumed);
-    return { ...b, consumed, remaining };
+    const depreciable = b.maxUses > 1;
+    const remainingUses = Math.max(0, b.maxUses - b.useCount);
+    const unrecoveredValue =
+      depreciable && b.amortisedCostPerUse
+        ? new Decimal(b.amortisedCostPerUse).times(remainingUses).times(remaining)
+        : new Decimal(0);
+    return { ...b, consumed, remaining, depreciable, remainingUses, unrecoveredValue };
   });
 
   const totalStock = batchesWithRemaining.reduce((s: Decimal, b) => s.plus(b.remaining), new Decimal(0));
@@ -79,6 +90,8 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
         <div className="flex gap-2">
           <ReceiveStockDialog
             itemId={item.id}
+            itemUnit={item.unit}
+            itemReusable={item.reusable}
             suppliers={suppliers.map((s: { id: string; name: string }) => ({ id: s.id, name: s.name }))}
             defaultSupplierId={item.defaultSupplierId ?? undefined}
           />
@@ -134,22 +147,49 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
                   <TableHead className="text-right">Qty</TableHead>
                   <TableHead className="text-right">Remaining</TableHead>
                   <TableHead className="text-right">Unit price</TableHead>
-                  <TableHead className="text-right">Batch value</TableHead>
+                  <TableHead>Uses</TableHead>
+                  <TableHead className="text-right">Unrecovered</TableHead>
+                  <TableHead>Status</TableHead>
                   <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {batchesWithRemaining.map((b) => (
-                  <TableRow key={b.id}>
-                    <TableCell className="text-muted-foreground">{b.date.toISOString().slice(0, 10)}</TableCell>
-                    <TableCell>{b.supplier?.name ?? "—"}</TableCell>
-                    <TableCell className="text-right">{Number(b.qty)} {item.unit}</TableCell>
-                    <TableCell className="text-right">{b.remaining.toFixed(0)} {item.unit}</TableCell>
-                    <TableCell className="text-right"><Money value={b.price.toFixed(4)} /></TableCell>
-                    <TableCell className="text-right font-medium"><Money value={b.remaining.times(b.price).toFixed(4)} /></TableCell>
-                    <TableCell className="p-0"><DeleteBatchButton id={b.id} /></TableCell>
-                  </TableRow>
-                ))}
+                {batchesWithRemaining.map((b) => {
+                  const fullyDepreciated = b.depreciable && b.useCount >= b.maxUses;
+                  const statusLabel = !b.depreciable
+                    ? b.returned
+                      ? "Returned"
+                      : "Standard"
+                    : fullyDepreciated
+                      ? "Fully depreciated"
+                      : b.useCount === 0
+                        ? "New"
+                        : `In use (${b.useCount} of ${b.maxUses})`;
+                  return (
+                    <TableRow key={b.id}>
+                      <TableCell className="text-muted-foreground">{b.date.toISOString().slice(0, 10)}</TableCell>
+                      <TableCell>{b.supplier?.name ?? "—"}</TableCell>
+                      <TableCell className="text-right">{Number(b.qty)} {item.unit}</TableCell>
+                      <TableCell className="text-right">{b.remaining.toFixed(0)} {item.unit}</TableCell>
+                      <TableCell className="text-right">
+                        <Money value={b.price.toFixed(4)} />
+                        {b.returned ? <span className="ml-1 text-xs text-muted-foreground">(returned)</span> : null}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {b.depreciable ? `${b.useCount} / ${b.maxUses}` : "—"}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {b.depreciable ? <Money value={b.unrecoveredValue.toFixed(4)} /> : "—"}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={fullyDepreciated ? "destructive" : b.depreciable ? "outline" : "secondary"}>
+                          {statusLabel}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="p-0"><DeleteBatchButton id={b.id} /></TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}

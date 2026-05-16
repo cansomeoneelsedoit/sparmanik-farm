@@ -143,12 +143,98 @@ export async function deleteHarvestAsset(id: string): Promise<ActionResult> {
 
 export async function endHarvest(harvestId: string): Promise<ActionResult> {
   const userId = await uid();
+  type ConsumptionWithBatch = {
+    id: string;
+    qty: Decimal;
+    batch: {
+      id: string;
+      itemId: string;
+      supplierId: string | null;
+      exchangeRate: Decimal;
+      maxUses: number;
+      useCount: number;
+      amortisedCostPerUse: Decimal | null;
+    };
+  };
+  type AssetRow = {
+    id: string;
+    depreciable: boolean;
+    consumptions: ConsumptionWithBatch[];
+  };
+  const summary: { returned: number; discarded: number } = { returned: 0, discarded: 0 };
   await prisma.$transaction(async (tx: TransactionClient) => {
     const h = await tx.harvest.findUnique({ where: { id: harvestId } });
     if (!h) throw new Error("Harvest not found");
+
+    // --- Depreciable asset lifecycle ---
+    // For each depreciable HarvestAsset on this harvest, look at its source
+    // BatchConsumption rows. For each source batch:
+    //   - if useCount < maxUses → return as a new zero-cost batch (price=0,
+    //     same maxUses/useCount/amortisedCostPerUse, returned=true).
+    //   - if useCount >= maxUses → don't return; the asset gets discarded=true.
+    const assets = (await tx.harvestAsset.findMany({
+      where: { harvestId, depreciable: true },
+      include: {
+        consumptions: {
+          include: {
+            batch: {
+              select: {
+                id: true,
+                itemId: true,
+                supplierId: true,
+                exchangeRate: true,
+                maxUses: true,
+                useCount: true,
+                amortisedCostPerUse: true,
+              },
+            },
+          },
+        },
+      },
+    })) as AssetRow[];
+
+    const today = new Date();
+    for (const asset of assets) {
+      let anyDiscarded = false;
+      let allDiscarded = asset.consumptions.length > 0;
+      for (const c of asset.consumptions) {
+        const b = c.batch;
+        if (b.useCount < b.maxUses) {
+          // Return this slice as a new zero-cost batch — preserves the
+          // amortisation schedule so future harvests still get charged a fair
+          // share, even though no further cash leaves the business.
+          await tx.batch.create({
+            data: {
+              itemId: b.itemId,
+              supplierId: b.supplierId,
+              date: today,
+              qty: new Decimal(c.qty),
+              price: new Decimal(0),
+              exchangeRate: b.exchangeRate,
+              maxUses: b.maxUses,
+              useCount: b.useCount,
+              amortisedCostPerUse: b.amortisedCostPerUse,
+              returned: true,
+            },
+          });
+          summary.returned += Number(c.qty);
+          allDiscarded = false;
+        } else {
+          anyDiscarded = true;
+          summary.discarded += Number(c.qty);
+        }
+      }
+      if (allDiscarded || anyDiscarded) {
+        await tx.harvestAsset.update({
+          where: { id: asset.id },
+          data: { discarded: allDiscarded },
+        });
+      }
+    }
+
     await tx.harvest.update({
       where: { id: harvestId },
-      data: { status: "CLOSED", endDate: new Date() },
+      data: { status: "CLOSED", endDate: today },
     });
     await recordAction(tx, {
       type: "harvest.end",
@@ -156,11 +242,15 @@ export async function endHarvest(harvestId: string): Promise<ActionResult> {
       entityId: harvestId,
       description: `Ended harvest: ${h.name}`,
       userId,
-      payload: { name: h.name },
+      payload: {
+        name: h.name,
+        depreciation: summary,
+      },
     });
   });
   revalidatePath("/harvest");
   revalidatePath(`/harvest/${harvestId}`);
+  revalidatePath("/inventory");
   return { ok: true };
 }
 
@@ -231,6 +321,30 @@ export async function installHarvestAsset(input: unknown): Promise<ActionResult>
   const userId = await uid();
   try {
     await prisma.$transaction(async (tx: TransactionClient) => {
+      const { consumed } = await consumeFifo(tx, parsed.data.itemId, parsed.data.qty);
+
+      // --- Depreciation snapshot ---
+      // depreciable = true if ANY consumed slice came from a maxUses>1 batch.
+      // amortisedCharge sums the per-slice contribution (qty * batch.amortisedCostPerUse).
+      // useCount/maxUses snapshot from the most-used source batch for display ("use N of M").
+      let depreciable = false;
+      let amortisedCharge = new Decimal(0);
+      let snapshotUseCount = 0;
+      let snapshotMaxUses = 1;
+      for (const c of consumed) {
+        if (c.batchMaxUses > 1 && c.amortisedCostPerUse) {
+          depreciable = true;
+          amortisedCharge = amortisedCharge.plus(
+            new Decimal(c.qty).times(c.amortisedCostPerUse),
+          );
+          const next = c.batchUseCountBefore + 1;
+          if (next > snapshotUseCount) {
+            snapshotUseCount = next;
+            snapshotMaxUses = c.batchMaxUses;
+          }
+        }
+      }
+
       const asset = await tx.harvestAsset.create({
         data: {
           harvestId: parsed.data.harvestId,
@@ -239,10 +353,14 @@ export async function installHarvestAsset(input: unknown): Promise<ActionResult>
           date: new Date(parsed.data.date),
           reusable: parsed.data.reusable,
           condition: parsed.data.condition || null,
+          depreciable,
+          amortisedCharge: depreciable ? amortisedCharge : null,
+          useCount: snapshotUseCount,
+          maxUses: snapshotMaxUses,
         },
       });
-      const { consumed } = await consumeFifo(tx, parsed.data.itemId, parsed.data.qty);
       const consumptionIds: string[] = [];
+      const touchedBatchIds = new Set<string>();
       for (const c of consumed) {
         const cc = await tx.batchConsumption.create({
           data: {
@@ -253,6 +371,15 @@ export async function installHarvestAsset(input: unknown): Promise<ActionResult>
           },
         });
         consumptionIds.push(cc.id);
+        // Increment useCount once per source batch so a 5+5 split across two
+        // depreciable batches counts as one "use" for each batch.
+        if (c.batchMaxUses > 1 && !touchedBatchIds.has(c.batchId)) {
+          touchedBatchIds.add(c.batchId);
+          await tx.batch.update({
+            where: { id: c.batchId },
+            data: { useCount: { increment: 1 } },
+          });
+        }
       }
       await recordAction(tx, {
         type: "harvest.install_asset",

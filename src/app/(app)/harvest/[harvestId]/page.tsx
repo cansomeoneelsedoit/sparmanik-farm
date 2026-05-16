@@ -18,6 +18,10 @@ import {
 import { Money } from "@/components/shared/money";
 import { Decimal } from "@/server/decimal";
 import { RecordUsageDialog } from "@/app/(app)/harvest/[harvestId]/record-usage-dialog";
+import {
+  InstallAssetDialog,
+  type InstallAssetItem,
+} from "@/app/(app)/harvest/[harvestId]/install-asset-dialog";
 import { LogSaleDialog } from "@/app/(app)/harvest/[harvestId]/log-sale-dialog";
 import { EndHarvestButton } from "@/app/(app)/harvest/[harvestId]/end-harvest-button";
 import { StartHarvestDialog } from "@/app/(app)/harvest/start-harvest-dialog";
@@ -42,7 +46,15 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
         assets: { orderBy: { date: "desc" }, include: { item: true, consumptions: true } },
       },
     }),
-    prisma.item.findMany({ orderBy: { name: "asc" } }),
+    prisma.item.findMany({
+      orderBy: { name: "asc" },
+      include: {
+        batches: {
+          orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+          include: { consumptions: { select: { qty: true } } },
+        },
+      },
+    }),
     prisma.produce.findMany({ orderBy: { name: "asc" } }),
     prisma.greenhouse.findMany({ orderBy: { name: "asc" } }),
   ]);
@@ -50,7 +62,9 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
   if (!harvest) notFound();
 
   const pl = await getHarvestPL(harvest.id);
-  const totalExpenses = (Number(pl.usageCost) + Number(pl.labourCost) + Number(pl.assetCost)).toFixed(4);
+  const totalExpenses = (
+    Number(pl.usageCost) + Number(pl.labourCost) + Number(pl.depreciationCost)
+  ).toFixed(4);
 
   // Labour lines for this harvest — resolves rates via effective-from history
   const labourLines = await prisma.wageEntryLine.findMany({
@@ -90,6 +104,79 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
     return { id: l.id, date: l.wageEntry.date, name: l.wageEntry.staff.name, hours: new Decimal(l.hours), rate, cost, task: l.task };
   });
 
+  type AssetRow = {
+    id: string;
+    date: Date;
+    item: { name: string; unit: string };
+    qty: Decimal;
+    reusable: boolean;
+    condition: string | null;
+    depreciable: boolean;
+    amortisedCharge: Decimal | null;
+    maxUses: number;
+    useCount: number;
+    discarded: boolean;
+    consumptions: { qty: Decimal; unitCost: Decimal }[];
+  };
+  const assetRows = (harvest.assets as AssetRow[]).map((a) => {
+    const fifoCost = a.consumptions.reduce(
+      (s: Decimal, c) => s.plus(new Decimal(c.qty).times(c.unitCost)),
+      new Decimal(0),
+    );
+    return { ...a, fifoCost };
+  });
+  const depreciableAssets = assetRows.filter((a) => a.depreciable);
+  const fixedAssets = assetRows.filter((a) => !a.depreciable);
+
+  // --- Build the item list passed to InstallAssetDialog ---
+  // For each item we compute total available stock and surface the FIFO-top
+  // batch's depreciation snapshot so the dialog can render the per-use charge
+  // preview before the user submits.
+  type ItemWithBatches = {
+    id: string;
+    name: string;
+    unit: string;
+    batches: {
+      id: string;
+      qty: Decimal;
+      maxUses: number;
+      useCount: number;
+      amortisedCostPerUse: Decimal | null;
+      consumptions: { qty: Decimal }[];
+    }[];
+  };
+  const installItems: InstallAssetItem[] = (items as ItemWithBatches[])
+    .map((i) => {
+      let available = new Decimal(0);
+      let topBatch: InstallAssetItem["topBatch"] = null;
+      for (const b of i.batches) {
+        const consumed = b.consumptions.reduce(
+          (s: Decimal, c) => s.plus(c.qty),
+          new Decimal(0),
+        );
+        const rem = new Decimal(b.qty).minus(consumed);
+        if (rem.lte(0)) continue;
+        if (!topBatch) {
+          topBatch = {
+            maxUses: b.maxUses ?? 1,
+            useCount: b.useCount ?? 0,
+            amortisedCostPerUse: b.amortisedCostPerUse
+              ? new Decimal(b.amortisedCostPerUse).toFixed(4)
+              : null,
+          };
+        }
+        available = available.plus(rem);
+      }
+      return {
+        id: i.id,
+        name: i.name,
+        unit: i.unit,
+        available: Number(available),
+        topBatch,
+      };
+    })
+    .filter((i) => i.available > 0);
+
   return (
     <div className="space-y-6">
       <header className="flex items-center justify-between">
@@ -106,6 +193,10 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
           <RecordUsageDialog
             harvestId={harvest.id}
             items={items.map((i: { id: string; name: string; unit: string }) => ({ id: i.id, name: i.name, unit: i.unit }))}
+          />
+          <InstallAssetDialog
+            harvestId={harvest.id}
+            items={installItems}
           />
           <LogSaleDialog
             harvestId={harvest.id}
@@ -137,9 +228,10 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
         {harvest.endDate ? ` → ${harvest.endDate.toISOString().slice(0, 10)}` : ""}
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-5">
         <StatCard label="Revenue" value={<Money value={pl.revenue} />} accent="green" />
         <StatCard label="Usage cost" value={<Money value={pl.usageCost} />} accent="red" />
+        <StatCard label="Depreciation" value={<Money value={pl.depreciationCost} />} accent="red" />
         <StatCard label="Labour cost" value={<Money value={pl.labourCost} />} accent="red" />
         <StatCard label="Net profit" value={<Money value={pl.netProfit} />} accent={Number(pl.netProfit) >= 0 ? "green" : "red"} />
       </div>
@@ -252,10 +344,51 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
       </Card>
 
       <Card>
-        <CardHeader><CardTitle>Fixed assets</CardTitle></CardHeader>
+        <CardHeader><CardTitle>Depreciable assets (cocopeat, rockwool, grow bags…)</CardTitle></CardHeader>
         <CardContent className="p-0">
-          {harvest.assets.length === 0 ? (
-            <div className="p-12 text-center text-muted-foreground">No assets installed for this harvest.</div>
+          {depreciableAssets.length === 0 ? (
+            <div className="p-12 text-center text-muted-foreground">No depreciable assets on this harvest.</div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Item</TableHead>
+                  <TableHead className="text-right">Qty</TableHead>
+                  <TableHead>Use</TableHead>
+                  <TableHead className="text-right">Charge this harvest</TableHead>
+                  <TableHead className="text-right">Full cost</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {depreciableAssets.map((a) => (
+                  <TableRow key={a.id}>
+                    <TableCell className="text-muted-foreground">{a.date.toISOString().slice(0, 10)}</TableCell>
+                    <TableCell>{a.item.name}</TableCell>
+                    <TableCell className="text-right">{Number(a.qty)} {a.item.unit}</TableCell>
+                    <TableCell className="text-muted-foreground">{`use ${a.useCount} of ${a.maxUses}`}</TableCell>
+                    <TableCell className="text-right"><Money value={(a.amortisedCharge ?? new Decimal(0)).toFixed(4)} /></TableCell>
+                    <TableCell className="text-right text-muted-foreground"><Money value={a.fifoCost.toFixed(4)} /></TableCell>
+                    <TableCell>
+                      {a.discarded ? <Badge variant="destructive">Fully depreciated</Badge> : <Badge variant="outline">In use</Badge>}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+          <p className="border-t bg-muted/30 p-3 text-xs text-muted-foreground">
+            Each harvest is charged its share (<em>amortised charge</em>), not the full purchase cost. The full price already hit Business P&amp;L on purchase day.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Fixed assets (ledger only — not in P&amp;L)</CardTitle></CardHeader>
+        <CardContent className="p-0">
+          {fixedAssets.length === 0 ? (
+            <div className="p-12 text-center text-muted-foreground">No fixed assets installed for this harvest.</div>
           ) : (
             <Table>
               <TableHeader>
@@ -265,23 +398,25 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                   <TableHead className="text-right">Qty</TableHead>
                   <TableHead>Reusable</TableHead>
                   <TableHead>Condition</TableHead>
+                  <TableHead className="text-right">FIFO cost</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(harvest.assets as { id: string; date: Date; item: { name: string; unit: string }; qty: Decimal; reusable: boolean; condition: string | null }[]).map((a) => (
+                {fixedAssets.map((a) => (
                   <TableRow key={a.id}>
                     <TableCell className="text-muted-foreground">{a.date.toISOString().slice(0, 10)}</TableCell>
                     <TableCell>{a.item.name}</TableCell>
                     <TableCell className="text-right">{Number(a.qty)} {a.item.unit}</TableCell>
                     <TableCell>{a.reusable ? <Badge variant="outline">Reusable</Badge> : "—"}</TableCell>
                     <TableCell className="text-muted-foreground">{a.condition ?? "—"}</TableCell>
+                    <TableCell className="text-right text-muted-foreground"><Money value={a.fifoCost.toFixed(4)} /></TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           )}
           <p className="border-t bg-muted/30 p-3 text-xs text-muted-foreground">
-            Fixed assets (reusable installs) are tracked here but excluded from the P&amp;L above.
+            Fixed-asset installs (drippers, frames) are tracked here but excluded from the P&amp;L.
           </p>
         </CardContent>
       </Card>
@@ -308,7 +443,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
           </section>
 
           <section>
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Expenses</h3>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Expenses — Usage</h3>
             <ul className="space-y-1">
               {(harvest.usages as { id: string; date: Date; item: { name: string }; displayQty: string | null; consumptions: { qty: Decimal; unitCost: Decimal }[] }[]).map((u) => {
                 const cost = u.consumptions.reduce((s: Decimal, c) => s.plus(new Decimal(c.qty).times(c.unitCost)), new Decimal(0));
@@ -319,6 +454,28 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                   </li>
                 );
               })}
+            </ul>
+          </section>
+
+          {depreciableAssets.length > 0 ? (
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Expenses — Depreciation (amortised assets)</h3>
+              <ul className="space-y-1">
+                {depreciableAssets.map((a) => (
+                  <li key={a.id} className="flex items-center justify-between">
+                    <span className="text-muted-foreground">
+                      {a.date.toISOString().slice(0, 10)} — {a.item.name} × {Number(a.qty)} {a.item.unit} (use {a.useCount} of {a.maxUses})
+                    </span>
+                    <span className="text-red-600"><Money value={(a.amortisedCharge ?? new Decimal(0)).toFixed(4)} /></span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
+          <section>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Expenses — Labour</h3>
+            <ul className="space-y-1">
               {labourRows.map((l) => (
                 <li key={l.id} className="flex items-center justify-between">
                   <span className="text-muted-foreground">{l.date.toISOString().slice(0, 10)} — {l.name} ({l.hours.toFixed(2)}h @ <Money value={l.rate.toFixed(4)} />){l.task ? ` — ${l.task}` : ""}</span>
