@@ -99,12 +99,18 @@ prisma/
 
 ## Schema highlights
 
-13 domain models + Auth.js tables. See `prisma/schema.prisma`. Key concepts:
+~17 domain models + Auth.js tables + AI conversation. See `prisma/schema.prisma`. Key concepts:
 
-- **FIFO inventory** via `Batch` + `BatchConsumption`. Remaining = `qty − Σ(consumptions.qty)`. **No denormalised `remaining` column** — recompute on read. The legacy app had this denormalised and its undo was buggy as a result.
-- **Money** is `Decimal(18, 4)`. **Always serialize to string** before passing across the RSC → client boundary. Use `serializeMoney()` in `src/server/money.ts`. Passing a raw `Decimal` to a Client Component throws "Only plain objects can be passed to Client Components from Server Components" — this is the most common error.
+- **FIFO inventory** via `Batch` + `BatchConsumption`. Remaining = `qty − Σ(consumptions.qty)`. **No denormalised `remaining` column** — recompute on read.
+- **Depreciable assets** (cocopeat, rockwool, grow bags): `Batch.maxUses / useCount / amortisedCostPerUse / returned`. Each harvest gets charged `amortisedCharge = qty × amortisedCostPerUse`; at end-harvest, batches with remaining uses return as `price=0` batches (same `amortisedCostPerUse`) so future harvests still get charged a fair share without further cash leaving the business. Invariant: `Σ(amortised_charge) + (remaining_uses × cost_per_use × remaining_qty) = original_price`. See `src/server/fifo.ts`, `src/server/pl.ts`.
+- **Multi-produce harvests**: `HarvestProduce` join table. A harvest can grow multiple crops simultaneously. `Harvest.produceId` stays as the "primary" for backward compat; canonical list is `harvest.produces`.
+- **Money** is `Decimal(18, 4)`. **Always serialize to string** before passing across the RSC → client boundary. Use `serializeMoney()` in `src/server/money.ts`. Passing a raw `Decimal` to a Client Component throws — most common error.
 - **Audit log** is generic: `AuditAction { type, entityType, entityId, payload (Json), undone }`. Per-type undo handlers registered in `src/server/audit-handlers.ts`.
-- **Staff rates** are versioned (`StaffRate.effectiveFrom`). Use the most-recent `effectiveFrom ≤ date` for wage cost calculations.
+- **Staff rates** are versioned (`StaffRate.effectiveFrom`). Use the most-recent `effectiveFrom ≤ date`.
+- **Wages split**: `WageEntry.totalHours` is total per day per staff; `WageEntryLine` allocates hours per `harvestId` (null = general farm work). Harvest P&L charges only allocated lines; Financials charges every line.
+- **Two-tier auth**: `User.role` is `USER` or `SUPERUSER`. Only SUPERUSER sees `/admin/users` (create / edit / reset password / delete) and the "Users" sidebar entry. Dev User is auto-promoted on every seed.
+- **Staff ↔ User**: `Staff.userId` is a unique nullable FK. Seed auto-creates a login for every staff (`<firstname>@sparmanikfarm.local`, password `Jasper1.0!`). `createStaff` provisions one in the same transaction.
+- **Ask AI conversations**: `AiConversation` groups `AiMessage`s per user (ChatGPT/Claude.ai-style sidebar). `AiMessage.attachments` (Json) holds vision images for user messages: `[{ path, mimeType, width, height }]`.
 - **SOP / Video** have parallel EN/ID columns. Render via `<LocalizedText en={…} id={…} />`.
 
 ## Common gotchas
@@ -158,6 +164,37 @@ prisma/
     inline. See `src/app/(app)/inventory/page.tsx:128-136` and
     `[itemId]/page.tsx:73-77`.
 
+11. **GitHub repo is hooked up to THREE Railway projects.** Only
+    `sparmanikfarm - web` (project `1c8787f4-…`, serves
+    `web-production-1e6de.up.railway.app`) matters. The other two
+    (`Sparmanik Farm OS - back-end`, `Sparmanik Farm OS - front-end`)
+    fail on every push and will keep doing so until disconnected from
+    the repo in their Railway settings. When polling deploy status,
+    filter on `"context": "sparmanikfarm - web"` — the top-level GH
+    state is always failure because of the other two.
+
+12. **Lockfile drift after adding new deps.** `npm install` sometimes
+    partially syncs `package-lock.json` (Railway's strict `npm ci` then
+    rejects with "Missing: X from lock file"). Fix:
+    `npm install --package-lock-only` after the install. If a peer-dep
+    conflict shows up (e.g. `next-intl`'s `@swc/core` wants
+    `@swc/helpers>=0.5.17` but Next 16 bundles 0.5.15), pin the higher
+    version as a top-level devDep so npm has a satisfying resolution.
+
+13. **Railway Volume mount needs root.** Volumes mount at runtime as
+    root; the `nextjs` non-root user can't `mkdir` inside `/data/uploads`
+    → EACCES on Ask AI uploads. The Dockerfile runs the container as
+    root and the CMD pre-creates + chmods the upload dir before
+    starting the app. Don't add `USER nextjs` back.
+
+14. **Browser caches stale `/ask-ai` HTML across deploys.** The
+    server-rendered `<Card>` saying "Set ANTHROPIC_API_KEY…" sticks
+    around in the browser after the env var is added on Railway. Open
+    a fresh tab or hard-refresh (Ctrl+Shift+R). Curl-against-prod also
+    misleads because unauthenticated `/ask-ai` redirects to `/signin`,
+    so banner-grep returns 0 even when the running container still has
+    the old code. Use an authenticated browser fetch to verify.
+
 ## Auth flow
 
 1. Unauthenticated user hits any `/(app)/*` route.
@@ -206,7 +243,9 @@ Required env on Railway:
 - `AUTH_URL` — public Railway domain
 - `AUTH_TRUST_HOST=true`
 - `UPLOAD_DIR=/data/uploads`
-- `ANTHROPIC_API_KEY` (optional — enables Ask AI)
+- `ANTHROPIC_API_KEY` — Claude (Ask AI + Echo); set on prod
+- `GEMINI_API_KEY` — Google Gemini (alternate Ask AI provider, free tier);
+  set on prod
 - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (optional — enables Google
   Calendar)
 
@@ -229,16 +268,21 @@ npm run check:i18n         # diff EN vs ID keysets
 
 ## Currently deferred / TODO
 
-- Multi-farm switcher (Xero-style account picker) — needs `Farm` entity +
-  every domain model gets a `farmId` FK + scoped queries.
-- Full bilingual entity content (item names, supplier names) — would need
-  translation API integration (Google Translate / DeepL).
+- **Multi-organisation switcher (in-flight)** — three orgs requested
+  (Sparmanik Farm + Andre Melon + Kevin Farm). Needs `Organization` +
+  `OrganizationMembership`, `organizationId` on every domain table,
+  active-org cookie, scoped queries, topbar switcher. Substantial.
+- In-app password change screen (currently superuser-resets via
+  `/admin/users` only).
+- Disconnect the two stale Railway projects from the GitHub repo so
+  `git push` doesn't trigger false-failure deploy statuses.
+- Full bilingual entity content (item names, supplier names) — would
+  need translation API integration (Google Translate / DeepL).
 - Photo uploads in forms (Staff photo, Task evidence, SOP cover) —
   upload infra in `src/server/uploads.ts` exists, no UI yet uses it.
 - Barcode scanning (`@zxing/browser` — not yet installed).
 - CSV export — server-side `papaparse` not yet hooked into a route.
-- Financials → P&L Forecast is still a "coming soon…" placeholder
-  (`src/app/(app)/financials/page.tsx`).
+- Financials → P&L Forecast is still a "coming soon…" placeholder.
 - Settings → Categories has a "Drag to reorder (coming soon)" hint;
   reorder UX not implemented.
 - Backfill / rename UI for the ~265 unnamed legacy items in inventory.
@@ -248,15 +292,41 @@ npm run check:i18n         # diff EN vs ID keysets
 
 ## Recent session log
 
-- **2026-05-16** — Production tour against the Melon Harvest 1 field
-  guide. Harvest detail page (all 7 sections, all 3 modals) matches the
-  guide. Nav tour covered every tab. Settings → Staff was the only
-  CRUD-incomplete tab; shipped Add / Edit / Delete reusing
-  `AddStaffDialog` + `StaffCardActions` from `/staff`. Inventory list +
-  detail got an "Untitled item" fallback for blank-name rows. AI is
-  wired in `src/server/ai.ts` waiting on `ANTHROPIC_API_KEY` env var on
-  Railway (user must set via dashboard — classifier blocks scripted
-  attempts).
+- **2026-05-16** — Production tour. Settings → Staff got Add / Edit /
+  Delete. Inventory rendered "Untitled item" fallback. Ask AI activated
+  via env vars on Railway. Depreciable assets feature (cocopeat /
+  rockwool amortisation) shipped with full schema + UI per spec.
+
+- **2026-05-17** —
+  - Ask AI got image attachments (Anthropic + Gemini vision via base64),
+    a Claude.ai-style centred layout with markdown rendering, and a
+    per-user **conversation history sidebar** (AiConversation model;
+    legacy messages backfilled into one "Earlier chats" thread per
+    user).
+  - Gemini 2.5 Flash-Lite added as alternate AI provider with a
+    Claude/Gemini pill toggle (localStorage-persisted).
+  - Multi-produce harvests (`HarvestProduce` join table; chip multi-
+    select in StartHarvestDialog; badges on harvest cards).
+  - Financials → real P&L statement with Revenue, COGS (Σ batch
+    purchases), Wages split (allocated vs general), Depreciation, Net.
+  - Staff auto-login: every Staff gets a User (email
+    `<firstname>@sparmanikfarm.local`, password `Jasper1.0!`); seed
+    backfills idempotently, `createStaff` provisions in-transaction.
+  - Two-tier auth: `User.role` (`USER` / `SUPERUSER`). Dev User
+    auto-promoted. `/admin/users` (SUPERUSER-only) with create / edit /
+    reset password / delete; "Users" sidebar entry gated on role.
+  - **Echo widget**: floating 🧑‍🌾 button bottom-right of every
+    authenticated page → small popover for single-turn quick farm
+    questions. Uses askAi() with a "be terse" wrapper. Not persisted.
+  - Searchable Combobox primitive (`src/components/ui/combobox.tsx`,
+    no extra deps) applied to Item / Supplier / Category / Produce
+    dropdowns in the high-cardinality dialogs.
+  - Dockerfile fix: runs as root + `mkdir -p $UPLOAD_DIR && chmod 777`
+    on start so the Railway Volume mount is writable. (EACCES on Ask
+    AI image upload is gone.)
+  - Lockfile drift fix: pinned `@swc/helpers@^0.5.17` as a top-level
+    devDep to satisfy `next-intl`'s `@swc/core` peer dep that Next 16's
+    bundled 0.5.15 doesn't.
 
 ## When in doubt
 
