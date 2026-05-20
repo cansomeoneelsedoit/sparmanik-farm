@@ -336,6 +336,30 @@ npm run check:i18n         # diff EN vs ID keysets
     Auto-scoping via Prisma `$extends` in `src/lib/prisma.ts` reads
     `activeOrgId` cookie and stamps every query. Xero-style topbar
     switcher (`OrgSwitcher`) lets Boyd flip between orgs.
+  - **`/ask-ai` first-visit 500 fix** (`a277eb3`). Stamping
+    `organizationId` explicitly when auto-creating the empty
+    `AiConversation` on first visit, because the Prisma extension
+    can't read the `activeOrgId` cookie before the user has
+    interacted with the `OrgSwitcher`. See gotcha #14.
+
+- **2026-05-20** —
+  - **Echo became Jasper Echo**. Widget avatar swapped from the
+    `🧑‍🌾` emoji to a portrait of the cat at
+    `public/jasper-echo.jpg` (256×256 JPEG, ~10 KB). Header title
+    renamed to "Jasper Echo"; aria labels updated. Assistant
+    replies in the Echo popup now render as markdown via
+    `react-markdown` + `remark-gfm` (matching the Ask AI panel) —
+    user messages still render as plain text.
+  - **Global `Cache-Control: no-store` headers** added in
+    `next.config.mjs`. The `headers()` function applies
+    `no-store, no-cache, must-revalidate, max-age=0` (plus
+    `Pragma: no-cache` and `Expires: 0`) to every route except
+    `/_next/static/*` (where Next's hashed filenames already
+    handle cache busting and `immutable` long-cache is correct).
+    HTML pages, RSC payloads, server actions, and `public/*`
+    assets always come back fresh — a deploy or an image swap
+    is visible without `Ctrl+Shift+R`. Trade-off: every nav
+    re-fetches the HTML, fine for a small admin app.
 
 ## When in doubt
 

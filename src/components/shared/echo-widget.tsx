@@ -2,6 +2,8 @@
 
 import { useState, useTransition, useRef, useEffect } from "react";
 import { X, ArrowUp, Sparkles } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import { cn } from "@/lib/utils";
 import { askEcho } from "@/server/echo-action";
@@ -44,27 +46,36 @@ export function EchoWidget() {
 
   return (
     <>
-      {/* Floating avatar — always visible, bottom-right. */}
+      {/* Floating avatar — always visible, bottom-right. Closed = Jasper Echo
+          cat portrait, open = X. */}
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        aria-label={open ? "Close Echo" : "Ask Echo"}
+        aria-label={open ? "Close Jasper Echo" : "Ask Jasper Echo"}
         className={cn(
-          "fixed bottom-5 right-5 z-40 flex h-12 w-12 items-center justify-center rounded-full text-2xl shadow-lg transition",
+          "fixed bottom-5 right-5 z-40 flex h-12 w-12 items-center justify-center overflow-hidden rounded-full shadow-lg transition",
           open
             ? "scale-95 bg-foreground text-background"
             : "bg-accent text-accent-foreground hover:scale-105",
         )}
       >
-        <span aria-hidden>{open ? "✕" : "🧑‍🌾"}</span>
+        {open ? (
+          <X className="h-5 w-5" aria-hidden />
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src="/jasper-echo.jpg" alt="" className="h-full w-full object-cover" />
+        )}
       </button>
 
       {open ? (
         <div className="fixed bottom-20 right-5 z-40 flex h-[420px] w-[340px] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
           <div className="flex items-center gap-2 border-b px-3 py-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-accent text-base">🧑‍🌾</div>
+            <div className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full bg-accent">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/jasper-echo.jpg" alt="" className="h-full w-full object-cover" />
+            </div>
             <div className="flex-1">
-              <div className="text-sm font-semibold leading-none">Echo</div>
+              <div className="text-sm font-semibold leading-none">Jasper Echo</div>
               <div className="text-[10px] text-muted-foreground">Quick farm questions</div>
             </div>
             <button
@@ -91,7 +102,34 @@ export function EchoWidget() {
                       : "bg-muted",
                   )}
                 >
-                  {t.content}
+                  {t.role === "assistant" ? (
+                    <div className="prose prose-sm prose-stone dark:prose-invert max-w-none prose-p:my-1 prose-pre:my-1 prose-ul:my-1 prose-ol:my-1 prose-headings:my-1">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          code({ className, children, ...props }) {
+                            const isBlock = /language-/.test(className ?? "");
+                            return isBlock ? (
+                              <code className={className} {...props}>
+                                {children}
+                              </code>
+                            ) : (
+                              <code
+                                className="rounded bg-background/60 px-1 py-0.5 font-mono text-[11px]"
+                                {...props}
+                              >
+                                {children}
+                              </code>
+                            );
+                          },
+                        }}
+                      >
+                        {t.content}
+                      </ReactMarkdown>
+                    </div>
+                  ) : (
+                    t.content
+                  )}
                 </div>
               ))
             )}
@@ -143,8 +181,8 @@ function EmptyHint({ onPick }: { onPick: (q: string) => void }) {
   return (
     <div className="space-y-2 pt-1">
       <div className="rounded-xl bg-muted px-3 py-2 text-xs leading-snug">
-        Hi! I'm <strong>Echo</strong> — ask me anything quick about your farm.
-        For longer conversations or photos, use <strong>Ask AI</strong>.
+        Hi! I'm <strong>Jasper Echo</strong> — ask me anything quick about your
+        farm. For longer conversations or photos, use <strong>Ask AI</strong>.
       </div>
       <div className="space-y-1.5">
         {suggestions.map((s) => (
