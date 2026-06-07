@@ -20,22 +20,31 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
     ports:
       - "3000:3000"
+    # Load credentials (ANTHROPIC_API_KEY, GEMINI_API_KEY, AUTH_SECRET,
+    # FARM_API_TOKEN) directly from .env into the container — bypassing the
+    # `${VAR:-}` shell-interpolation path that lets an empty host-shell
+    # variable override the file's real value. The Claude Code session
+    # exports an empty ANTHROPIC_API_KEY for its own credential management,
+    # which is what was making Ask AI + receipt OCR fail locally despite
+    # the key being present in .env.
+    env_file:
+      - .env
     environment:
-      # Host `db` is the postgres service above; the web service talks to it
-      # over the docker network.
+      # `db` (the postgres service above) is only reachable on the docker
+      # network, not from the host shell. Define it here so it overrides
+      # the localhost-based DATABASE_URL the host shell uses for
+      # `npm run dev` outside compose.
       DATABASE_URL: postgresql://sparmanik:sparmanik@db:5432/sparmanik?schema=public
       DATABASE_SSL: "false"
-      AUTH_SECRET: ${AUTH_SECRET:-dev-secret-change-me}
       AUTH_URL: http://localhost:3000
       AUTH_TRUST_HOST: "true"
       UPLOAD_DIR: /app/uploads
-      FARM_API_TOKEN: ${FARM_API_TOKEN:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       NODE_ENV: development
       NEXT_TELEMETRY_DISABLED: "1"
     volumes:

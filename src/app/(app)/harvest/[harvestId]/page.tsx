@@ -23,6 +23,9 @@ import {
   type InstallAssetItem,
 } from "@/app/(app)/harvest/[harvestId]/install-asset-dialog";
 import { LogSaleDialog } from "@/app/(app)/harvest/[harvestId]/log-sale-dialog";
+import { LogLabourDialog } from "@/app/(app)/harvest/[harvestId]/log-labour-dialog";
+import { CheckInAssetDialog } from "@/app/(app)/harvest/[harvestId]/check-in-asset-dialog";
+import { ExpenseFormDialog } from "@/app/(app)/expenses/expense-form-dialog";
 import { EndHarvestButton } from "@/app/(app)/harvest/[harvestId]/end-harvest-button";
 import { StartHarvestDialog } from "@/app/(app)/harvest/start-harvest-dialog";
 import { DeleteHarvestButton } from "@/app/(app)/harvest/[harvestId]/harvest-actions";
@@ -35,8 +38,11 @@ export const dynamic = "force-dynamic";
 
 export default async function HarvestDetailPage({ params }: { params: Promise<{ harvestId: string }> }) {
   const { harvestId } = await params;
-  const [harvest, items, produces, greenhouses] = await Promise.all([
-    prisma.harvest.findUnique({
+  const [harvest, items, produces, greenhouses, staffRows, harvestExpenses, labourTasks] = await Promise.all([
+    // findFirst (not findUnique) so the prisma extension can safely append
+    // an `organizationId` predicate for org isolation — findUnique rejects
+    // non-unique fields in its where.
+    prisma.harvest.findFirst({
       where: { id: harvestId },
       include: {
         greenhouse: true,
@@ -58,7 +64,46 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
     }),
     prisma.produce.findMany({ orderBy: { name: "asc" } }),
     prisma.greenhouse.findMany({ orderBy: { name: "asc" } }),
+    prisma.staff.findMany({
+      orderBy: { name: "asc" },
+      select: {
+        id: true,
+        name: true,
+        rates: {
+          orderBy: { effectiveFrom: "desc" },
+          take: 1,
+          select: { rate: true },
+        },
+      },
+    }),
+    prisma.expense.findMany({
+      where: { harvestId },
+      orderBy: { date: "desc" },
+    }),
+    prisma.labourTask.findMany({
+      where: { active: true },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+      select: { id: true, name: true },
+    }),
   ]);
+
+  type HarvestExpense = {
+    id: string;
+    date: Date;
+    amount: Decimal;
+    category: string | null;
+    payee: string;
+    description: string | null;
+    paymentMethod: string | null;
+  };
+  const expenseRows = harvestExpenses as HarvestExpense[];
+
+  type StaffWithRate = { id: string; name: string; rates: { rate: Decimal }[] };
+  const staffForDialog = (staffRows as StaffWithRate[]).map((s) => ({
+    id: s.id,
+    name: s.name,
+    rate: s.rates[0] ? new Decimal(s.rates[0].rate).toFixed(2) : null,
+  }));
 
   if (!harvest) notFound();
 
@@ -129,6 +174,9 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
     maxUses: number;
     useCount: number;
     discarded: boolean;
+    returnCondition: string | null;
+    returnedAt: Date | null;
+    returnNote: string | null;
     consumptions: { qty: Decimal; unitCost: Decimal }[];
   };
   const assetRows = (harvest.assets as AssetRow[]).map((a) => {
@@ -195,7 +243,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
       <header className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Button asChild variant="ghost" size="sm">
-            <Link href="/harvest"><ArrowLeft className="h-4 w-4" /> Harvests</Link>
+            <Link href="/harvest"><ArrowLeft className="h-4 w-4" /> Greenhouses</Link>
           </Button>
           <h1 className="font-serif text-3xl">{harvest.name}</h1>
           <Badge variant={harvest.status === "LIVE" ? "accent" : "secondary"}>
@@ -210,6 +258,16 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
           <InstallAssetDialog
             harvestId={harvest.id}
             items={installItems}
+          />
+          <LogLabourDialog
+            harvestId={harvest.id}
+            staff={staffForDialog}
+            tasks={labourTasks as { id: string; name: string }[]}
+          />
+          <ExpenseFormDialog
+            harvests={[{ id: harvest.id, name: harvest.name }]}
+            defaultHarvestId={harvest.id}
+            trigger={<Button variant="outline">Add expense</Button>}
           />
           <LogSaleDialog
             harvestId={harvest.id}
@@ -258,6 +316,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
         <StatCard label="Usage cost" value={<Money value={pl.usageCost} />} accent="red" />
         <StatCard label="Depreciation" value={<Money value={pl.depreciationCost} />} accent="red" />
         <StatCard label="Labour cost" value={<Money value={pl.labourCost} />} accent="red" />
+        <StatCard label="Misc expenses" value={<Money value={pl.expenseCost} />} accent="red" />
         <StatCard label="Net profit" value={<Money value={pl.netProfit} />} accent={Number(pl.netProfit) >= 0 ? "green" : "red"} />
       </div>
 
@@ -335,6 +394,46 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
       </Card>
 
       <Card>
+        <CardHeader><CardTitle>Misc expenses</CardTitle></CardHeader>
+        <CardContent className="p-0">
+          {expenseRows.length === 0 ? (
+            <div className="p-12 text-center text-muted-foreground">
+              No misc expenses on this harvest. Use <strong>Add expense</strong> in the header
+              to charge a contractor, cash payment, or utility.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Paid to</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Method</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {expenseRows.map((e) => (
+                  <TableRow key={e.id}>
+                    <TableCell className="text-muted-foreground">{e.date.toISOString().slice(0, 10)}</TableCell>
+                    <TableCell>
+                      <div className="font-medium">{e.payee}</div>
+                      {e.description ? (
+                        <div className="line-clamp-1 text-xs text-muted-foreground">{e.description}</div>
+                      ) : null}
+                    </TableCell>
+                    <TableCell>{e.category ? <Badge variant="outline">{e.category}</Badge> : "—"}</TableCell>
+                    <TableCell className="text-muted-foreground">{e.paymentMethod ?? "—"}</TableCell>
+                    <TableCell className="text-right font-medium"><Money value={e.amount.toFixed(4)} /></TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader><CardTitle>Labour expenses</CardTitle></CardHeader>
         <CardContent className="p-0">
           {labourRows.length === 0 ? (
@@ -380,26 +479,57 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                   <TableHead>Date</TableHead>
                   <TableHead>Item</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
-                  <TableHead>Use</TableHead>
+                  <TableHead>Uses remaining</TableHead>
                   <TableHead className="text-right">Charge this harvest</TableHead>
                   <TableHead className="text-right">Full cost</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead className="w-28" />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {depreciableAssets.map((a) => (
-                  <TableRow key={a.id}>
-                    <TableCell className="text-muted-foreground">{a.date.toISOString().slice(0, 10)}</TableCell>
-                    <TableCell>{a.item.name}</TableCell>
-                    <TableCell className="text-right">{Number(a.qty)} {a.item.unit}</TableCell>
-                    <TableCell className="text-muted-foreground">{`use ${a.useCount} of ${a.maxUses}`}</TableCell>
-                    <TableCell className="text-right"><Money value={(a.amortisedCharge ?? new Decimal(0)).toFixed(4)} /></TableCell>
-                    <TableCell className="text-right text-muted-foreground"><Money value={a.fifoCost.toFixed(4)} /></TableCell>
-                    <TableCell>
-                      {a.discarded ? <Badge variant="destructive">Fully depreciated</Badge> : <Badge variant="outline">In use</Badge>}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {depreciableAssets.map((a) => {
+                  const usesRemaining = Math.max(0, a.maxUses - a.useCount);
+                  const inUse = !a.returnCondition && !a.discarded;
+                  return (
+                    <TableRow key={a.id}>
+                      <TableCell className="text-muted-foreground">{a.date.toISOString().slice(0, 10)}</TableCell>
+                      <TableCell>{a.item.name}</TableCell>
+                      <TableCell className="text-right">{Number(a.qty)} {a.item.unit}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        <strong className="text-foreground">{usesRemaining}</strong> of {a.maxUses}
+                      </TableCell>
+                      <TableCell className="text-right"><Money value={(a.amortisedCharge ?? new Decimal(0)).toFixed(4)} /></TableCell>
+                      <TableCell className="text-right text-muted-foreground"><Money value={a.fifoCost.toFixed(4)} /></TableCell>
+                      <TableCell>
+                        {a.returnCondition === "good" ? (
+                          <Badge variant="outline">Checked in</Badge>
+                        ) : a.returnCondition === "damaged" ? (
+                          <Badge variant="destructive">Damaged</Badge>
+                        ) : a.returnCondition === "lost" ? (
+                          <Badge variant="destructive">Lost</Badge>
+                        ) : a.discarded ? (
+                          <Badge variant="destructive">Fully depreciated</Badge>
+                        ) : (
+                          <Badge variant="outline">In use</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {inUse && harvest.status === "LIVE" ? (
+                          <CheckInAssetDialog
+                            harvestAssetId={a.id}
+                            itemName={a.item.name}
+                            qty={Number(a.qty)}
+                            unit={a.item.unit}
+                            usesRemaining={usesRemaining}
+                            trigger={
+                              <Button size="sm" variant="outline">Check in</Button>
+                            }
+                          />
+                        ) : null}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}

@@ -12,7 +12,7 @@ const nextConfig = {
   },
   experimental: {
     serverActions: {
-      bodySizeLimit: "10mb",
+      bodySizeLimit: "210mb",
     },
   },
   // Disable browser caching for everything except Next's own immutable build

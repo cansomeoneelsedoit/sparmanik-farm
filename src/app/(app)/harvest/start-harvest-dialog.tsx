@@ -6,7 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +23,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { startHarvest, updateHarvest } from "@/app/(app)/harvest/actions";
+import { createProduceQuick } from "@/app/(app)/settings/actions";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const schema = z.object({
@@ -59,8 +60,58 @@ export function StartHarvestDialog({
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startT] = useTransition();
+  const [localProduces, setLocalProduces] = useState(produces);
+  const [newProduceName, setNewProduceName] = useState("");
+  const [addingProduce, setAddingProduce] = useState(false);
   const router = useRouter();
   const isEdit = !!existing;
+
+  // Dedup the chip list — multi-org seeding occasionally creates "Green
+  // Melon" twice on the same org. Show each name once, keep the first id
+  // we saw so the user can still pick it.
+  const dedupedProduces = (() => {
+    const seen = new Set<string>();
+    const out: { id: string; name: string }[] = [];
+    for (const p of localProduces) {
+      const key = p.name.toLowerCase().trim();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(p);
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name));
+  })();
+
+  async function addProduceInline() {
+    const name = newProduceName.trim();
+    if (!name) return;
+    // Don't create a duplicate — just select the existing one.
+    const existingMatch = localProduces.find(
+      (p) => p.name.toLowerCase() === name.toLowerCase(),
+    );
+    if (existingMatch) {
+      if (!selectedProduceIds.includes(existingMatch.id)) {
+        form.setValue("produceIds", [...selectedProduceIds, existingMatch.id]);
+      }
+      setNewProduceName("");
+      toast.message(`Already exists — selected "${existingMatch.name}"`);
+      return;
+    }
+    setAddingProduce(true);
+    try {
+      const r = await createProduceQuick(name);
+      if (r.ok && r.data) {
+        const newProduce = { id: r.data.id, name: r.data.name };
+        setLocalProduces((prev) => [...prev, newProduce]);
+        form.setValue("produceIds", [...selectedProduceIds, newProduce.id]);
+        setNewProduceName("");
+        toast.success(`Added "${newProduce.name}"`);
+      } else if (!r.ok) {
+        toast.error(r.error);
+      }
+    } finally {
+      setAddingProduce(false);
+    }
+  }
   const form = useForm<Form>({
     resolver: zodResolver(schema),
     defaultValues: existing
@@ -119,7 +170,7 @@ export function StartHarvestDialog({
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent>
         <form onSubmit={form.handleSubmit(onSubmit)}>
-          <DialogHeader><DialogTitle>{isEdit ? "Edit harvest" : "Start harvest"}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{isEdit ? "Edit harvest" : "Start a new harvest"}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>Name</Label>
@@ -146,10 +197,12 @@ export function StartHarvestDialog({
                 Pick one or more — a single harvest can intercrop e.g. melon + chilli.
               </p>
               <div className="flex flex-wrap gap-1.5 rounded-md border p-2">
-                {produces.length === 0 ? (
-                  <span className="text-xs text-muted-foreground">No produces yet. Add them in Settings → Produce.</span>
+                {dedupedProduces.length === 0 ? (
+                  <span className="text-xs text-muted-foreground">
+                    No produces yet. Type a name below to add the first.
+                  </span>
                 ) : (
-                  produces.map((p) => {
+                  dedupedProduces.map((p) => {
                     const on = selectedProduceIds.includes(p.id);
                     return (
                       <button
@@ -169,10 +222,36 @@ export function StartHarvestDialog({
                   })
                 )}
               </div>
+              {/* Inline "+ Add new produce" — also saves to Settings → Produce
+                  so other pages see it too. No need to leave the dialog. */}
+              <div className="flex gap-2">
+                <Input
+                  value={newProduceName}
+                  onChange={(e) => setNewProduceName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void addProduceInline();
+                    }
+                  }}
+                  placeholder="Add a new produce (e.g. Watermelon)"
+                  className="flex-1 text-sm"
+                  disabled={addingProduce}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={addProduceInline}
+                  disabled={addingProduce || !newProduceName.trim()}
+                >
+                  <Plus className="h-3.5 w-3.5" /> {addingProduce ? "Adding…" : "Add"}
+                </Button>
+              </div>
               {selectedProduceIds.length > 0 ? (
                 <div className="flex flex-wrap gap-1">
                   {selectedProduceIds.map((id) => {
-                    const p = produces.find((x) => x.id === id);
+                    const p = localProduces.find((x) => x.id === id);
                     if (!p) return null;
                     return (
                       <Badge key={id} variant="secondary" className="gap-1">

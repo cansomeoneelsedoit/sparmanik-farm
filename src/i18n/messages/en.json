@@ -20,7 +20,7 @@
     "dashboard": "Dashboard",
     "calendar": "Calendar",
     "sales": "Sales",
-    "harvest": "Harvest",
+    "harvest": "Greenhouses",
     "tasks": "Tasks",
     "inventory": "Inventory",
     "recipes": "Nutrient Recipes",
@@ -28,8 +28,11 @@
     "videos": "Videos",
     "suppliers": "Suppliers",
     "staff": "Staff",
+    "expenses": "Expenses",
     "financials": "Financials",
+    "financialsTotal": "Total Business Financials",
     "settings": "Settings",
+    "healthCheck": "Health check",
     "askAi": "Ask AI"
   },
   "topbar": {

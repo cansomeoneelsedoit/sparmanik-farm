@@ -13,7 +13,14 @@ import { deleteStaff } from "@/app/(app)/staff/actions";
 export function StaffCardActions({
   staff,
 }: {
-  staff: { id: string; name: string; role: string | null; avatar: string | null };
+  staff: {
+    id: string;
+    name: string;
+    role: string | null;
+    avatar: string | null;
+    photoPath: string | null;
+    bio: string | null;
+  };
 }) {
   const [open, setOpen] = useState(false);
   const [, startT] = useTransition();

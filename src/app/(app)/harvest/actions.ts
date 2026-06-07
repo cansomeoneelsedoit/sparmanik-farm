@@ -169,39 +169,191 @@ export async function deleteHarvestAsset(id: string): Promise<ActionResult> {
   return { ok: true };
 }
 
+// Shared types used by endHarvest + checkInHarvestAsset.
+type ConsumptionWithBatch = {
+  id: string;
+  qty: Decimal;
+  batch: {
+    id: string;
+    itemId: string;
+    supplierId: string | null;
+    exchangeRate: Decimal;
+    maxUses: number;
+    useCount: number;
+    amortisedCostPerUse: Decimal | null;
+  };
+};
+type AssetRowForReturn = {
+  id: string;
+  depreciable: boolean;
+  consumptions: ConsumptionWithBatch[];
+};
+
+/**
+ * For each consumption slice of an asset, either return it to inventory as a
+ * `returned=true, price=0` batch (preserving the amortisation schedule) or
+ * mark it as discarded if all uses are spent. Shared by `checkInHarvestAsset`
+ * (condition=good) and the legacy end-harvest auto-good path.
+ */
+async function returnAssetSlicesToInventory(
+  tx: TransactionClient,
+  asset: AssetRowForReturn,
+  whenDate: Date,
+  summary: { returned: number; discarded: number },
+) {
+  let anyDiscarded = false;
+  let allDiscarded = asset.consumptions.length > 0;
+  for (const c of asset.consumptions) {
+    const b = c.batch;
+    if (b.useCount < b.maxUses) {
+      await tx.batch.create({
+        data: {
+          itemId: b.itemId,
+          supplierId: b.supplierId,
+          date: whenDate,
+          qty: new Decimal(c.qty),
+          price: new Decimal(0),
+          exchangeRate: b.exchangeRate,
+          maxUses: b.maxUses,
+          useCount: b.useCount,
+          amortisedCostPerUse: b.amortisedCostPerUse,
+          returned: true,
+        },
+      });
+      summary.returned += Number(c.qty);
+      allDiscarded = false;
+    } else {
+      anyDiscarded = true;
+      summary.discarded += Number(c.qty);
+    }
+  }
+  if (allDiscarded || anyDiscarded) {
+    await tx.harvestAsset.update({
+      where: { id: asset.id },
+      data: { discarded: allDiscarded },
+    });
+  }
+}
+
+const checkInSchema = z.object({
+  harvestAssetId: z.string().min(1),
+  condition: z.enum(["good", "damaged", "lost"]),
+  date: z.string().min(1),
+  note: z.string().optional().default(""),
+});
+
+/**
+ * Mid-harvest check-in for a reusable asset.
+ *   - good     → return slices to inventory (same code path as end-harvest)
+ *   - damaged  → don't return; mark source batches' damagedFromHarvestId so
+ *                Financials can attribute the write-off; residual depreciable
+ *                value stays on the business books (no recovery)
+ *   - lost     → same as damaged
+ * In all cases `returnCondition` / `returnedAt` / `returnNote` are stamped on
+ * the HarvestAsset so endHarvest can skip it.
+ */
+export async function checkInHarvestAsset(input: unknown): Promise<ActionResult> {
+  const parsed = checkInSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Validation failed" };
+  const userId = await uid();
+  const when = new Date(parsed.data.date);
+  const summary = { returned: 0, discarded: 0 };
+
+  try {
+    const harvestId = await prisma.$transaction(async (tx: TransactionClient) => {
+      const asset = (await tx.harvestAsset.findUnique({
+        where: { id: parsed.data.harvestAssetId },
+        include: {
+          consumptions: {
+            include: {
+              batch: {
+                select: {
+                  id: true,
+                  itemId: true,
+                  supplierId: true,
+                  exchangeRate: true,
+                  maxUses: true,
+                  useCount: true,
+                  amortisedCostPerUse: true,
+                },
+              },
+            },
+          },
+        },
+      })) as (AssetRowForReturn & { harvestId: string; returnCondition: string | null }) | null;
+      if (!asset) throw new Error("Asset not found");
+      if (asset.returnCondition) {
+        throw new Error(`Asset already checked in (${asset.returnCondition})`);
+      }
+
+      if (parsed.data.condition === "good") {
+        await returnAssetSlicesToInventory(tx, asset, when, summary);
+      } else {
+        // Damaged or Lost — link each source batch back to this harvest so the
+        // Financials damage-loss line can show what broke where. Don't create
+        // a returned batch.
+        for (const c of asset.consumptions) {
+          await tx.batch.update({
+            where: { id: c.batch.id },
+            data: { damagedFromHarvestId: asset.harvestId },
+          });
+        }
+      }
+
+      await tx.harvestAsset.update({
+        where: { id: asset.id },
+        data: {
+          returnCondition: parsed.data.condition,
+          returnedAt: when,
+          returnNote: parsed.data.note || null,
+        },
+      });
+
+      await recordAction(tx, {
+        type:
+          parsed.data.condition === "good"
+            ? "harvest.checkin_asset"
+            : "harvest.damage_asset",
+        entityType: "HarvestAsset",
+        entityId: asset.id,
+        description:
+          parsed.data.condition === "good"
+            ? `Checked in asset (good): ${summary.returned} units returned`
+            : `Asset ${parsed.data.condition}: ${parsed.data.note || "no note"}`,
+        userId,
+        payload: {
+          harvestAssetId: asset.id,
+          harvestId: asset.harvestId,
+          condition: parsed.data.condition,
+          summary,
+          note: parsed.data.note,
+        },
+      });
+
+      return asset.harvestId;
+    });
+
+    revalidatePath(`/harvest/${harvestId}`);
+    revalidatePath("/inventory");
+    revalidatePath("/financials");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to check in" };
+  }
+}
+
 export async function endHarvest(harvestId: string): Promise<ActionResult> {
   const userId = await uid();
-  type ConsumptionWithBatch = {
-    id: string;
-    qty: Decimal;
-    batch: {
-      id: string;
-      itemId: string;
-      supplierId: string | null;
-      exchangeRate: Decimal;
-      maxUses: number;
-      useCount: number;
-      amortisedCostPerUse: Decimal | null;
-    };
-  };
-  type AssetRow = {
-    id: string;
-    depreciable: boolean;
-    consumptions: ConsumptionWithBatch[];
-  };
   const summary: { returned: number; discarded: number } = { returned: 0, discarded: 0 };
   await prisma.$transaction(async (tx: TransactionClient) => {
     const h = await tx.harvest.findUnique({ where: { id: harvestId } });
     if (!h) throw new Error("Harvest not found");
 
-    // --- Depreciable asset lifecycle ---
-    // For each depreciable HarvestAsset on this harvest, look at its source
-    // BatchConsumption rows. For each source batch:
-    //   - if useCount < maxUses → return as a new zero-cost batch (price=0,
-    //     same maxUses/useCount/amortisedCostPerUse, returned=true).
-    //   - if useCount >= maxUses → don't return; the asset gets discarded=true.
+    // Auto-good every depreciable HarvestAsset that hasn't already been
+    // checked in manually. Anything with returnCondition set (good/damaged
+    // /lost) was handled by checkInHarvestAsset — skip it.
     const assets = (await tx.harvestAsset.findMany({
-      where: { harvestId, depreciable: true },
+      where: { harvestId, depreciable: true, returnCondition: null },
       include: {
         consumptions: {
           include: {
@@ -219,45 +371,15 @@ export async function endHarvest(harvestId: string): Promise<ActionResult> {
           },
         },
       },
-    })) as AssetRow[];
+    })) as AssetRowForReturn[];
 
     const today = new Date();
     for (const asset of assets) {
-      let anyDiscarded = false;
-      let allDiscarded = asset.consumptions.length > 0;
-      for (const c of asset.consumptions) {
-        const b = c.batch;
-        if (b.useCount < b.maxUses) {
-          // Return this slice as a new zero-cost batch — preserves the
-          // amortisation schedule so future harvests still get charged a fair
-          // share, even though no further cash leaves the business.
-          await tx.batch.create({
-            data: {
-              itemId: b.itemId,
-              supplierId: b.supplierId,
-              date: today,
-              qty: new Decimal(c.qty),
-              price: new Decimal(0),
-              exchangeRate: b.exchangeRate,
-              maxUses: b.maxUses,
-              useCount: b.useCount,
-              amortisedCostPerUse: b.amortisedCostPerUse,
-              returned: true,
-            },
-          });
-          summary.returned += Number(c.qty);
-          allDiscarded = false;
-        } else {
-          anyDiscarded = true;
-          summary.discarded += Number(c.qty);
-        }
-      }
-      if (allDiscarded || anyDiscarded) {
-        await tx.harvestAsset.update({
-          where: { id: asset.id },
-          data: { discarded: allDiscarded },
-        });
-      }
+      await returnAssetSlicesToInventory(tx, asset, today, summary);
+      await tx.harvestAsset.update({
+        where: { id: asset.id },
+        data: { returnCondition: "good", returnedAt: today },
+      });
     }
 
     await tx.harvest.update({
@@ -279,6 +401,7 @@ export async function endHarvest(harvestId: string): Promise<ActionResult> {
   revalidatePath("/harvest");
   revalidatePath(`/harvest/${harvestId}`);
   revalidatePath("/inventory");
+  revalidatePath("/financials");
   return { ok: true };
 }
 

@@ -14,7 +14,8 @@ export const dynamic = "force-dynamic";
 
 export default async function SopDetailPage({ params }: { params: Promise<{ sopId: string }> }) {
   const { sopId } = await params;
-  const sop = await prisma.sop.findUnique({
+  // findFirst — see harvest detail page for the rationale.
+  const sop = await prisma.sop.findFirst({
     where: { id: sopId },
     include: { steps: { orderBy: { position: "asc" } } },
   });

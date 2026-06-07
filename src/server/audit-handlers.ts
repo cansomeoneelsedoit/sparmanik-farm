@@ -33,9 +33,14 @@ export function registerAllUndoHandlers() {
   registerUndoHandler("item.delete", async (tx, action) => {
     const item = action.payload as Record<string, unknown>;
     if (!item?.id) return;
+    // Re-use the original code if we still have it; fall back to issuing a
+    // fresh one so the restore doesn't fail on the NOT NULL constraint.
+    const { nextItemCode } = await import("@/app/(app)/inventory/actions");
+    const code = (item.code as string | undefined) ?? (await nextItemCode(tx));
     await tx.item.create({
       data: {
         id: item.id as string,
+        code,
         name: item.name as string,
         categoryId: (item.categoryId as string | null) ?? null,
         unit: item.unit as string,

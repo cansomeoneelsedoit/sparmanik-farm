@@ -9,6 +9,7 @@ import { ThemeToggle } from "@/components/shared/theme-toggle";
 import { AlertBell } from "@/components/shared/alert-bell";
 import { AuditHistorySheet } from "@/components/shared/audit-history-sheet";
 import { OrgSwitcher } from "@/components/shared/org-switcher";
+import { ClearCacheButton } from "@/components/shared/clear-cache-button";
 import { Button } from "@/components/ui/button";
 
 async function getCurrentRate() {
@@ -43,6 +44,7 @@ export async function Topbar({ userName }: { userName?: string | null }) {
         <span className="text-muted-foreground">
           {t("rateLabel")}: <span className="font-medium text-foreground">{rate}</span> {t("rateUnit")}
         </span>
+        <ClearCacheButton />
         <LangToggle />
         <ThemeToggle />
         <AlertBell alerts={alerts} />

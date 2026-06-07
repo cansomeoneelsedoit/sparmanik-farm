@@ -13,7 +13,8 @@ export const dynamic = "force-dynamic";
 
 export default async function RecipeDetailPage({ params }: { params: Promise<{ recipeId: string }> }) {
   const { recipeId } = await params;
-  const r = await prisma.nutrientRecipe.findUnique({
+  // findFirst — see harvest detail page for the rationale.
+  const r = await prisma.nutrientRecipe.findFirst({
     where: { id: recipeId },
     include: { ingredients: true },
   });

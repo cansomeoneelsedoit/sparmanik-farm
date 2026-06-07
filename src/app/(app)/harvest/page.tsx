@@ -52,7 +52,12 @@ export default async function HarvestPage() {
   return (
     <div className="space-y-6">
       <header className="flex items-center justify-between">
-        <h1 className="font-serif text-3xl">Harvests</h1>
+        <div>
+          <h1 className="font-serif text-3xl">Greenhouses</h1>
+          <p className="text-sm text-muted-foreground">
+            Active and past harvests across every greenhouse.
+          </p>
+        </div>
         <StartHarvestDialog
           greenhouses={greenhouses.map((g: { id: string; name: string }) => ({ id: g.id, name: g.name }))}
           produces={produces.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }))}

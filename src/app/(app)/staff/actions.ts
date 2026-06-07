@@ -9,6 +9,27 @@ import { prisma } from "@/server/prisma";
 import { auth } from "@/auth";
 import { recordAction } from "@/server/audit";
 import { Decimal, type TransactionClient } from "@/server/decimal";
+import { saveImageUpload } from "@/server/uploads";
+
+/**
+ * Upload a staff profile photo. Uses the same sharp pipeline as item/video
+ * photos — resize on longest side, WebP @ q82, random filename under
+ * uploads/staff/. Returns the relative path to store on Staff.photoPath.
+ */
+export async function uploadStaffPhoto(
+  formData: FormData,
+): Promise<ActionResult<{ path: string }>> {
+  const s = await auth();
+  if (!s?.user?.id) return { ok: false, error: "Not signed in" };
+  const file = formData.get("file");
+  if (!(file instanceof File)) return { ok: false, error: "No file provided" };
+  try {
+    const saved = await saveImageUpload(file, "staff");
+    return { ok: true, data: { path: saved.path } };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Upload failed" };
+  }
+}
 
 const STAFF_DEFAULT_PASSWORD = "Jasper1.0!";
 
@@ -52,6 +73,8 @@ const staffSchema = z.object({
   name: z.string().min(1),
   role: z.string().optional().default(""),
   avatar: z.string().optional().default(""),
+  photoPath: z.string().optional().nullable(),
+  bio: z.string().optional().nullable(),
   rate: z.string().regex(/^[0-9.]+$/),
   effectiveFrom: z.string().min(1),
 });
@@ -69,6 +92,8 @@ export async function createStaff(input: unknown): Promise<ActionResult<{ id: st
         name: parsed.data.name,
         role: parsed.data.role || null,
         avatar: parsed.data.avatar || initials,
+        photoPath: parsed.data.photoPath || null,
+        bio: parsed.data.bio || null,
         userId: login.id,
         rates: {
           create: { rate: new Decimal(parsed.data.rate), effectiveFrom: new Date(parsed.data.effectiveFrom) },
@@ -93,30 +118,63 @@ const updateStaffSchema = z.object({
   name: z.string().min(1),
   role: z.string().optional().default(""),
   avatar: z.string().optional().default(""),
+  photoPath: z.string().optional().nullable(),
+  bio: z.string().optional().nullable(),
 });
 
 export async function updateStaff(id: string, input: unknown): Promise<ActionResult> {
   const parsed = updateStaffSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
-  await prisma.staff.update({
-    where: { id },
-    data: {
-      name: parsed.data.name,
-      role: parsed.data.role || null,
-      avatar: parsed.data.avatar || null,
-    },
+  await prisma.$transaction(async (tx: TransactionClient) => {
+    const updated = await tx.staff.update({
+      where: { id },
+      data: {
+        name: parsed.data.name,
+        role: parsed.data.role || null,
+        avatar: parsed.data.avatar || null,
+        photoPath: parsed.data.photoPath || null,
+        bio: parsed.data.bio || null,
+      },
+      select: { userId: true },
+    });
+    // Mirror the name onto the linked login so Users and Staff stay in
+    // sync — they're meant to represent the same person.
+    if (updated.userId) {
+      await tx.user.update({
+        where: { id: updated.userId },
+        data: { name: parsed.data.name },
+      });
+    }
   });
   revalidatePath("/staff");
+  revalidatePath("/admin/users");
   return { ok: true };
 }
 
+const DEV_EMAIL = "dev@sparmanikfarm.local";
+
 export async function deleteStaff(id: string): Promise<ActionResult> {
   try {
-    await prisma.staff.delete({ where: { id } });
+    const result = await prisma.$transaction(async (tx: TransactionClient) => {
+      const staff = await tx.staff.findUnique({
+        where: { id },
+        select: { userId: true, user: { select: { email: true } } },
+      });
+      if (!staff) throw new Error("not_found");
+      await tx.staff.delete({ where: { id } });
+      // Cascade-delete the linked login too, unless it's the protected dev
+      // account.
+      if (staff.userId && staff.user?.email !== DEV_EMAIL) {
+        await tx.user.delete({ where: { id: staff.userId } });
+      }
+      return staff;
+    });
+    if (!result) return { ok: false, error: "Staff not found" };
   } catch {
     return { ok: false, error: "Can't delete staff who have wage entries — delete those first" };
   }
   revalidatePath("/staff");
+  revalidatePath("/admin/users");
   return { ok: true };
 }
 
@@ -223,5 +281,17 @@ export async function createWageEntry(input: unknown): Promise<ActionResult> {
     });
   });
   revalidatePath("/staff");
+  revalidatePath("/financials");
+  // Refresh every harvest detail page whose ID was referenced on a line, so
+  // the Labour cost stat on the harvest detail page updates without a
+  // manual reload.
+  const touchedHarvests = new Set(
+    parsed.data.lines
+      .map((l) => l.harvestId)
+      .filter((id): id is string => typeof id === "string" && id.length > 0),
+  );
+  for (const hid of touchedHarvests) {
+    revalidatePath(`/harvest/${hid}`);
+  }
   return { ok: true };
 }

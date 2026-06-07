@@ -1,0 +1,390 @@
+"use client";
+
+import { useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Plus, Sparkles, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Combobox } from "@/components/ui/combobox";
+import {
+  createItemQuick,
+  createSupplierQuick,
+  receiveStockBulk,
+} from "@/app/(app)/inventory/actions";
+
+type ItemOpt = { id: string; name: string; unit: string };
+type SupplierOpt = { id: string; name: string };
+type ItemHistory = { lastSupplierId: string | null; lastPrice: string; lastDate: string };
+type SupplierChip = {
+  itemId: string;
+  itemName: string;
+  unit: string;
+  lastPrice: string;
+  lastDate: string;
+};
+
+type Line = {
+  itemId: string | null;
+  qty: string;
+  price: string;
+  reusable: boolean;
+  maxUses: string;
+};
+
+const newLine = (): Line => ({
+  itemId: null,
+  qty: "1",
+  price: "0",
+  reusable: false,
+  maxUses: "1",
+});
+
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
+export function ReceiveStockClient({
+  items: initialItems,
+  suppliers: initialSuppliers,
+  defaultExchangeRate,
+  itemHistory,
+  supplierHistory,
+}: {
+  items: ItemOpt[];
+  suppliers: SupplierOpt[];
+  defaultExchangeRate: string;
+  itemHistory: Record<string, ItemHistory>;
+  supplierHistory: Record<string, SupplierChip[]>;
+}) {
+  const router = useRouter();
+  const [items, setItems] = useState<ItemOpt[]>(initialItems);
+  const [suppliers, setSuppliers] = useState<SupplierOpt[]>(initialSuppliers);
+  const [date, setDate] = useState(todayStr());
+  const [supplierId, setSupplierId] = useState<string | null>(null);
+  const [exchangeRate, setExchangeRate] = useState(defaultExchangeRate);
+  const [lines, setLines] = useState<Line[]>([newLine()]);
+  const [pending, startTransition] = useTransition();
+
+  const itemMap = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+
+  const prevFromSupplier: SupplierChip[] = supplierId ? supplierHistory[supplierId] ?? [] : [];
+  const usedItemIds = new Set(lines.map((l) => l.itemId).filter(Boolean) as string[]);
+
+  function updateLine(idx: number, patch: Partial<Line>) {
+    setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+  }
+
+  function addLine(prefill?: Partial<Line>) {
+    setLines((prev) => [...prev, { ...newLine(), ...prefill }]);
+  }
+
+  function removeLine(idx: number) {
+    setLines((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== idx)));
+  }
+
+  /** Re-use an item the chosen supplier has previously sold us — pre-fills
+   * the last unit price so the staff doesn't have to retype. Drops into an
+   * empty line if the current first row is blank, otherwise appends. */
+  function quickAddFromHistory(chip: SupplierChip) {
+    if (usedItemIds.has(chip.itemId)) {
+      toast.error(`${chip.itemName} is already on the receipt`);
+      return;
+    }
+    const emptyIdx = lines.findIndex((l) => !l.itemId);
+    if (emptyIdx >= 0) {
+      updateLine(emptyIdx, { itemId: chip.itemId, price: chip.lastPrice });
+    } else {
+      addLine({ itemId: chip.itemId, price: chip.lastPrice });
+    }
+  }
+
+  /** When an item with prior history is picked manually, also pre-fill the
+   * unit price from its last batch (only if the staff hasn't already typed). */
+  function pickItem(idx: number, newItemId: string | null) {
+    const line = lines[idx];
+    const patch: Partial<Line> = { itemId: newItemId };
+    if (newItemId && itemHistory[newItemId] && (line.price === "0" || line.price === "")) {
+      patch.price = itemHistory[newItemId].lastPrice;
+    }
+    updateLine(idx, patch);
+  }
+
+  async function handleCreateItem(idx: number, typed: string) {
+    const r = await createItemQuick(typed);
+    if (r.ok && r.data) {
+      const newItem: ItemOpt = { id: r.data.id, name: r.data.name, unit: r.data.unit };
+      setItems((prev) => [...prev, newItem].sort((a, b) => a.name.localeCompare(b.name)));
+      updateLine(idx, { itemId: newItem.id });
+      toast.success(`Created "${newItem.name}"`);
+    } else if (!r.ok) {
+      toast.error(r.error);
+    }
+  }
+
+  async function handleCreateSupplier(typed: string) {
+    const r = await createSupplierQuick(typed);
+    if (r.ok && r.data) {
+      const newSup: SupplierOpt = { id: r.data.id, name: r.data.name };
+      setSuppliers((prev) => [...prev, newSup].sort((a, b) => a.name.localeCompare(b.name)));
+      setSupplierId(newSup.id);
+      toast.success(`Created "${newSup.name}"`);
+    } else if (!r.ok) {
+      toast.error(r.error);
+    }
+  }
+
+  function totalLines(): number {
+    return lines.filter((l) => l.itemId && Number(l.qty) > 0).length;
+  }
+
+  function totalCost(): string {
+    const sum = lines.reduce(
+      (s, l) => (l.itemId ? s + Number(l.qty) * Number(l.price) : s),
+      0,
+    );
+    return sum.toFixed(2);
+  }
+
+  function handleSubmit() {
+    const validLines = lines.filter((l) => l.itemId && Number(l.qty) > 0);
+    if (validLines.length === 0) {
+      toast.error("Add at least one line with an item and qty > 0");
+      return;
+    }
+    startTransition(async () => {
+      const r = await receiveStockBulk({
+        date,
+        supplierId,
+        exchangeRate: exchangeRate || "1",
+        lines: validLines.map((l) => ({
+          itemId: l.itemId!,
+          qty: l.qty,
+          price: l.price,
+          maxUses: l.reusable ? Math.max(1, Number(l.maxUses) || 1) : 1,
+        })),
+      });
+      if (r.ok && r.data) {
+        toast.success(
+          `Received ${r.data.lineCount} batch${r.data.lineCount === 1 ? "" : "es"}`,
+        );
+        router.push("/inventory");
+        router.refresh();
+      } else if (!r.ok) {
+        toast.error(r.error);
+      }
+    });
+  }
+
+  // Build item-picker options once — annotate each with a hint of the last
+  // supplier + price so the staff sees prior context before clicking.
+  const itemOptions = useMemo(() => {
+    const supById = new Map(suppliers.map((s) => [s.id, s.name]));
+    return items.map((i) => {
+      const h = itemHistory[i.id];
+      let desc = i.unit;
+      if (h) {
+        const sup = h.lastSupplierId ? supById.get(h.lastSupplierId) : null;
+        desc = `${i.unit} · last: ${h.lastPrice}${sup ? ` from ${sup}` : ""} (${h.lastDate})`;
+      }
+      return { value: i.id, label: i.name, description: desc };
+    });
+  }, [items, suppliers, itemHistory]);
+
+  return (
+    <>
+      {/* Step 1 — Header form. Compact two-row layout: date+supplier on top,
+          exchange rate below + dim because it's pre-filled from settings. */}
+      <Card>
+        <CardContent className="space-y-3 p-4">
+          <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[10px] font-bold text-accent-foreground">
+              1
+            </span>
+            Who and when
+          </div>
+          <div className="grid gap-3 sm:grid-cols-[1fr_2fr_1fr]">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Date</Label>
+              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Supplier</Label>
+              <Combobox
+                value={supplierId}
+                onChange={(v) => setSupplierId(v)}
+                placeholder="Pick or type to create"
+                options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+                onCreate={handleCreateSupplier}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Exchange rate (IDR/AUD)</Label>
+              <Input
+                type="number"
+                step="any"
+                min="0"
+                value={exchangeRate}
+                onChange={(e) => setExchangeRate(e.target.value)}
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Step 2 — Quick-add chips for items previously bought from the
+          chosen supplier, so the staff doesn't have to search blindly. */}
+      {supplierId && prevFromSupplier.length > 0 ? (
+        <Card>
+          <CardContent className="space-y-2 p-4">
+            <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              <Sparkles className="h-3.5 w-3.5" />
+              Previously bought from this supplier
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {prevFromSupplier.map((chip) => {
+                const taken = usedItemIds.has(chip.itemId);
+                return (
+                  <button
+                    key={chip.itemId}
+                    type="button"
+                    onClick={() => quickAddFromHistory(chip)}
+                    disabled={taken}
+                    className={cn(
+                      "rounded-full border px-3 py-1 text-xs transition",
+                      taken
+                        ? "cursor-not-allowed border-dashed bg-muted/40 text-muted-foreground/60 line-through"
+                        : "border-accent/40 bg-accent/10 text-foreground hover:border-accent hover:bg-accent/20",
+                    )}
+                    title={`Last bought ${chip.lastDate} at ${chip.lastPrice} per ${chip.unit}`}
+                  >
+                    {chip.itemName}
+                    <span className="ml-1.5 text-[10px] text-muted-foreground">
+                      {chip.lastPrice}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              Click any to add a line pre-filled with the last unit price.
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/* Step 3 — Lines. Hidden behind a numbered step header so the eye
+          travels top-to-bottom and the page doesn't feel like a wall of
+          form. */}
+      <Card>
+        <CardContent className="space-y-3 p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[10px] font-bold text-accent-foreground">
+                2
+              </span>
+              What you received
+            </div>
+            <Button type="button" size="sm" variant="outline" onClick={() => addLine()}>
+              <Plus className="h-3.5 w-3.5" /> Add line
+            </Button>
+          </div>
+
+          <div className="space-y-2">
+            {lines.map((line, idx) => {
+              const item = line.itemId ? itemMap.get(line.itemId) : null;
+              return (
+                <div
+                  key={idx}
+                  className="grid grid-cols-1 gap-2 rounded-lg border bg-background/40 p-2.5 sm:grid-cols-[3fr_1fr_1.2fr_1.5fr_auto]"
+                >
+                  <Combobox
+                    value={line.itemId}
+                    onChange={(v) => pickItem(idx, v)}
+                    placeholder="Search items (type to create new)"
+                    options={itemOptions}
+                    onCreate={(typed) => handleCreateItem(idx, typed)}
+                  />
+                  <Input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={line.qty}
+                    onChange={(e) => updateLine(idx, { qty: e.target.value })}
+                    placeholder="qty"
+                    title="Quantity"
+                  />
+                  <Input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={line.price}
+                    onChange={(e) => updateLine(idx, { price: e.target.value })}
+                    placeholder="unit price"
+                    title="Unit price"
+                  />
+                  <div className="flex h-9 items-center gap-2 rounded-md border bg-muted/20 px-2.5">
+                    <Switch
+                      checked={line.reusable}
+                      onCheckedChange={(v) => updateLine(idx, { reusable: v })}
+                    />
+                    <span className="text-xs text-muted-foreground">Reusable</span>
+                    {line.reusable ? (
+                      <Input
+                        type="number"
+                        step="1"
+                        min="1"
+                        value={line.maxUses}
+                        onChange={(e) => updateLine(idx, { maxUses: e.target.value })}
+                        className="h-7 w-14"
+                        placeholder="uses"
+                        title="Max uses"
+                      />
+                    ) : null}
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => removeLine(idx)}
+                    disabled={lines.length === 1}
+                    title="Remove this line"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                  {item && line.reusable && Number(line.price) > 0 && Number(line.maxUses) > 0 ? (
+                    <div className="col-span-full -mt-1 text-[10px] text-muted-foreground sm:col-span-5">
+                      Cost per use:{" "}
+                      <strong className="text-foreground">
+                        {(Number(line.price) / Number(line.maxUses)).toFixed(2)}
+                      </strong>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="sticky bottom-0 -mx-4 flex items-center justify-between gap-3 border-t bg-background/95 px-4 py-3 backdrop-blur sm:mx-0 sm:rounded-lg sm:border">
+        <div className="text-sm text-muted-foreground">
+          <strong className="text-foreground">{totalLines()}</strong> line
+          {totalLines() === 1 ? "" : "s"} · estimated total{" "}
+          <strong className="text-foreground">{totalCost()}</strong>
+        </div>
+        <div className="flex gap-2">
+          <Button asChild variant="ghost">
+            <a href="/inventory">Cancel</a>
+          </Button>
+          <Button onClick={handleSubmit} disabled={pending || totalLines() === 0}>
+            {pending ? "Receiving…" : `Receive ${totalLines()} line${totalLines() === 1 ? "" : "s"}`}
+          </Button>
+        </div>
+      </div>
+    </>
+  );
+}

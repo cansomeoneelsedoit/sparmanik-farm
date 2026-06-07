@@ -164,8 +164,39 @@ model Organization {
   auditActions    AuditAction[]
   aiConversations AiConversation[]
   aiMessages      AiMessage[]
+  expenses        Expense[]
+  labourTasks     LabourTask[]
+  aiProviderKeys  AiProviderKey[]
 
   @@map("organizations")
+}
+
+model Expense {
+  id              String   @id @default(cuid())
+  organizationId  String?  @map("organization_id")
+  date            DateTime @db.Date
+  amount          Decimal  @db.Decimal(18, 4)
+  category        String?
+  /** Free-form name of who got paid — contractor, individual, utility co. */
+  payee           String
+  description     String?
+  /** Optional: allocate this expense to a specific harvest's P&L. When
+   * null, the expense stays at the business level (general overhead). */
+  harvestId       String?  @map("harvest_id")
+  /** "cash", "transfer", "card", etc. — free-form. */
+  paymentMethod   String?  @map("payment_method")
+  /** Optional receipt photo (uploads-relative path). */
+  receiptPath     String?  @map("receipt_path")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  harvest      Harvest?      @relation(fields: [harvestId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([harvestId])
+  @@index([date])
+  @@map("expenses")
 }
 
 model OrganizationMembership {
@@ -272,7 +303,11 @@ model Supplier {
 model Item {
   id                String   @id @default(cuid())
   organizationId    String?   @map("organization_id")
+  /** Internal short code printed on bins and used in search ("SF00001"). */
+  code              String
   name              String
+  description       String?
+  photoPath         String?  @map("photo_path")
   categoryId        String?  @map("category_id")
   unit              String
   subUnit           String?  @map("sub_unit")
@@ -292,6 +327,7 @@ model Item {
   harvestAssets    HarvestAsset[]
   harvestUsages    HarvestUsage[]
 
+  @@unique([organizationId, code])
   @@index([organizationId])
   @@index([categoryId])
   @@index([defaultSupplierId])
@@ -318,12 +354,17 @@ model Batch {
   // original purchase cost is already on Business P&L. The amortised charge
   // still follows the batch via amortisedCostPerUse.
   returned              Boolean  @default(false)
+  // Set when a reusable batch was checked back in as damaged or lost from
+  // a specific harvest, so the Financials page can attribute the loss.
+  // Null in all normal cases.
+  damagedFromHarvestId  String?  @map("damaged_from_harvest_id")
   createdAt             DateTime @default(now()) @map("created_at")
 
-  organization  Organization?       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  item          Item               @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  supplier      Supplier?          @relation(fields: [supplierId], references: [id])
-  consumptions  BatchConsumption[]
+  organization      Organization?       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  item              Item               @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  supplier          Supplier?          @relation(fields: [supplierId], references: [id])
+  consumptions      BatchConsumption[]
+  damagedFromHarvest Harvest?          @relation("BatchDamagedFromHarvest", fields: [damagedFromHarvestId], references: [id])
 
   @@index([organizationId])
   @@index([itemId, date])
@@ -365,15 +406,17 @@ model Harvest {
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
 
-  organization Organization?      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  greenhouse   Greenhouse        @relation(fields: [greenhouseId], references: [id])
-  produce      Produce?          @relation(fields: [produceId], references: [id])
-  produces     HarvestProduce[]
-  assets       HarvestAsset[]
-  usages       HarvestUsage[]
-  sales        Sale[]
-  wageLines    WageEntryLine[]
-  tasks        Task[]
+  organization     Organization?      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  greenhouse       Greenhouse        @relation(fields: [greenhouseId], references: [id])
+  produce          Produce?          @relation(fields: [produceId], references: [id])
+  produces         HarvestProduce[]
+  assets           HarvestAsset[]
+  usages           HarvestUsage[]
+  sales            Sale[]
+  wageLines        WageEntryLine[]
+  tasks            Task[]
+  damagedBatches   Batch[]           @relation("BatchDamagedFromHarvest")
+  expenses         Expense[]
 
   @@index([organizationId])
   @@index([status, startDate])
@@ -394,6 +437,13 @@ model HarvestAsset {
   maxUses         Int      @default(1) @map("max_uses")
   useCount        Int      @default(0) @map("use_count")
   discarded       Boolean  @default(false)
+  // Check-in state when the asset comes back to inventory mid-harvest or at
+  // end-harvest. "good" returns to inventory; "damaged"/"lost" stay with the
+  // business and the residual depreciable value gets written off on the
+  // Financials page (and linked back to this harvest).
+  returnCondition String?  @map("return_condition")
+  returnedAt      DateTime? @map("returned_at")
+  returnNote      String?  @map("return_note")
   createdAt       DateTime @default(now()) @map("created_at")
 
   organization Organization?       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -456,6 +506,8 @@ model Staff {
   role           String?
   avatar         String?
   photoPath      String?  @map("photo_path")
+  /** Free-form bio / fun facts (family, pets, hobbies, animals' names). */
+  bio            String?
   userId         String?  @unique @map("user_id")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
@@ -655,6 +707,56 @@ model Video {
 
   @@index([organizationId])
   @@map("videos")
+}
+
+// Ranked LLM credentials. The ai-chain at src/server/ai-chain.ts walks
+// these top-to-bottom (lowest rank first), advances on 429/quota/4xx,
+// retries network/5xx once. Multiple free Gemini accounts + paid
+// Anthropic backstop is the typical pattern.
+model AiProviderKey {
+  id             String    @id @default(cuid())
+  organizationId String?   @map("organization_id")
+  /** "gemini" | "groq" | "cerebras" | "openrouter" | "mistral" | "anthropic" */
+  provider       String
+  /** Human label e.g. "Primary", "Boyd backup". Surfaced in the settings UI. */
+  label          String?
+  /** Real secret. Never sent to the client; settings UI shows last 6 chars only. */
+  apiKey         String    @map("api_key")
+  /** Override the provider's default model for this key. Null = use default. */
+  model          String?
+  /** Lower = tried first. */
+  rank           Int       @default(100)
+  enabled        Boolean   @default(true)
+  /** "ok" | "quota" | "error" | "untested" — written after each call/test. */
+  lastStatus     String?   @map("last_status")
+  lastUsedAt     DateTime? @map("last_used_at")
+  lastError      String?   @map("last_error")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([rank])
+  @@map("ai_provider_keys")
+}
+
+// Editable pick-list shown in the "Log labour" dialog. Staff are forced to
+// pick one of these (or "Other" → manual entry). Each row is scoped to one
+// org; admins can rename/disable/add via /settings/labour-tasks.
+model LabourTask {
+  id             String   @id @default(cuid())
+  organizationId String?  @map("organization_id")
+  name           String
+  sortOrder      Int      @default(0) @map("sort_order")
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("labour_tasks")
 }
 
 // ---------- Settings ----------

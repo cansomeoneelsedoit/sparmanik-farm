@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Check, ChevronsUpDown, Search } from "lucide-react";
+import { Check, ChevronsUpDown, Plus, Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -22,8 +22,12 @@ export function Combobox({
   placeholder = "Select…",
   disabled = false,
   emptyHint = "No matches.",
-  searchThreshold = 5,
+  // Show the search input as soon as there's more than a handful of options
+  // — typing two or three letters should always filter, never hunt-and-peck.
+  searchThreshold = 3,
   className,
+  onCreate,
+  createLabel,
 }: {
   options: ComboboxOption[];
   value: string | null | undefined;
@@ -33,6 +37,14 @@ export function Combobox({
   emptyHint?: string;
   searchThreshold?: number;
   className?: string;
+  /**
+   * When provided, the dropdown shows a "+ Create '<query>'" affordance at
+   * the bottom whenever the typed query doesn't exactly match any option.
+   * The handler receives the typed label; it should create the entity, then
+   * the parent updates `options` and `value` so the new row is selected.
+   */
+  onCreate?: (label: string) => void | Promise<void>;
+  createLabel?: (typed: string) => string;
 }) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
@@ -105,10 +117,18 @@ export function Combobox({
             </div>
           ) : null}
           <div className="max-h-60 overflow-y-auto p-1">
-            {filtered.length === 0 ? (
-              <div className="px-3 py-2 text-xs text-muted-foreground">{emptyHint}</div>
-            ) : (
-              filtered.map((o) => {
+            {(() => {
+              const trimmed = query.trim();
+              const exactMatch =
+                trimmed !== "" &&
+                filtered.some((o) => o.label.toLowerCase() === trimmed.toLowerCase());
+              const showCreate = !!onCreate && trimmed !== "" && !exactMatch;
+              if (filtered.length === 0 && !showCreate) {
+                return <div className="px-3 py-2 text-xs text-muted-foreground">{emptyHint}</div>;
+              }
+              return (
+                <>
+                  {filtered.map((o) => {
                 const active = o.value === value;
                 return (
                   <button
@@ -138,8 +158,29 @@ export function Combobox({
                     </span>
                   </button>
                 );
-              })
-            )}
+              })}
+              {showCreate ? (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const label = trimmed;
+                    setOpen(false);
+                    setQuery("");
+                    await onCreate?.(label);
+                  }}
+                  className="mt-1 flex w-full items-center gap-2 rounded-sm border-t px-2 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
+                >
+                  <Plus className="h-3.5 w-3.5 shrink-0" />
+                  <span className="flex-1 truncate">
+                    {createLabel
+                      ? createLabel(trimmed)
+                      : <>Create &ldquo;<strong>{trimmed}</strong>&rdquo;</>}
+                  </span>
+                </button>
+              ) : null}
+                </>
+              );
+            })()}
           </div>
         </div>
       ) : null}

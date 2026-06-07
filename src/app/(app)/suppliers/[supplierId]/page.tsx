@@ -21,7 +21,9 @@ export const dynamic = "force-dynamic";
 
 export default async function SupplierDetailPage({ params }: { params: Promise<{ supplierId: string }> }) {
   const { supplierId } = await params;
-  const supplier = await prisma.supplier.findUnique({
+  // findFirst so the prisma extension can append organizationId for org
+  // isolation — findUnique rejects non-unique predicates in its where.
+  const supplier = await prisma.supplier.findFirst({
     where: { id: supplierId },
     include: {
       batches: {

@@ -108,12 +108,19 @@ export function InstallAssetDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline">Install from inventory</Button>
+        <Button variant="outline">Install asset</Button>
       </DialogTrigger>
       <DialogContent>
         <form onSubmit={form.handleSubmit(onSubmit)}>
-          <DialogHeader><DialogTitle>Install asset on harvest</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Install an asset on this harvest</DialogTitle>
+          </DialogHeader>
           <div className="space-y-4 py-4">
+            <p className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              For physical things installed in the greenhouse:{" "}
+              <strong className="text-foreground">drippers, plumbing, frames</strong> (Fixed),
+              or <strong className="text-foreground">rockwool, grow bags</strong> (Reusable — depreciates per use).
+            </p>
             <div className="space-y-2">
               <Label>Item</Label>
               <Combobox
@@ -143,8 +150,8 @@ export function InstallAssetDialog({
                 <Select value={form.watch("type")} onValueChange={(v) => form.setValue("type", v as "reusable" | "onetime")}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="reusable">Reusable</SelectItem>
-                    <SelectItem value="onetime">One-time</SelectItem>
+                    <SelectItem value="reusable">Reusable (depreciates per use)</SelectItem>
+                    <SelectItem value="onetime">Fixed (stays here, one-time)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

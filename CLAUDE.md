@@ -57,7 +57,11 @@ src/
 │   │   ├── sales/
 │   │   ├── financials/
 │   │   ├── calendar/
-│   │   ├── settings/{categories,produce,greenhouses,staff,general}/
+│   │   ├── settings/{categories,produce,greenhouses,staff,labour-tasks,general}/
+│   │   ├── expenses/                Misc expenses (contractors, cash, etc.)
+│   │   ├── inventory/identify/      Visual Item Identifier (Claude vision)
+│   │   ├── inventory/receive/       Multi-line Receive Stock
+│   │   ├── inventory/import/        Excel (Shopee export) import
 │   │   ├── ask-ai/                 Claude integration (env-gated)
 │   │   └── audit/actions.ts        undoActionById server action
 │   ├── api/
@@ -68,9 +72,11 @@ src/
 │   └── layout.tsx                  root layout, next-intl provider, theme bootstrap
 ├── components/
 │   ├── ui/                         shadcn primitives (button, dialog, etc.)
-│   └── shared/                     Money, LocalizedText, ConfirmDialog,
-│                                   Sidebar, Topbar, AlertBell, AuditHistorySheet,
-│                                   ThemeToggle, LangToggle
+│   └── shared/                     Money, LocalizedText (server),
+│                                   LocalizedTextClient (client),
+│                                   ConfirmDialog, Sidebar, Topbar, AlertBell,
+│                                   AuditHistorySheet, ThemeToggle, LangToggle,
+│                                   ClearCacheButton, SmartImage, PieChart
 ├── server/                         server-only utils (never imported by client)
 │   ├── prisma.ts                   re-exports the singleton
 │   ├── decimal.ts                  Decimal, InputJsonValue, TransactionClient
@@ -81,7 +87,9 @@ src/
 │   ├── audit.ts                    recordAction, undoAction, registry
 │   ├── audit-handlers.ts           every undo handler registered here
 │   ├── uploads.ts                  sharp resize → ./uploads (Volume in prod)
-│   └── ai.ts                       Claude SDK + farm-context system prompt
+│   ├── ai.ts                       Claude SDK + farm-context system prompt
+│   ├── receipt-ocr.ts              Claude vision for expense receipts
+│   └── item-vision.ts              Claude vision for inventory item identification
 ├── i18n/
 │   ├── routing.ts / request.ts / actions.ts
 │   └── messages/{en,id}.json
@@ -92,8 +100,8 @@ src/
 ├── proxy.ts                        Auth.js Proxy (Next-16 "middleware" rename)
 └── types/next-auth.d.ts            session.user.id augmentation
 prisma/
-├── schema.prisma                   13 domain entities + auth + audit
-├── migrations/                     2 migrations (init + domain_schema)
+├── schema.prisma                   ~20 domain entities + auth + audit
+├── migrations/                     14 migrations (see prisma/migrations/)
 └── seed.ts                         loads legacy farm-legacy.js S object via vm
 ```
 
@@ -102,7 +110,10 @@ prisma/
 ~17 domain models + Auth.js tables + AI conversation + multi-org tables. See `prisma/schema.prisma`. Key concepts:
 
 - **Multi-tenant via `Organization` + `OrganizationMembership`**. Three fixed orgs seeded: `org_sparmanik` (all legacy data), `org_andre` (Andre Melon, empty), `org_kevin` (Kevin Farm, empty). The active org is held in the `activeOrgId` cookie; Boyd (superuser / Dev User) is the only OWNER across all three.
-- **Auto-scoping via Prisma `$extends`** in `src/lib/prisma.ts`. The extension reads `activeOrgId` from the request cookie (dynamic `import("next/headers")`) and injects `where: { organizationId }` on reads/updates/deletes and `data: { organizationId }` on creates for every model in `ORG_SCOPED_MODELS` (18 tenant tables: Category, Produce, Greenhouse, Supplier, Item, Batch, Staff, Harvest, HarvestAsset, HarvestUsage, Sale, Task, NutrientRecipe, Sop, Video, AuditAction, AiConversation, AiMessage). Non-request contexts (seed, CLI scripts) skip scoping — they must stamp `organizationId` explicitly. **Implication**: `organizationId` is `String?` in the Prisma schema (so `prisma.x.create({ data: {…} })` typechecks without the field) but **`NOT NULL` in the DB** via migration; if the extension doesn't fire, the FK fails — safe failure.
+- **Auto-scoping via Prisma `$extends`** in `src/lib/prisma.ts`. The extension reads `activeOrgId` from the request cookie (dynamic `import("next/headers")`) and injects `where: { organizationId }` on reads/updates/deletes and `data: { organizationId }` on creates for every model in `ORG_SCOPED_MODELS` (**20** tenant tables: Category, Produce, Greenhouse, Supplier, Item, Batch, Staff, Harvest, HarvestAsset, HarvestUsage, Sale, Task, NutrientRecipe, Sop, Video, AuditAction, AiConversation, AiMessage, Expense, LabourTask). Non-request contexts (seed, CLI scripts) skip scoping — they must stamp `organizationId` explicitly. **Implication**: `organizationId` is `String?` in the Prisma schema (so `prisma.x.create({ data: {…} })` typechecks without the field) but **`NOT NULL` in the DB** via migration; if the extension doesn't fire, the FK fails — safe failure.
+  - **Cookie validation checks membership**, not just org existence. A cookie pointing at an org the user isn't in falls through to their first membership — this fixed a 404 storm where dev@'s old `activeOrgId=org_andre` cookie was persisting after sign-out and scoping the next user's queries to a foreign org.
+  - **Resolution is wrapped in React `cache()`** so it runs once per request, even across 20+ parallel queries. Without this every query did 2 DB round-trips just to figure out the org, which dominated render time on the dashboard.
+  - **For detail pages (`/harvest/[id]`, `/inventory/[id]`, `/suppliers/[id]`, `/recipes/[id]`, `/sops/[id]`)** use `findFirst` not `findUnique`. `findUnique` rejects the extra `organizationId` predicate the extension injects, silently returning null and 404'ing the page.
 - **Active-org plumbing**: `src/server/org.ts` (`listMyOrgs`, `getActiveOrgId`, `requireActiveOrgId`), `src/server/org-actions.ts` (`setActiveOrg`), `src/components/shared/org-switcher.tsx` (Xero-style dropdown in topbar). Single-org users see a static label; multi-org users see the chevron + dropdown.
 - **FIFO inventory** via `Batch` + `BatchConsumption`. Remaining = `qty − Σ(consumptions.qty)`. **No denormalised `remaining` column** — recompute on read.
 - **Depreciable assets** (cocopeat, rockwool, grow bags): `Batch.maxUses / useCount / amortisedCostPerUse / returned`. Each harvest gets charged `amortisedCharge = qty × amortisedCostPerUse`; at end-harvest, batches with remaining uses return as `price=0` batches (same `amortisedCostPerUse`) so future harvests still get charged a fair share without further cash leaving the business. Invariant: `Σ(amortised_charge) + (remaining_uses × cost_per_use × remaining_qty) = original_price`. See `src/server/fifo.ts`, `src/server/pl.ts`.
@@ -114,7 +125,10 @@ prisma/
 - **Two-tier auth**: `User.role` is `USER` or `SUPERUSER`. Only SUPERUSER sees `/admin/users` (create / edit / reset password / delete) and the "Users" sidebar entry. Dev User is auto-promoted on every seed.
 - **Staff ↔ User**: `Staff.userId` is a unique nullable FK. Seed auto-creates a login for every staff (`<firstname>@sparmanikfarm.local`, password `Jasper1.0!`). `createStaff` provisions one in the same transaction.
 - **Ask AI conversations**: `AiConversation` groups `AiMessage`s per user (ChatGPT/Claude.ai-style sidebar). `AiMessage.attachments` (Json) holds vision images for user messages: `[{ path, mimeType, width, height }]`.
-- **SOP / Video** have parallel EN/ID columns. Render via `<LocalizedText en={…} id={…} />`.
+- **SOP / Video** have parallel EN/ID columns. Render via `<LocalizedText en={…} id={…} />` in **server** components or `<LocalizedTextClient>` (from `localized-text-client.tsx`) in **client** components. The server version uses `getLocale()` which throws inside a `"use client"` tree.
+- **Items have a sequential code `SF#####`** auto-stamped on create (`nextItemCode()` in `src/app/(app)/inventory/actions.ts`). Backfilled in creation order for legacy rows. Unique per org. Shown on inventory cards + detail header; searchable. New: Visual Identifier at `/inventory/identify` matches a photo against the catalogue via Claude vision.
+- **Labour tasks** are an editable per-org pick-list (`LabourTask` model, seeded with 14 farm defaults: Seeding, Transplanting, Watering, etc.). The "Log labour" dialog forces selection of a task, with "Other (type below)…" revealing a free-text input. Managed under `/settings/labour-tasks`.
+- **Expense receipts get OCR'd via Claude vision** in `src/server/receipt-ocr.ts`. Camera capture on mobile via `<input type="file" capture="environment">`. User picks "Keep & extract" (photo saved + fields filled) or "Extract only" (photo discarded). Indonesian rupiah amounts ("Rp 150.000" with dot thousand-separators) handled by `normaliseAmount()`.
 
 ## Common gotchas
 
@@ -199,6 +213,59 @@ prisma/
     misleads because unauthenticated `/ask-ai` redirects to `/signin`,
     so banner-grep returns 0 even when the running container still has
     the old code. Use an authenticated browser fetch to verify.
+
+16. **Bulletproof cache-clear escape hatch at `/clear.html`.** Plain
+    static HTML (in `public/`, no React, no Next chunks) that wipes
+    Cache Storage API + service workers + localStorage +
+    sessionStorage, then bounces to `/`. Use when Turbopack chunks
+    are stale and `/clear` (the React-based version) can't even
+    load. There's also a big amber **Clear cache** button in the
+    topbar for the in-app path.
+
+17. **`<script>` tags in `RootLayout` need `next/script`.** Adding a
+    `<script dangerouslySetInnerHTML>` directly to `<body>` (or even
+    `<head>`) in `src/app/layout.tsx` triggers a Next 16 dev warning
+    ("Scripts inside React components are never executed when
+    rendering on the client") and can cause hydration mismatches.
+    The theme bootstrap uses `<Script id="..." strategy="beforeInteractive">`
+    from `next/script` — it lives outside the React render tree.
+
+18. **Server-only imports leak into client bundles transitively.**
+    `<Money>` (in `src/components/shared/money.tsx`) is `async` and
+    imports `@/server/prisma` to read the exchange rate. Importing
+    `<Money>` into a `"use client"` component (e.g. the sales chart)
+    pulls Prisma into the browser bundle and crashes Turbopack with
+    "the chunking context does not support external modules (request:
+    node:module)". Fix: pre-format on the server side and pass the
+    formatted string into the client component. `SalesCharts` accepts
+    `valueFormatted` for exactly this reason.
+
+19. **`SmartImage` (`src/components/shared/smart-image.tsx`) is the
+    standard image renderer.** Falls back to a Lucide placeholder if
+    the underlying upload 404s. Use it instead of raw `<img>` for
+    user-uploaded content (item photos, staff photos, receipt
+    thumbnails). The `/api/uploads/[...path]` route is deliberately
+    minimal — no DB writes — so a single page render with 20+ image
+    tags doesn't pile up Prisma transactions.
+
+20. **Uploads route returns `Cache-Control: max-age=31536000, immutable`.**
+    Filenames are content-addressed random cuids, so the bytes at a
+    given URL never change. Long-cache aggressively to avoid
+    re-fetching 400 inventory thumbnails on every navigation.
+
+21. **Docker Compose env precedence: host shell > `.env` file**. The
+    `web` service used to interpolate creds via `${ANTHROPIC_API_KEY:-}`
+    in `environment:`. If the host shell exports an empty value for
+    that variable (Claude Code does this — clears `ANTHROPIC_API_KEY`
+    to route through its own credential mechanism), the empty shell
+    value silently wins and the container gets `""`. Symptom: Ask AI
+    and the new receipt-OCR / visual identifier features all error
+    with "ANTHROPIC_API_KEY not configured" despite the key sitting
+    in `.env`. Fix: `env_file: - .env` directly on the web service in
+    `docker-compose.yml`, so values from the file load into the
+    container regardless of the host shell. `environment:` still
+    overrides where it has to (e.g. `DATABASE_URL` for the docker-net
+    `db` hostname).
 
 ## Auth flow
 
@@ -360,6 +427,172 @@ npm run check:i18n         # diff EN vs ID keysets
     assets always come back fresh — a deploy or an image swap
     is visible without `Ctrl+Shift+R`. Trade-off: every nav
     re-fetches the HTML, fine for a small admin app.
+
+- **2026-06-08 (evening, late)** — **Receipt OCR accepts JPG / PNG /
+  PDF / Word (.docx) / Excel (.xlsx)**. Files route through the AI
+  chain based on type:
+  - Images → sharp resize → `askVision()` with `image/jpeg`
+  - PDFs → `askVision()` with `application/pdf` (Anthropic uses
+    `type: "document"` blocks; Gemini passes the same `inline_data`
+    shape with the PDF mime type).
+  - Word → `mammoth.extractRawText()` → text-only `ask()` chain
+  - Excel → `xlsx.utils.sheet_to_csv()` on sheet 1 → text-only
+    `ask()` chain
+  - `classifyReceiptFile()` in `src/server/receipt-ocr.ts` is the
+    dispatch table — anything outside the supported set is rejected
+    with a clear error before vision tokens are spent.
+  - `saveFileUpload()` in `src/server/uploads.ts` stores PDF/Word/
+    Excel bit-for-bit (sharp's image pipeline doesn't apply). 10 MB
+    cap. The `/api/uploads` route's MIME map now covers them so
+    PDFs render in the iframe-based lightbox preview.
+  - Per-Gemini-key model overrides in the env-backed chain: rank-1
+    reads `BIZGPT_MODEL` (defaults gemini-2.5-flash), rank-2 reads
+    `GEMINI_MODEL_2` (defaults gemini-flash-latest), rank-3 reads
+    `GEMINI_MODEL_3` (defaults gemini-flash-latest). DB-managed
+    keys keep their own `model` column unchanged.
+
+- **2026-06-08 (evening)** — **Farm data Health Check page shipped**.
+  `/health-check` runs a suite of diagnostics against the org's data and
+  surfaces issues grouped by severity (Critical / Worth fixing / Nice to
+  have / All clear). Top-of-page **health score** = percentage of checks
+  that came back clean.
+  - 10 checks today, all in `src/server/health-checks.ts`:
+    Unnamed items, uncategorised items, items without description,
+    items without photo, possibly mis-flagged reusable
+    (regex heuristic on the name), stale LIVE harvests > 6 months,
+    suppliers without contact, staff without rate, expenses without
+    category, singleton categories (likely typos).
+  - **Per-check AI suggestions**. Click "Get AI suggestions" inside any
+    expandable card → the chain (`src/server/ai-chain.ts::ask()`) drafts
+    a fix for each affected item (e.g. category names sourced from the
+    org's existing category list to avoid fragmentation). Per-row
+    **Apply** / **Skip** buttons. Apply writes through
+    `src/app/(app)/health-check/actions.ts::applyFix()`.
+  - Cleaning up unnamed legacy seed items, fixing rockwool that landed
+    as consumable, suggesting categories for the "Other" bucket — all
+    work flows through this page now.
+
+- **2026-06-08 (afternoon)** — **AI provider chain shipped**. Migration
+  `20260608090000_ai_provider_keys` adds an `AiProviderKey` model (per-
+  org). `src/server/ai-chain.ts` exposes `ask({ prompt, json?, ... })`
+  and `askVision({ prompt, imageBase64, imageMediaType, ... })`. The
+  chain walks DB-managed keys top-to-bottom (lowest `rank` first), then
+  env-backed keys as a safety net. Adapters for Gemini (native REST),
+  OpenAI-compatible (Groq, Cerebras, OpenRouter, Mistral — same shape,
+  different base URLs), and Anthropic. 429 / quota / 4xx advances to
+  the next provider immediately; 5xx and network errors retry once
+  with backoff. Outcome is recorded on the row (`lastStatus`,
+  `lastUsedAt`, `lastError`) so the user can see in the settings UI
+  which key was used last and which is currently rate-limited.
+  - Receipt OCR (`src/server/receipt-ocr.ts`) and visual item
+    identifier (`src/server/item-vision.ts`) now go through
+    `askVision()` instead of calling the Anthropic SDK directly. They
+    fall back to Gemini transparently when Anthropic 429s.
+  - `/settings/ai-keys` adds rank, label, model override, enable
+    toggle, edit, delete, reorder (up/down arrows), and a **per-row
+    Test button** that pings the provider with "Say OK" and writes
+    the result back to `lastStatus`. Keys are stored server-side
+    only; the page masks all but the last 6 chars (`••••••••••XYZAB`)
+    and the edit form sends `apiKey: ""` to mean "keep the current
+    key". A second card lists env-backed providers (read from `.env`
+    / Railway Variables) so the user knows the chain has them as a
+    fallback even when the DB list is empty.
+
+- **2026-06-07 → 2026-06-08** — Major UX + perf overhaul, plus a wave
+  of new entity types and AI-powered flows:
+  - **Item codes (`SF#####`)** auto-generated, unique per org. Migration
+    `20260608070000_item_codes` adds the column, backfills every legacy
+    row in creation order, and adds the NOT NULL constraint.
+    `nextItemCode()` in inventory/actions.ts is the single source of
+    truth — used by `createItem`, `createItemQuick`, the Shopee Excel
+    import, and the audit `item.create` restore handler. Searchable,
+    displayed on cards + detail header.
+  - **Visual Item Identifier** at `/inventory/identify`. Camera or
+    upload → photo + the org's catalogue text are sent to Claude vision
+    (`src/server/item-vision.ts`) → up to 5 ranked matches with
+    confidence (Strong / Plausible / Weak) and a one-line reason.
+    Image never hits disk.
+  - **Camera + OCR for expense receipts** (`src/server/receipt-ocr.ts`).
+    Mobile camera via `capture="environment"`. User picks
+    Keep & Extract / Extract Only. Pre-fills payee, amount, date,
+    category, payment method, description from the receipt. Indonesian
+    rupiah dot-thousand-separator format normalised in
+    `normaliseAmount()`.
+  - **Labour tasks** are an editable per-org pick-list
+    (`LabourTask` model in migration
+    `20260607080000_labour_tasks_and_video_thumbs`, seeded with 14
+    defaults). The "Log labour" dialog forces task selection (was
+    optional free-text); "Other (type below)…" reveals a manual entry
+    input. Managed under `/settings/labour-tasks`.
+  - **SOPs + Videos pages got search, grid/list toggle, and clickable
+    category chips.** `LocalizedText` had to be split into a server
+    component (`localized-text.tsx`, uses `getLocale()`) and a client
+    component (`localized-text-client.tsx`, uses `useLocale()`) because
+    the search/filter UI lives in a `"use client"` tree.
+  - **Suppliers page gained a product search box** — type a product
+    name or `SF#####` code to filter to suppliers who've delivered
+    that item. Each supplier card lists the top 6 products supplied as
+    clickable chips.
+  - **Sidebar restructured into collapsible groups** (state persists
+    via `localStorage`):
+    - Top-level: Dashboard, Greenhouses, Inventory, Staff
+    - **Operations**: Calendar, Tasks (with red count badge for
+      non-completed tasks)
+    - **Financial**: Sales, Expenses, Suppliers, Total Business Financials
+    - **Content**: Nutrient Recipes, Videos, SOPs
+    - **Settings**: Settings, Users (superuser-only)
+    - Plus standalone **Ask AI**
+  - **Dashboard merged with Sales metrics**: 8 clickable KPI cards
+    (Active harvests, 30-day revenue, Inventory value, Open tasks,
+    Items, Staff, Lifetime revenue, Avg price/kg) + the full
+    `SalesCharts` (30-day area trend + top-6 greenhouse + top-6
+    produce bars) + two donut charts (sales mix + inventory value by
+    category) + alerts panel. The standalone `/sales` page survives
+    untouched as the filterable detail view.
+  - **`PieChart` primitive** (`src/components/shared/pie-chart.tsx`)
+    — pure inline SVG, 8-colour palette, responsive legend (stacks
+    below on phone, beside on tablet). Reusable.
+  - **Sales charts no longer use `<Money>`** — they're `"use client"`
+    components, so callers pre-format and pass `valueFormatted`
+    strings. Avoids pulling Prisma into the browser bundle (which
+    Turbopack rejects with the `node:module` chunking error).
+  - **Inventory search now matches name OR description OR code OR
+    category** (was name-only, which caused the "kirin matches more
+    than seeds" confusion).
+  - **Category chips on inventory cards are clickable** — filter the
+    list by that category. Extracted into `CategoryChipLink` client
+    component because adding `onClick` to a `<Link>` inside a server
+    component throws "Event handlers cannot be passed to Client
+    Component props".
+  - **`SmartImage` component** (`src/components/shared/smart-image.tsx`)
+    — `<img>` wrapper that falls back to a Lucide placeholder on
+    404. Used across inventory + matches.
+  - **`/api/uploads/[...path]` is now minimal + long-cached**.
+    Earlier iteration ran a `prisma.$transaction` to lazy-null DB
+    refs on missing files — that hot-pathed Prisma into every image
+    request, making the whole site feel laggy. Long-cache header
+    (`max-age=31536000, immutable`) means the browser doesn't
+    re-fetch.
+  - **Cookie validation in `getActiveOrgIdFromCookie` now checks
+    membership**, not just whether the cookie's org exists. Fixed
+    the 404 cascade where `dev@`'s stale `activeOrgId=org_andre`
+    cookie was getting honoured for Boyd (who's only in
+    org_sparmanik) → every detail page returned null → 404.
+  - **Detail-page `findUnique` → `findFirst`**. The Prisma extension
+    appends `organizationId` to the where clause, and `findUnique`
+    silently rejects extra predicates. Hit on 5 pages.
+  - **N+1 fix on Financials wage rate lookup.** Was firing one
+    `staffRate.findFirst` query per wage line — pre-load all rates
+    and resolve from a `Map` instead. Dominant cost on orgs with
+    months of payroll.
+  - **`Clear cache` button in topbar** (3× larger, amber pill) +
+    `/clear` React fallback + `/clear.html` static HTML escape hatch
+    (in `public/`, no React/Next chunks). Bookmark `localhost:3000/clear.html`
+    for whenever Turbopack chunks go stale.
+  - **Dark-mode bootstrap script** now injected via
+    `<Script id="theme-bootstrap" strategy="beforeInteractive">`
+    in `RootLayout` (was a raw `<script>` JSX child, which Next 16
+    rejects with "Scripts inside React components…").
 
 ## When in doubt
 

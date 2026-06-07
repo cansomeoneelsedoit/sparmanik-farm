@@ -11,6 +11,9 @@ export type HarvestPL = {
   // this harvest. Non-depreciable assets stay in the Fixed Assets ledger and
   // do NOT contribute to the P&L.
   depreciationCost: string;
+  // Misc expenses (contractors, cash payments, etc.) assigned to this
+  // harvest via Expense.harvestId.
+  expenseCost: string;
   netProfit: string;
 };
 
@@ -24,7 +27,7 @@ async function effectiveRate(staffId: string, date: Date): Promise<Decimal> {
 }
 
 export const getHarvestPL = cache(async (harvestId: string): Promise<HarvestPL> => {
-  const [sales, usages, depreciableAssets, wageLines] = await Promise.all([
+  const [sales, usages, depreciableAssets, wageLines, expenses] = await Promise.all([
     prisma.sale.findMany({ where: { harvestId }, select: { amount: true } }),
     prisma.harvestUsage.findMany({
       where: { harvestId },
@@ -38,6 +41,7 @@ export const getHarvestPL = cache(async (harvestId: string): Promise<HarvestPL> 
       where: { harvestId },
       select: { hours: true, wageEntry: { select: { staffId: true, date: true } } },
     }),
+    prisma.expense.findMany({ where: { harvestId }, select: { amount: true } }),
   ]);
 
   const revenue = sales.reduce(
@@ -67,12 +71,18 @@ export const getHarvestPL = cache(async (harvestId: string): Promise<HarvestPL> 
     labourCost = labourCost.plus(new Decimal(line.hours).times(rate));
   }
 
-  const totalCost = usageCost.plus(labourCost).plus(depreciationCost);
+  const expenseCost = (expenses as { amount: Decimal }[]).reduce(
+    (s: Decimal, e) => s.plus(e.amount),
+    new Decimal(0),
+  );
+
+  const totalCost = usageCost.plus(labourCost).plus(depreciationCost).plus(expenseCost);
   return {
     revenue: revenue.toFixed(4),
     usageCost: usageCost.toFixed(4),
     labourCost: labourCost.toFixed(4),
     depreciationCost: depreciationCost.toFixed(4),
+    expenseCost: expenseCost.toFixed(4),
     netProfit: revenue.minus(totalCost).toFixed(4),
   };
 });

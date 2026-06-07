@@ -17,6 +17,8 @@ type StaffRow = {
   name: string;
   role: string | null;
   avatar: string | null;
+  photoPath: string | null;
+  bio: string | null;
   rates: { rate: Decimal; effectiveFrom: Date }[];
   wageEntries: { totalHours: Decimal; date: Date; lines: { hours: Decimal; harvestId: string | null }[] }[];
 };
@@ -64,16 +66,32 @@ export default async function StaffPage() {
             return (
               <Card key={s.id}>
                 <CardContent className="space-y-3 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 font-semibold text-accent">{s.avatar ?? s.name[0]}</div>
-                      <div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      {s.photoPath ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={`/api/uploads/${s.photoPath}`}
+                          alt=""
+                          className="h-14 w-14 shrink-0 rounded-full border object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-accent/10 text-lg font-semibold text-accent">
+                          {s.avatar ?? s.name[0]}
+                        </div>
+                      )}
+                      <div className="min-w-0">
                         <div className="font-medium">{s.name}</div>
                         <div className="text-xs text-muted-foreground">{s.role ?? "—"}</div>
                       </div>
                     </div>
-                    <StaffCardActions staff={{ id: s.id, name: s.name, role: s.role, avatar: s.avatar }} />
+                    <StaffCardActions staff={{ id: s.id, name: s.name, role: s.role, avatar: s.avatar, photoPath: s.photoPath, bio: s.bio }} />
                   </div>
+                  {s.bio ? (
+                    <p className="line-clamp-3 whitespace-pre-line rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                      {s.bio}
+                    </p>
+                  ) : null}
                   <div className="grid grid-cols-3 gap-2 border-t pt-3 text-center text-xs">
                     <div><div className="text-muted-foreground">Rate</div><div className="font-medium"><Money value={String(currentRate)} /></div></div>
                     <div><div className="text-muted-foreground">Hours</div><div className="font-medium">{totalHours.toFixed(0)}</div></div>

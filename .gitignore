@@ -45,3 +45,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Claude Code session state — not source code
+.claude/
+
+# Understand Anything indexing artefacts
+.understand-anything/

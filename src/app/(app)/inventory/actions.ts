@@ -2,12 +2,38 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import * as XLSX from "xlsx";
 
 import { prisma } from "@/server/prisma";
 import { auth } from "@/auth";
 import { recordAction } from "@/server/audit";
 import { consumeFifo } from "@/server/fifo";
 import { Decimal, type TransactionClient } from "@/server/decimal";
+import { saveImageBuffer, saveImageUpload } from "@/server/uploads";
+import { getActiveOrgId } from "@/server/org";
+
+/**
+ * Generate the next SF##### code for the active organisation. Walks the
+ * existing items' codes, picks the highest numeric suffix, and adds one.
+ * Done inside a transaction (caller's tx) so concurrent creates can't both
+ * pick the same code — the unique index will reject the loser regardless,
+ * but we also retry once before giving up to keep the UX seamless.
+ */
+export async function nextItemCode(tx: TransactionClient): Promise<string> {
+  const orgId = await getActiveOrgId();
+  const where = orgId ? { organizationId: orgId } : {};
+  const top = await tx.item.findFirst({
+    where,
+    orderBy: { code: "desc" },
+    select: { code: true },
+  });
+  let next = 1;
+  if (top?.code) {
+    const m = top.code.match(/^SF(\d+)$/);
+    if (m) next = parseInt(m[1], 10) + 1;
+  }
+  return `SF${String(next).padStart(5, "0")}`;
+}
 
 export type ActionResult<T = void> =
   | { ok: true; data?: T }
@@ -20,6 +46,8 @@ async function userId(): Promise<string | null> {
 
 const newItemSchema = z.object({
   name: z.string().min(1),
+  description: z.string().optional().nullable(),
+  photoPath: z.string().optional().nullable(),
   categoryId: z.string().optional().nullable(),
   unit: z.string().min(1),
   subUnit: z.string().optional().nullable(),
@@ -31,39 +59,77 @@ const newItemSchema = z.object({
   defaultSupplierId: z.string().optional().nullable(),
 });
 
+/**
+ * Upload an item photo. Reuses the existing sharp + WebP pipeline that the
+ * Ask AI vision upload uses. Returns a relative `path` that the caller
+ * stores on the Item (the `/api/uploads/[...path]` route serves it back).
+ */
+export async function uploadItemPhoto(
+  formData: FormData,
+): Promise<ActionResult<{ path: string }>> {
+  const s = await auth();
+  if (!s?.user?.id) return { ok: false, error: "Not signed in" };
+  const file = formData.get("file");
+  if (!(file instanceof File)) return { ok: false, error: "No file provided" };
+  try {
+    const saved = await saveImageUpload(file, "items");
+    return { ok: true, data: { path: saved.path } };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Upload failed" };
+  }
+}
+
 export async function createItem(input: unknown): Promise<ActionResult<{ id: string }>> {
   const parsed = newItemSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
   }
   const uid = await userId();
-  const item = await prisma.$transaction(async (tx: TransactionClient) => {
-    const created = await tx.item.create({
-      data: {
-        name: parsed.data.name,
-        categoryId: parsed.data.categoryId || null,
-        unit: parsed.data.unit,
-        subUnit: parsed.data.subUnit || null,
-        subFactor: parsed.data.subFactor ? new Decimal(parsed.data.subFactor) : null,
-        location: parsed.data.location || null,
-        reusable: parsed.data.reusable ?? false,
-        reorder: new Decimal(parsed.data.reorder),
-        shopeeUrl: parsed.data.shopeeUrl || null,
-        defaultSupplierId: parsed.data.defaultSupplierId || null,
-      },
-    });
-    await recordAction(tx, {
-      type: "item.create",
-      entityType: "Item",
-      entityId: created.id,
-      description: `Added item: ${created.name}`,
-      userId: uid,
-      payload: { name: created.name },
-    });
-    return created;
-  });
-  revalidatePath("/inventory");
-  return { ok: true, data: { id: item.id } };
+  // Retry once if the auto-generated code races with another concurrent
+  // create — extremely unlikely in practice but cheap to guard against.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const item = await prisma.$transaction(async (tx: TransactionClient) => {
+        const code = await nextItemCode(tx);
+        const created = await tx.item.create({
+          data: {
+            code,
+            name: parsed.data.name,
+            description: parsed.data.description || null,
+            photoPath: parsed.data.photoPath || null,
+            categoryId: parsed.data.categoryId || null,
+            unit: parsed.data.unit,
+            subUnit: parsed.data.subUnit || null,
+            subFactor: parsed.data.subFactor ? new Decimal(parsed.data.subFactor) : null,
+            location: parsed.data.location || null,
+            reusable: parsed.data.reusable ?? false,
+            reorder: new Decimal(parsed.data.reorder),
+            shopeeUrl: parsed.data.shopeeUrl || null,
+            defaultSupplierId: parsed.data.defaultSupplierId || null,
+          },
+        });
+        await recordAction(tx, {
+          type: "item.create",
+          entityType: "Item",
+          entityId: created.id,
+          description: `Added item: ${created.name} (${code})`,
+          userId: uid,
+          payload: { name: created.name, code },
+        });
+        return created;
+      });
+      revalidatePath("/inventory");
+      return { ok: true, data: { id: item.id } };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (attempt === 0 && msg.toLowerCase().includes("unique")) {
+        // Race on the code — retry once with a fresh number.
+        continue;
+      }
+      return { ok: false, error: msg };
+    }
+  }
+  return { ok: false, error: "Couldn't allocate an item code" };
 }
 
 export async function updateItem(id: string, input: unknown): Promise<ActionResult> {
@@ -75,6 +141,8 @@ export async function updateItem(id: string, input: unknown): Promise<ActionResu
     where: { id },
     data: {
       name: parsed.data.name,
+      description: parsed.data.description || null,
+      photoPath: parsed.data.photoPath || null,
       categoryId: parsed.data.categoryId || null,
       unit: parsed.data.unit,
       subUnit: parsed.data.subUnit || null,
@@ -99,6 +167,80 @@ export async function deleteBatch(id: string): Promise<ActionResult> {
   }
   revalidatePath("/inventory");
   return { ok: true };
+}
+
+/**
+ * Quick item creation for inline "+ Create new" flows (e.g. from the Receive
+ * Stock multi-line page when staff types an item name that doesn't exist
+ * yet). Minimal fields — defaults the unit to "pcs", no category, no
+ * supplier; user can flesh it out later from the item detail page.
+ */
+export async function createItemQuick(
+  name: string,
+  unit: string = "pcs",
+): Promise<ActionResult<{ id: string; name: string; unit: string }>> {
+  const trimmed = name.trim();
+  if (!trimmed) return { ok: false, error: "Name is required" };
+  const uid = await userId();
+  try {
+    const item = await prisma.$transaction(async (tx: TransactionClient) => {
+      const code = await nextItemCode(tx);
+      const created = await tx.item.create({
+        data: { code, name: trimmed, unit, reorder: new Decimal(0) },
+      });
+      await recordAction(tx, {
+        type: "item.create",
+        entityType: "Item",
+        entityId: created.id,
+        description: `Added item (quick): ${trimmed} (${code})`,
+        userId: uid,
+        payload: { name: trimmed, code, source: "quick" },
+      });
+      return created;
+    });
+    revalidatePath("/inventory");
+    return { ok: true, data: { id: item.id, name: item.name, unit: item.unit } };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Failed to create item",
+    };
+  }
+}
+
+/**
+ * Quick supplier creation, used by the Receive Stock page's inline "+ Create"
+ * affordance on the Supplier Combobox.
+ */
+export async function createSupplierQuick(
+  name: string,
+): Promise<ActionResult<{ id: string; name: string }>> {
+  const trimmed = name.trim();
+  if (!trimmed) return { ok: false, error: "Name is required" };
+  const uid = await userId();
+  try {
+    const sup = await prisma.$transaction(async (tx: TransactionClient) => {
+      const created = await tx.supplier.create({ data: { name: trimmed } });
+      await recordAction(tx, {
+        type: "supplier.create",
+        entityType: "Supplier",
+        entityId: created.id,
+        description: `Added supplier (quick): ${trimmed}`,
+        userId: uid,
+        payload: { name: trimmed, source: "quick" },
+      });
+      return created;
+    });
+    revalidatePath("/inventory");
+    revalidatePath("/inventory/receive");
+    revalidatePath("/suppliers");
+    return { ok: true, data: { id: sup.id, name: sup.name } };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Failed to create supplier",
+    };
+  }
 }
 
 const receiveStockSchema = z.object({
@@ -158,6 +300,88 @@ export async function receiveStock(input: unknown): Promise<ActionResult<{ batch
   return { ok: true, data: { batchId: result.id } };
 }
 
+// -----------------------------------------------------------------------------
+// Multi-line "Receive Stock" — one supplier + date, several batches in one go
+// -----------------------------------------------------------------------------
+
+const receiveStockBulkSchema = z.object({
+  date: z.string().min(1),
+  supplierId: z.string().optional().nullable(),
+  exchangeRate: z.string().default("1"),
+  lines: z
+    .array(
+      z.object({
+        itemId: z.string().min(1),
+        qty: z.string().regex(/^[0-9.]+$/),
+        price: z.string().regex(/^[0-9.]+$/),
+        maxUses: z.coerce.number().int().min(1).default(1),
+      }),
+    )
+    .min(1, "Add at least one line"),
+});
+
+export async function receiveStockBulk(
+  input: unknown,
+): Promise<ActionResult<{ batchIds: string[]; lineCount: number }>> {
+  const parsed = receiveStockBulkSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+  const uid = await userId();
+  const date = new Date(parsed.data.date);
+  const exchangeRate = new Decimal(parsed.data.exchangeRate || "1");
+  const supplierId = parsed.data.supplierId || null;
+
+  try {
+    const result = await prisma.$transaction(async (tx: TransactionClient) => {
+      const ids: string[] = [];
+      const itemIdsToRevalidate = new Set<string>();
+      for (const l of parsed.data.lines) {
+        const price = new Decimal(l.price);
+        const amortisedCostPerUse = l.maxUses > 1 ? price.div(l.maxUses) : null;
+        const batch = await tx.batch.create({
+          data: {
+            itemId: l.itemId,
+            date,
+            supplierId,
+            qty: new Decimal(l.qty),
+            price,
+            exchangeRate,
+            maxUses: l.maxUses,
+            useCount: 0,
+            amortisedCostPerUse,
+          },
+          include: { item: { select: { name: true } } },
+        });
+        ids.push(batch.id);
+        itemIdsToRevalidate.add(l.itemId);
+
+        await recordAction(tx, {
+          type: "inventory.receive_stock",
+          entityType: "Batch",
+          entityId: batch.id,
+          description: `Received ${l.qty} of ${batch.item.name}`,
+          userId: uid,
+          payload: {
+            batchId: batch.id,
+            itemId: batch.itemId,
+            qty: l.qty,
+            maxUses: l.maxUses,
+            bulk: true,
+          },
+        });
+      }
+      return { ids, itemIdsToRevalidate: Array.from(itemIdsToRevalidate) };
+    });
+
+    revalidatePath("/inventory");
+    for (const id of result.itemIdsToRevalidate) revalidatePath(`/inventory/${id}`);
+    return { ok: true, data: { batchIds: result.ids, lineCount: result.ids.length } };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to receive stock" };
+  }
+}
+
 const useStockSchema = z.object({
   itemId: z.string(),
   qty: z.string(),
@@ -205,6 +429,487 @@ export async function consumeItem(input: unknown): Promise<ActionResult<{ action
   }
 }
 
+// -----------------------------------------------------------------------------
+// Excel bulk import
+// -----------------------------------------------------------------------------
+
+/**
+ * Map a raw header from the user's spreadsheet to one of our known Item
+ * fields. Returns null when nothing recognisable matched. Case- and
+ * whitespace-insensitive so "Item Name" matches "item name", "Item_Name",
+ * etc. Also strips currency markers like "(Rp)" so "Unit Price (Rp)" maps
+ * to unitPrice.
+ */
+function matchHeader(raw: string): keyof ParsedItemRow | null {
+  const k = raw
+    .toLowerCase()
+    .replace(/\(.*?\)/g, "") // drop "(Rp)" etc.
+    .replace(/[_\s-]+/g, "");
+  const map: Record<string, keyof ParsedItemRow> = {
+    name: "name",
+    itemname: "name",
+    productname: "name",
+    item: "name",
+    product: "name",
+    title: "name",
+    description: "description",
+    desc: "description",
+    notes: "description",
+    details: "description",
+    info: "description",
+    variation: "variation",
+    variant: "variation",
+    colour: "variation",
+    color: "variation",
+    category: "categoryName",
+    cat: "categoryName",
+    type: "categoryName",
+    unit: "unit",
+    uom: "unit",
+    units: "unit",
+    measure: "unit",
+    reorder: "reorder",
+    reorderlevel: "reorder",
+    reorderpoint: "reorder",
+    reorderqty: "reorder",
+    minstock: "reorder",
+    qty: "qty",
+    quantity: "qty",
+    qtypurchased: "qty",
+    pcs: "qty",
+    count: "qty",
+    unitprice: "unitPrice",
+    price: "unitPrice",
+    cost: "unitPrice",
+    unitcost: "unitPrice",
+    pricepaid: "unitPrice",
+    supplier: "supplierName",
+    defaultsupplier: "supplierName",
+    vendor: "supplierName",
+    shop: "supplierName",
+    seller: "supplierName",
+    location: "location",
+    store: "location",
+    warehouse: "location",
+    reusable: "reusable",
+    asset: "reusable",
+    depreciable: "reusable",
+    url: "shopeeUrl",
+    shopee: "shopeeUrl",
+    shopeeurl: "shopeeUrl",
+    link: "shopeeUrl",
+    producturl: "shopeeUrl",
+  };
+  return map[k] ?? null;
+}
+
+export type ParsedItemRow = {
+  name: string;
+  description: string | null;
+  /** Appended to name when present so "Box 15cm" + "MERAH" → "Box 15cm — MERAH" */
+  variation: string | null;
+  categoryName: string | null;
+  unit: string;
+  reorder: string;
+  supplierName: string | null;
+  location: string | null;
+  reusable: boolean;
+  shopeeUrl: string | null;
+  /** Optional: when present a Batch is created at import time */
+  qty: string | null;
+  unitPrice: string | null;
+  /** Set by the image-extraction pass when a Picture is anchored to this row */
+  photoPath: string | null;
+};
+
+export type ImportPreview = {
+  totalRows: number;
+  validRows: ParsedItemRow[];
+  detectedHeaders: { raw: string; mapped: keyof ParsedItemRow | null }[];
+  errors: { row: number; reason: string }[];
+};
+
+function parseBool(v: unknown): boolean {
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v !== 0;
+  const s = String(v ?? "").trim().toLowerCase();
+  return s === "y" || s === "yes" || s === "true" || s === "1" || s === "t";
+}
+
+function asString(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  return String(v).trim();
+}
+
+/** Strip thousand-separators / currency symbols so "Rp 3,750" / "3.750,00"
+ * / "3750" all parse to 3750. Returns null when nothing numeric was found. */
+function parseNumberLoose(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  const raw = String(v).trim();
+  if (raw === "") return null;
+  // Drop any non-digit / non-decimal-point character. Treat the LAST decimal
+  // separator (either "." or ",") as the decimal point.
+  const cleaned = raw.replace(/[^0-9.,-]/g, "");
+  if (cleaned === "") return null;
+  // If both . and , are present, the rightmost is the decimal separator;
+  // strip the other as a grouping separator.
+  const lastDot = cleaned.lastIndexOf(".");
+  const lastComma = cleaned.lastIndexOf(",");
+  let normalised: string;
+  if (lastDot === -1 && lastComma === -1) {
+    normalised = cleaned;
+  } else if (lastDot > lastComma) {
+    normalised = cleaned.replace(/,/g, "");
+  } else {
+    normalised = cleaned.replace(/\./g, "").replace(/,/g, ".");
+  }
+  const n = Number(normalised);
+  return Number.isFinite(n) ? String(n) : null;
+}
+
+/**
+ * Extract every embedded image from sheet 1 of an .xlsx, save each via the
+ * sharp pipeline under uploads/items/, and return a map from spreadsheet
+ * data-row index (0-based, matching XLSX.sheet_to_json output) to the saved
+ * relative path.
+ *
+ * The .xlsx ZIP layout is:
+ *   xl/worksheets/_rels/sheet1.xml.rels       sheet → drawing relationship
+ *   xl/drawings/drawing1.xml                   image anchors (rows + rIds)
+ *   xl/drawings/_rels/drawing1.xml.rels        rId → media file
+ *   xl/media/image*.png|jpg|...                actual image bytes
+ *
+ * Each anchor's `<xdr:from><xdr:row>N</xdr:row></xdr:from>` is 0-indexed,
+ * with row 0 being the header — so data row index = N - 1.
+ */
+async function extractImagesByDataRow(
+  fileBuffer: Buffer,
+): Promise<Map<number, string>> {
+  const out = new Map<number, string>();
+  try {
+    // jszip is CommonJS; pull it in via require so the bundler doesn't bloat
+    // every server action with it.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const JSZip = require("jszip");
+    const zip = await JSZip.loadAsync(fileBuffer);
+
+    // 1. Sheet 1 → drawing.
+    const sheetRels = await zip
+      .file("xl/worksheets/_rels/sheet1.xml.rels")
+      ?.async("string");
+    if (!sheetRels) return out;
+    const drawingMatch = sheetRels.match(/Target="([^"]*drawings\/drawing(\d+)\.xml)"/);
+    if (!drawingMatch) return out;
+    const drawingNum = drawingMatch[2];
+    const drawingPath = `xl/drawings/drawing${drawingNum}.xml`;
+    const drawingRelsPath = `xl/drawings/_rels/drawing${drawingNum}.xml.rels`;
+
+    const drawingXml = await zip.file(drawingPath)?.async("string");
+    const drawingRels = await zip.file(drawingRelsPath)?.async("string");
+    if (!drawingXml || !drawingRels) return out;
+
+    // 2. Build rId → media path map.
+    const ridToMedia = new Map<string, string>();
+    for (const m of drawingRels.matchAll(/<Relationship\s+Id="([^"]+)"[^>]*Target="([^"]+)"/g)) {
+      const rid = m[1];
+      const target = m[2].replace(/^\.\.\//, "xl/");
+      ridToMedia.set(rid, target);
+    }
+
+    // 3. Walk every twoCellAnchor, pair its <xdr:row> with its <a:blip embed>.
+    const anchorRegex = /<xdr:twoCellAnchor[^>]*>([\s\S]*?)<\/xdr:twoCellAnchor>/g;
+    for (const a of drawingXml.matchAll(anchorRegex)) {
+      const block = a[1];
+      const rowMatch = block.match(/<xdr:from>[\s\S]*?<xdr:row>(\d+)<\/xdr:row>/);
+      const blipMatch = block.match(/<a:blip[^>]*r:embed="([^"]+)"/);
+      if (!rowMatch || !blipMatch) continue;
+      const xdrRow = parseInt(rowMatch[1], 10);
+      const dataRowIdx = xdrRow - 1; // header is row 0
+      if (dataRowIdx < 0) continue;
+      const mediaPath = ridToMedia.get(blipMatch[1]);
+      if (!mediaPath) continue;
+      const mediaFile = zip.file(mediaPath);
+      if (!mediaFile) continue;
+      const buf: Buffer = await mediaFile.async("nodebuffer");
+      try {
+        const saved = await saveImageBuffer(buf, "items");
+        out.set(dataRowIdx, saved.path);
+      } catch {
+        // Skip images sharp can't decode (corrupt / weird format).
+      }
+    }
+  } catch {
+    // Image extraction failure shouldn't fail the whole import.
+  }
+  return out;
+}
+
+/**
+ * Parse the uploaded .xlsx, auto-detect column mapping, return preview rows.
+ * Doesn't write to the DB — the user confirms first, then bulkCreateItems
+ * runs with the parsed rows.
+ */
+export async function previewInventoryExcel(
+  formData: FormData,
+): Promise<ActionResult<ImportPreview>> {
+  const s = await auth();
+  if (!s?.user?.id) return { ok: false, error: "Not signed in" };
+  const file = formData.get("file");
+  if (!(file instanceof File)) return { ok: false, error: "No file provided" };
+
+  try {
+    const buf = Buffer.from(await file.arrayBuffer());
+    const wb = XLSX.read(buf, { type: "buffer" });
+    const sheetName = wb.SheetNames[0];
+    if (!sheetName) return { ok: false, error: "Workbook has no sheets" };
+    const sheet = wb.Sheets[sheetName];
+    const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+      defval: null,
+      raw: false,
+    });
+    if (raw.length === 0) {
+      return { ok: false, error: "Sheet is empty" };
+    }
+
+    const firstRow = raw[0];
+    const detectedHeaders = Object.keys(firstRow).map((h) => ({
+      raw: h,
+      mapped: matchHeader(h),
+    }));
+    const mapByHeader: Partial<Record<string, keyof ParsedItemRow>> = {};
+    for (const h of detectedHeaders) {
+      if (h.mapped) mapByHeader[h.raw] = h.mapped;
+    }
+    if (!Object.values(mapByHeader).includes("name")) {
+      return {
+        ok: false,
+        error:
+          "Couldn't find a Name / Product column. Headers detected: " +
+          detectedHeaders.map((h) => h.raw).join(", "),
+      };
+    }
+
+    // Pull any embedded pictures out of sheet 1 in parallel with cell parsing.
+    const imagesByRow = await extractImagesByDataRow(buf);
+
+    const validRows: ParsedItemRow[] = [];
+    const errors: { row: number; reason: string }[] = [];
+    raw.forEach((row: Record<string, unknown>, idx: number) => {
+      const out: ParsedItemRow = {
+        name: "",
+        description: null,
+        variation: null,
+        categoryName: null,
+        unit: "pcs",
+        reorder: "0",
+        supplierName: null,
+        location: null,
+        reusable: false,
+        shopeeUrl: null,
+        qty: null,
+        unitPrice: null,
+        photoPath: imagesByRow.get(idx) ?? null,
+      };
+      for (const [header, key] of Object.entries(mapByHeader)) {
+        if (!key) continue;
+        const v = row[header];
+        if (key === "reusable") out.reusable = parseBool(v);
+        else if (key === "reorder") {
+          const n = parseNumberLoose(v);
+          out.reorder = n !== null && Number(n) >= 0 ? n : "0";
+        } else if (key === "qty") {
+          const n = parseNumberLoose(v);
+          out.qty = n !== null && Number(n) > 0 ? n : null;
+        } else if (key === "unitPrice") {
+          const n = parseNumberLoose(v);
+          out.unitPrice = n !== null && Number(n) >= 0 ? n : null;
+        } else if (key === "name") out.name = asString(v);
+        else if (key === "unit") out.unit = asString(v) || "pcs";
+        else if (key === "description") out.description = asString(v) || null;
+        else if (key === "variation") out.variation = asString(v) || null;
+        else if (key === "categoryName") out.categoryName = asString(v) || null;
+        else if (key === "supplierName") out.supplierName = asString(v) || null;
+        else if (key === "location") out.location = asString(v) || null;
+        else if (key === "shopeeUrl") out.shopeeUrl = asString(v) || null;
+      }
+      // Variation gets folded into the name: "Box 15cm — MERAH". Keeps
+      // distinct stock entries per variant without needing a separate field.
+      if (out.variation) {
+        out.name = out.name ? `${out.name} — ${out.variation}` : out.variation;
+      }
+      if (!out.name) {
+        errors.push({ row: idx + 2, reason: "Missing name / product" });
+        return;
+      }
+      validRows.push(out);
+    });
+
+    return {
+      ok: true,
+      data: { totalRows: raw.length, validRows, detectedHeaders, errors },
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Failed to parse spreadsheet",
+    };
+  }
+}
+
+/**
+ * Bulk-create items from the previewed rows. Auto-creates Category and
+ * Supplier rows when a row references a name we don't have yet (so the
+ * user doesn't have to pre-create every reference). All in one transaction.
+ */
+export async function bulkCreateItems(
+  rows: ParsedItemRow[],
+): Promise<
+  ActionResult<{
+    created: number;
+    categoriesAdded: number;
+    suppliersAdded: number;
+    batchesCreated: number;
+  }>
+> {
+  const uid = await userId();
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return { ok: false, error: "Nothing to import" };
+  }
+  try {
+    const result = await prisma.$transaction(
+      async (tx: TransactionClient) => {
+      const existingCats = await tx.category.findMany({ select: { id: true, name: true } });
+      type IdName = { id: string; name: string };
+      const catMap = new Map<string, string>(
+        existingCats.map((c: IdName) => [c.name.toLowerCase(), c.id]),
+      );
+      const existingSups = await tx.supplier.findMany({ select: { id: true, name: true } });
+      const supMap = new Map<string, string>(
+        existingSups.map((s: IdName) => [s.name.toLowerCase(), s.id]),
+      );
+      // Compute the starting code ONCE outside the per-row loop. Calling
+      // nextItemCode() inside the loop was an N+1 query — on a 500-row
+      // import that's 500 extra round-trips just to figure out the next
+      // SF##### number, blowing past even the 5-minute interactive
+      // transaction timeout we set below. We bump it in memory instead.
+      const startCode = await nextItemCode(tx);
+      const startMatch = startCode.match(/^SF(\d+)$/);
+      let nextCodeNumber = startMatch ? parseInt(startMatch[1], 10) : 1;
+      const formatCode = () => `SF${String(nextCodeNumber).padStart(5, "0")}`;
+
+      let categoriesAdded = 0;
+      let suppliersAdded = 0;
+      let batchesCreated = 0;
+      const today = new Date();
+
+      for (const r of rows) {
+        let categoryId: string | null = null;
+        if (r.categoryName) {
+          const key = r.categoryName.toLowerCase();
+          const existing = catMap.get(key);
+          if (existing) {
+            categoryId = existing;
+          } else {
+            const c = await tx.category.create({ data: { name: r.categoryName } });
+            catMap.set(key, c.id);
+            categoryId = c.id;
+            categoriesAdded += 1;
+          }
+        }
+        let supplierId: string | null = null;
+        if (r.supplierName) {
+          const key = r.supplierName.toLowerCase();
+          const existing = supMap.get(key);
+          if (existing) {
+            supplierId = existing;
+          } else {
+            const sup = await tx.supplier.create({ data: { name: r.supplierName } });
+            supMap.set(key, sup.id);
+            supplierId = sup.id;
+            suppliersAdded += 1;
+          }
+        }
+
+        const code = formatCode();
+        const item = await tx.item.create({
+          data: {
+            code,
+            name: r.name,
+            description: r.description,
+            photoPath: r.photoPath,
+            categoryId,
+            unit: r.unit,
+            reorder: new Decimal(r.reorder),
+            reusable: r.reusable,
+            location: r.location,
+            shopeeUrl: r.shopeeUrl,
+            defaultSupplierId: supplierId,
+          },
+        });
+        // Increment AFTER a successful create so failures don't burn a
+        // number. The unique index on (organizationId, code) would catch
+        // a race but the in-memory counter keeps us out of trouble in
+        // the normal path.
+        nextCodeNumber += 1;
+
+        // If the row has a real qty + price (e.g. a Shopee order export),
+        // create a Batch too so the inventory shows actual stock rather
+        // than just a definition with zero on-hand.
+        if (r.qty && Number(r.qty) > 0 && r.unitPrice !== null) {
+          const price = new Decimal(r.unitPrice);
+          await tx.batch.create({
+            data: {
+              itemId: item.id,
+              supplierId,
+              date: today,
+              qty: new Decimal(r.qty),
+              price,
+              exchangeRate: new Decimal(1),
+              maxUses: r.reusable ? 1 : 1, // import doesn't expose maxUses yet
+              useCount: 0,
+              amortisedCostPerUse: null,
+            },
+          });
+          batchesCreated += 1;
+        }
+      }
+
+      await recordAction(tx, {
+        type: "item.bulk_import",
+        entityType: "Item",
+        entityId: "",
+        description: `Imported ${rows.length} items from Excel (+${categoriesAdded} categories, +${suppliersAdded} suppliers, +${batchesCreated} batches)`,
+        userId: uid,
+        payload: { count: rows.length, categoriesAdded, suppliersAdded, batchesCreated },
+      });
+
+      return {
+        created: rows.length,
+        categoriesAdded,
+        suppliersAdded,
+        batchesCreated,
+      };
+    },
+    {
+      // Default interactive transaction timeout is 5 s, but a typical
+      // Shopee export is 300–500 rows × 2–3 db writes each. Give it 5
+      // minutes so big spreadsheets still import atomically.
+      maxWait: 15_000,
+      timeout: 300_000,
+    },
+  );
+
+    revalidatePath("/inventory");
+    return { ok: true, data: result };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Failed to import",
+    };
+  }
+}
+
 export async function deleteItem(id: string): Promise<ActionResult> {
   const uid = await userId();
   await prisma.$transaction(async (tx: TransactionClient) => {
@@ -222,4 +927,58 @@ export async function deleteItem(id: string): Promise<ActionResult> {
   });
   revalidatePath("/inventory");
   return { ok: true };
+}
+
+/**
+ * Bulk-delete items + every row that references them. Used by the inventory
+ * list multi-select toolbar so users can quickly clean up an Excel import
+ * that brought in some unwanted rows.
+ *
+ * Cascade order (FK-safe):
+ *   batch_consumptions  ->  harvest_usages / harvest_assets  ->  batches  ->  items
+ *
+ * Single transaction so partial deletes can't leave the DB in a broken state.
+ */
+export async function deleteItems(ids: string[]): Promise<ActionResult<{ deleted: number }>> {
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return { ok: false, error: "No items selected" };
+  }
+  const uid = await userId();
+  try {
+    const deleted = await prisma.$transaction(async (tx: TransactionClient) => {
+      const items = await tx.item.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, name: true },
+      });
+      if (items.length === 0) return 0;
+      const batchIds = (
+        await tx.batch.findMany({ where: { itemId: { in: ids } }, select: { id: true } })
+      ).map((b: { id: string }) => b.id);
+
+      if (batchIds.length > 0) {
+        await tx.batchConsumption.deleteMany({ where: { batchId: { in: batchIds } } });
+      }
+      await tx.harvestUsage.deleteMany({ where: { itemId: { in: ids } } });
+      await tx.harvestAsset.deleteMany({ where: { itemId: { in: ids } } });
+      await tx.batch.deleteMany({ where: { itemId: { in: ids } } });
+      await tx.item.deleteMany({ where: { id: { in: ids } } });
+
+      await recordAction(tx, {
+        type: "item.bulk_delete",
+        entityType: "Item",
+        entityId: items[0].id,
+        description: `Deleted ${items.length} items: ${items
+          .slice(0, 3)
+          .map((i: { name: string }) => i.name)
+          .join(", ")}${items.length > 3 ? `, +${items.length - 3} more` : ""}`,
+        userId: uid,
+        payload: { ids, names: items.map((i: { name: string }) => i.name) },
+      });
+      return items.length;
+    });
+    revalidatePath("/inventory");
+    return { ok: true, data: { deleted } };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to delete items" };
+  }
 }

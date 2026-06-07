@@ -20,7 +20,7 @@ export function EndHarvestButton({ id }: { id: string }) {
         open={open}
         onOpenChange={setOpen}
         title="End this harvest?"
-        description="The harvest will be marked Closed. You can still view its data."
+        description="The harvest will be marked Closed. Any reusable assets still in use will auto-check-in as good. You can still view its data."
         confirmLabel="End harvest"
         cancelLabel="Cancel"
         onConfirm={() =>

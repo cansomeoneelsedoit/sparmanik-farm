@@ -3,38 +3,177 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { useState } from "react";
+import {
+  Calendar,
+  ChevronDown,
+  ClipboardList,
+  DollarSign,
+  Flag,
+  FolderTree,
+  HeartPulse,
+  LayoutDashboard,
+  Leaf,
+  MessageSquare,
+  Package,
+  PlayCircle,
+  Settings,
+  Sparkles,
+  Truck,
+  UserCircle2,
+} from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
-type NavItem = { key: string; href: string };
+type LeafItem = {
+  /** i18n key under `nav.*` — falls back to `fallback` if missing. */
+  key: string;
+  href: string;
+  /** Hardcoded label used when the i18n catalog doesn't have the key. */
+  fallback?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  icon?: any;
+  /** When >0, render a count chip beside the label. */
+  badge?: number;
+};
 
-const NAV_ITEMS: NavItem[] = [
-  { key: "dashboard", href: "/" },
-  { key: "calendar", href: "/calendar" },
-  { key: "sales", href: "/sales" },
-  { key: "harvest", href: "/harvest" },
-  { key: "tasks", href: "/tasks" },
-  { key: "inventory", href: "/inventory" },
-  { key: "recipes", href: "/recipes" },
-  { key: "sops", href: "/sops" },
-  { key: "videos", href: "/videos" },
-  { key: "suppliers", href: "/suppliers" },
-  { key: "staff", href: "/staff" },
-  { key: "financials", href: "/financials" },
-  { key: "settings", href: "/settings" },
-  { key: "askAi", href: "/ask-ai" },
-];
+type NavNode = LeafItem | NavGroup;
 
-export function Sidebar({ isSuperuser = false }: { isSuperuser?: boolean }) {
+type NavGroup = {
+  /** Label shown on the group header. */
+  label: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  icon: any;
+  /** Stable id for localStorage open/closed persistence. */
+  id: string;
+  children: LeafItem[];
+};
+
+function isGroup(n: NavNode): n is NavGroup {
+  return "children" in n;
+}
+
+export function Sidebar({
+  isSuperuser = false,
+  openTaskCount = 0,
+}: {
+  isSuperuser?: boolean;
+  openTaskCount?: number;
+}) {
   const t = useTranslations("nav");
   const tCommon = useTranslations("common");
   const pathname = usePathname();
 
-  // The "Users" admin link only appears for superusers — it's the gateway to
-  // /admin/users (create / edit / reset password / delete other users).
-  const items: NavItem[] = isSuperuser
-    ? [...NAV_ITEMS, { key: "users", href: "/admin/users" }]
-    : NAV_ITEMS;
+  // Persist which groups are expanded across reloads so the user doesn't
+  // have to re-open the same group every time. Each group id maps to a
+  // boolean.
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
+    if (typeof window === "undefined") return defaultOpen();
+    try {
+      const raw = window.localStorage.getItem("sidebarOpenGroups");
+      if (!raw) return defaultOpen();
+      return { ...defaultOpen(), ...(JSON.parse(raw) as Record<string, boolean>) };
+    } catch {
+      return defaultOpen();
+    }
+  });
+
+  function toggleGroup(id: string) {
+    setOpenGroups((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      try {
+        window.localStorage.setItem("sidebarOpenGroups", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  }
+
+  // Nav graph. Top-level pages that need no grouping live at the top so
+  // they're always one click away. Grouped pages get their own collapsible
+  // section underneath.
+  const nav: NavNode[] = [
+    { key: "dashboard", href: "/", icon: LayoutDashboard },
+    { key: "harvest", href: "/harvest", icon: Leaf },
+    { key: "inventory", href: "/inventory", icon: Package },
+    { key: "staff", href: "/staff", icon: UserCircle2 },
+    {
+      label: "Operations",
+      id: "operations",
+      icon: ClipboardList,
+      children: [
+        { key: "calendar", href: "/calendar", icon: Calendar },
+        {
+          key: "tasks",
+          href: "/tasks",
+          icon: Flag,
+          // The flag icon stays whether or not we have a count, but the
+          // count chip only renders when there's something pending.
+          badge: openTaskCount,
+        },
+      ],
+    },
+    {
+      label: "Financial",
+      id: "financial",
+      icon: DollarSign,
+      children: [
+        { key: "sales", href: "/sales", icon: DollarSign },
+        { key: "expenses", href: "/expenses", icon: DollarSign },
+        { key: "suppliers", href: "/suppliers", icon: Truck },
+        // The original "Financials" page is rebranded as the consolidated
+        // business view so the user has a clear "where's the bottom line"
+        // entry point in the menu.
+        {
+          key: "financialsTotal",
+          href: "/financials",
+          fallback: "Total Business Financials",
+          icon: DollarSign,
+        },
+      ],
+    },
+    {
+      label: "Content",
+      id: "content",
+      icon: FolderTree,
+      children: [
+        { key: "recipes", href: "/recipes", icon: Leaf },
+        { key: "videos", href: "/videos", icon: PlayCircle },
+        { key: "sops", href: "/sops", icon: ClipboardList },
+      ],
+    },
+    { key: "askAi", href: "/ask-ai", icon: Sparkles },
+    {
+      label: "Settings",
+      id: "settings",
+      icon: Settings,
+      children: [
+        { key: "settings", href: "/settings", icon: Settings },
+        {
+          key: "healthCheck",
+          href: "/health-check",
+          fallback: "Health check",
+          icon: HeartPulse,
+        },
+        ...(isSuperuser
+          ? [{ key: "users", href: "/admin/users", fallback: "Users", icon: UserCircle2 } satisfies LeafItem]
+          : []),
+      ],
+    },
+  ];
+
+  function labelFor(item: LeafItem): string {
+    if (item.fallback) return item.fallback;
+    try {
+      return t(item.key);
+    } catch {
+      return item.key;
+    }
+  }
+
+  function isActive(href: string): boolean {
+    if (href === "/") return pathname === "/";
+    return pathname === href || pathname.startsWith(href + "/");
+  }
 
   return (
     <aside className="hidden w-64 shrink-0 flex-col border-r bg-card md:flex">
@@ -48,27 +187,98 @@ export function Sidebar({ isSuperuser = false }: { isSuperuser?: boolean }) {
         </div>
       </div>
       <nav className="flex-1 overflow-y-auto p-2">
-        {items.map((item) => {
-          const active =
-            item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(item.href + "/");
-          // The "users" key isn't in the i18n catalog; fall back to a literal.
-          const label = item.key === "users" ? "Users" : t(item.key);
+        {nav.map((node, idx) => {
+          if (!isGroup(node)) {
+            return <NavLeaf key={node.key} item={node} active={isActive(node.href)} label={labelFor(node)} />;
+          }
+          const groupOpen = openGroups[node.id] ?? true;
+          const Icon = node.icon;
+          const hasActiveChild = node.children.some((c) => isActive(c.href));
           return (
-            <Link
-              key={item.key}
-              href={item.href}
-              className={cn(
-                "block rounded-md px-3 py-2 text-sm transition-colors",
-                active
-                  ? "bg-accent/10 font-medium text-foreground"
-                  : "text-muted-foreground hover:bg-accent/5 hover:text-foreground",
-              )}
-            >
-              {label}
-            </Link>
+            <div key={node.id} className={cn(idx > 0 && "mt-2")}>
+              <button
+                type="button"
+                onClick={() => toggleGroup(node.id)}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider transition",
+                  hasActiveChild
+                    ? "text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                <span className="flex-1 text-left">{node.label}</span>
+                <ChevronDown
+                  className={cn(
+                    "h-3.5 w-3.5 transition-transform",
+                    groupOpen ? "rotate-0" : "-rotate-90",
+                  )}
+                />
+              </button>
+              {groupOpen ? (
+                <div className="mt-0.5 space-y-0.5 pl-3">
+                  {node.children.map((c) => (
+                    <NavLeaf
+                      key={c.key}
+                      item={c}
+                      active={isActive(c.href)}
+                      label={labelFor(c)}
+                      indent
+                    />
+                  ))}
+                </div>
+              ) : null}
+            </div>
           );
         })}
       </nav>
+      <div className="flex items-center gap-2 border-t p-3 text-[10px] text-muted-foreground">
+        <MessageSquare className="h-3 w-3" /> v0.3 · {tCommon("appName")}
+      </div>
     </aside>
   );
+}
+
+function NavLeaf({
+  item,
+  active,
+  label,
+  indent,
+}: {
+  item: LeafItem;
+  active: boolean;
+  label: string;
+  indent?: boolean;
+}) {
+  const Icon = item.icon;
+  return (
+    <Link
+      href={item.href}
+      className={cn(
+        "group flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
+        indent && "pl-5",
+        active
+          ? "bg-accent/10 font-medium text-foreground"
+          : "text-muted-foreground hover:bg-accent/5 hover:text-foreground",
+      )}
+    >
+      {Icon ? <Icon className="h-4 w-4 shrink-0 opacity-70 group-hover:opacity-100" /> : null}
+      <span className="flex-1 truncate">{label}</span>
+      {item.badge && item.badge > 0 ? (
+        <span className="rounded-full bg-destructive px-1.5 py-0.5 text-[9px] font-semibold leading-none text-destructive-foreground">
+          {item.badge > 99 ? "99+" : item.badge}
+        </span>
+      ) : null}
+    </Link>
+  );
+}
+
+/** Initial open/closed state for the collapsible groups. */
+function defaultOpen(): Record<string, boolean> {
+  return {
+    operations: true,
+    financial: true,
+    content: true,
+    settings: true,
+  };
 }

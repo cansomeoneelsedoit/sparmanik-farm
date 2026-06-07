@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useTransition, type ReactNode } from "react";
+import { useState, useTransition, useRef, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
+import { ImagePlus, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -19,11 +20,15 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { Combobox } from "@/components/ui/combobox";
-import { createItem, updateItem } from "@/app/(app)/inventory/actions";
+import { createItem, updateItem, uploadItemPhoto } from "@/app/(app)/inventory/actions";
+import { createCategoryQuick } from "@/app/(app)/settings/actions";
 
 const schema = z.object({
   name: z.string().min(1, "Required"),
+  description: z.string().optional(),
+  photoPath: z.string().optional(),
   unit: z.string().min(1, "Required"),
   categoryId: z.string().optional(),
   defaultSupplierId: z.string().optional(),
@@ -47,6 +52,8 @@ export function NewItemDialog({
   existing?: {
     id: string;
     name: string;
+    description: string | null;
+    photoPath: string | null;
     unit: string;
     categoryId: string | null;
     defaultSupplierId: string | null;
@@ -58,6 +65,9 @@ export function NewItemDialog({
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+  const [uploading, setUploading] = useState(false);
+  const [localCategories, setLocalCategories] = useState(categories);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const isEdit = !!existing;
   const form = useForm<Form>({
@@ -65,6 +75,8 @@ export function NewItemDialog({
     defaultValues: existing
       ? {
           name: existing.name,
+          description: existing.description ?? "",
+          photoPath: existing.photoPath ?? "",
           unit: existing.unit,
           categoryId: existing.categoryId ?? undefined,
           defaultSupplierId: existing.defaultSupplierId ?? undefined,
@@ -73,13 +85,35 @@ export function NewItemDialog({
           reusable: existing.reusable,
           shopeeUrl: existing.shopeeUrl ?? "",
         }
-      : { name: "", unit: "", reorder: "0", reusable: false },
+      : { name: "", description: "", photoPath: "", unit: "", reorder: "0", reusable: false },
   });
+
+  const photoPath = form.watch("photoPath");
+
+  async function handleFileSelect(file: File) {
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await uploadItemPhoto(fd);
+      if (r.ok && r.data) {
+        form.setValue("photoPath", r.data.path);
+        toast.success("Photo uploaded");
+      } else if (!r.ok) {
+        toast.error(r.error);
+      }
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
 
   function onSubmit(values: Form) {
     startTransition(async () => {
       const payload = {
         ...values,
+        description: values.description || null,
+        photoPath: values.photoPath || null,
         categoryId: values.categoryId || null,
         defaultSupplierId: values.defaultSupplierId || null,
         shopeeUrl: values.shopeeUrl || null,
@@ -105,8 +139,63 @@ export function NewItemDialog({
             <DialogTitle>{isEdit ? "Edit item" : "New item"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
+            <Row label="Photo">
+              <div className="flex items-center gap-3">
+                {photoPath ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={`/api/uploads/${photoPath}`}
+                    alt=""
+                    className="h-20 w-20 rounded-md border object-cover"
+                  />
+                ) : (
+                  <div className="flex h-20 w-20 items-center justify-center rounded-md border border-dashed text-muted-foreground">
+                    <ImagePlus className="h-6 w-6" />
+                  </div>
+                )}
+                <div className="flex flex-col gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading || pending}
+                  >
+                    {uploading ? "Uploading…" : photoPath ? "Replace" : "Upload"}
+                  </Button>
+                  {photoPath ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => form.setValue("photoPath", "")}
+                      disabled={uploading || pending}
+                    >
+                      <X className="h-3.5 w-3.5" /> Remove
+                    </Button>
+                  ) : null}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void handleFileSelect(f);
+                    }}
+                  />
+                </div>
+              </div>
+            </Row>
             <Row label="Name" error={form.formState.errors.name?.message}>
               <Input {...form.register("name")} autoFocus />
+            </Row>
+            <Row label="Product info">
+              <Textarea
+                {...form.register("description")}
+                placeholder="What this is, brand/grade, what we use it for…"
+                rows={3}
+              />
             </Row>
             <div className="grid grid-cols-2 gap-3">
               <Row label="Unit" error={form.formState.errors.unit?.message}>
@@ -122,7 +211,21 @@ export function NewItemDialog({
                   value={form.watch("categoryId") || null}
                   onChange={(v) => form.setValue("categoryId", v ?? undefined)}
                   placeholder="Pick category"
-                  options={categories.map((c) => ({ value: c.id, label: c.name }))}
+                  options={localCategories.map((c) => ({ value: c.id, label: c.name }))}
+                  onCreate={async (typed) => {
+                    // Inline-create from the picker: same UX the Combobox
+                    // already supports for produce in the harvest dialog.
+                    const r = await createCategoryQuick(typed);
+                    if (r.ok && r.data) {
+                      const created = { id: r.data.id, name: r.data.name };
+                      setLocalCategories((prev) => [...prev, created]);
+                      form.setValue("categoryId", created.id);
+                      toast.success(`Added category "${created.name}"`);
+                    } else if (!r.ok) {
+                      toast.error(r.error);
+                    }
+                  }}
+                  createLabel={(typed) => `Add category "${typed}"`}
                 />
               </Row>
               <Row label="Default supplier">

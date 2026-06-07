@@ -65,7 +65,14 @@ export default async function StaffSettingsPage() {
                   </TableCell>
                   <TableCell className="text-right">
                     <StaffCardActions
-                      staff={{ id: s.id, name: s.name, role: s.role, avatar: s.avatar }}
+                      staff={{
+                        id: s.id,
+                        name: s.name,
+                        role: s.role,
+                        avatar: s.avatar,
+                        photoPath: null,
+                        bio: null,
+                      }}
                     />
                   </TableCell>
                 </TableRow>

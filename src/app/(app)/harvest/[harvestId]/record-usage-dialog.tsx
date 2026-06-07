@@ -54,12 +54,19 @@ export function RecordUsageDialog({ harvestId, items }: { harvestId: string; ite
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline">Record usage</Button>
+        <Button variant="outline">Use product</Button>
       </DialogTrigger>
       <DialogContent>
         <form onSubmit={form.handleSubmit(onSubmit)}>
-          <DialogHeader><DialogTitle>Record harvest usage</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Use a product on this harvest</DialogTitle>
+          </DialogHeader>
           <div className="space-y-4 py-4">
+            <p className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              For things that get used up: <strong className="text-foreground">pesticides</strong> (ml, L),{" "}
+              <strong className="text-foreground">nutrients</strong> (g, kg), seeds, etc.
+              FIFO consumption is charged to this harvest&apos;s Usage cost.
+            </p>
             <div className="space-y-2">
               <Label>Item</Label>
               <Combobox

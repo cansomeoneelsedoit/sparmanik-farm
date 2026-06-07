@@ -5,6 +5,7 @@ import { z } from "zod";
 import bcrypt from "bcryptjs";
 
 import { prisma } from "@/server/prisma";
+import type { TransactionClient } from "@/server/decimal";
 import { auth } from "@/auth";
 
 export type ActionResult<T = void> = { ok: true; data?: T } | { ok: false; error: string };
@@ -65,15 +66,25 @@ export async function updateUser(id: string, input: unknown): Promise<ActionResu
     }
   }
   try {
-    await prisma.user.update({
-      where: { id },
-      data: {
-        name: parsed.data.name,
-        email: parsed.data.email.toLowerCase(),
-        role: parsed.data.role,
-      },
+    await prisma.$transaction(async (tx: TransactionClient) => {
+      await tx.user.update({
+        where: { id },
+        data: {
+          name: parsed.data.name,
+          email: parsed.data.email.toLowerCase(),
+          role: parsed.data.role,
+        },
+      });
+      // Mirror the name onto the linked Staff row so /staff stays in sync.
+      // Email isn't mirrored — Staff has no email field — and role is auth-
+      // only, not a farm concept.
+      await tx.staff.updateMany({
+        where: { userId: id },
+        data: { name: parsed.data.name },
+      });
     });
     revalidatePath("/admin/users");
+    revalidatePath("/staff");
     return { ok: true };
   } catch {
     return { ok: false, error: "Email is already in use" };
@@ -104,7 +115,21 @@ export async function deleteUser(id: string): Promise<ActionResult> {
     const supers = await prisma.user.count({ where: { role: "SUPERUSER" } });
     if (supers <= 1) return { ok: false, error: "Can't delete the only superuser" };
   }
-  await prisma.user.delete({ where: { id } });
+  try {
+    await prisma.$transaction(async (tx: TransactionClient) => {
+      // Drop the linked Staff first (if any) so the FK constraint doesn't
+      // block the user delete. If the staff has wage entries the inner
+      // delete will throw and the whole transaction rolls back.
+      await tx.staff.deleteMany({ where: { userId: id } });
+      await tx.user.delete({ where: { id } });
+    });
+  } catch {
+    return {
+      ok: false,
+      error: "Can't delete this user — their staff record has wage entries. Delete those first.",
+    };
+  }
   revalidatePath("/admin/users");
+  revalidatePath("/staff");
   return { ok: true };
 }

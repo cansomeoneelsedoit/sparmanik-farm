@@ -352,9 +352,15 @@ async function main() {
   const itemIdByLegacyId = new Map<number, string>();
   const batchIdByLegacyKey = new Map<string, string>(); // "itemId:legacyBatchId" → cuid
   for (const it of legacy.items) {
+    // Code is required (NOT NULL) after the 20260608070000_item_codes
+    // migration; backfill the seed flow with a sequential code based on
+    // the legacy id so re-running the seed against an empty DB still
+    // works.
+    const code = `SF${String(it.id).padStart(5, "0")}`;
     const created = await prisma.item.create({
       data: {
         organizationId: SPARMANIK,
+        code,
         name: it.name,
         categoryId: categoryIdByName.get(it.cat) ?? null,
         unit: it.unit,
@@ -376,12 +382,21 @@ async function main() {
           })),
         },
       },
-      include: { batches: true },
     });
     itemIdByLegacyId.set(it.id, created.id);
-    // Pair created batches with legacy batch ids by date+qty order
+    // Re-query the created batches to pair them by date order — using
+    // `include: { batches: true }` was rejected by Prisma 6 typings
+    // because of an upstream change to ItemCreateInput's nested-create
+    // generics.
+    const createdBatches = await prisma.batch.findMany({
+      where: { itemId: created.id },
+      orderBy: { date: "asc" },
+      select: { id: true },
+    });
     for (let i = 0; i < it.batches.length; i++) {
-      batchIdByLegacyKey.set(`${it.id}:${it.batches[i].id}`, created.batches[i].id);
+      if (createdBatches[i]) {
+        batchIdByLegacyKey.set(`${it.id}:${it.batches[i].id}`, createdBatches[i].id);
+      }
     }
   }
   console.log(`[seed] ${legacy.items.length} items + batches`);

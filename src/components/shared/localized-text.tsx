@@ -1,8 +1,13 @@
 import { getLocale } from "next-intl/server";
 
 /**
- * Picks the localized variant of a field stored as parallel EN/ID columns
- * (e.g. SOP.titleEn / SOP.titleId).
+ * Server Component version. Picks the localized variant of a field
+ * stored as parallel EN/ID columns (e.g. SOP.titleEn / SOP.titleId).
+ *
+ * If you need the same behaviour in a "use client" component, import
+ * `LocalizedTextClient` from `./localized-text-client` instead — the
+ * client variant uses `useLocale()` instead of `getLocale()`, since
+ * `getLocale()` from `next-intl/server` is server-only.
  */
 export async function LocalizedText({ en, id }: { en: string | null | undefined; id: string | null | undefined }) {
   const locale = await getLocale();

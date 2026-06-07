@@ -59,6 +59,43 @@ export const getAlerts = cache(async (): Promise<Alert[]> => {
     }
   }
 
+  // ---- Reusable assets nearing end of life ----
+  // Flag any batch where the next install would be the last possible use,
+  // so the user knows to order a replacement before the asset retires.
+  const reusableBatches = await prisma.batch.findMany({
+    where: { maxUses: { gt: 1 }, returned: false },
+    select: {
+      id: true,
+      maxUses: true,
+      useCount: true,
+      item: { select: { id: true, name: true } },
+    },
+  });
+  type ReusableBatchRow = {
+    id: string;
+    maxUses: number;
+    useCount: number;
+    item: { id: string; name: string };
+  };
+  for (const b of reusableBatches as ReusableBatchRow[]) {
+    const remaining = b.maxUses - b.useCount;
+    if (remaining === 1) {
+      alerts.push({
+        id: alertId("asset-last-use", [b.id]),
+        severity: "warning",
+        text: `${b.item.name} — Last use remaining`,
+        href: `/inventory/${b.item.id}`,
+      });
+    } else if (remaining === 0) {
+      alerts.push({
+        id: alertId("asset-retired", [b.id]),
+        severity: "low",
+        text: `${b.item.name} — Reusable asset retired`,
+        href: `/inventory/${b.item.id}`,
+      });
+    }
+  }
+
   // ---- Active harvests ----
   const liveHarvests = await prisma.harvest.findMany({
     where: { status: "LIVE" },

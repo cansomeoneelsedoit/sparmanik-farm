@@ -20,7 +20,7 @@
     "dashboard": "Dasbor",
     "calendar": "Kalender",
     "sales": "Penjualan",
-    "harvest": "Panen",
+    "harvest": "Rumah Kaca",
     "tasks": "Tugas",
     "inventory": "Inventaris",
     "recipes": "Resep Nutrisi",
@@ -28,8 +28,11 @@
     "videos": "Video",
     "suppliers": "Pemasok",
     "staff": "Staf",
+    "expenses": "Pengeluaran",
     "financials": "Keuangan",
+    "financialsTotal": "Keuangan Total Bisnis",
     "settings": "Pengaturan",
+    "healthCheck": "Pemeriksaan kesehatan",
     "askAi": "Tanya AI"
   },
   "topbar": {
