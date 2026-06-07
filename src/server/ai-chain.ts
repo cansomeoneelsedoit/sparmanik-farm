@@ -276,9 +276,11 @@ async function callGemini(p: Provider, o: CallShape): Promise<string> {
     );
     if (!res.ok) throw new ProviderError(res.status, await res.text().catch(() => ""));
     const j = (await res.json()) as {
-      candidates?: { content?: { parts?: { text?: string }[] } }[];
+      candidates?: {
+        finishReason?: string;
+        content?: { parts?: { text?: string }[] };
+      }[];
       promptFeedback?: { blockReason?: string };
-      candidates?: { finishReason?: string; content?: { parts?: { text?: string }[] } }[];
     };
     const text =
       j.candidates?.[0]?.content?.parts?.map((x) => x.text ?? "").join("") ?? "";

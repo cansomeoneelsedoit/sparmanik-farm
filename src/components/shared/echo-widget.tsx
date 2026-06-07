@@ -136,7 +136,7 @@ export function EchoWidget() {
             {pending ? (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Sparkles className="h-3.5 w-3.5 animate-pulse" />
-                <span>Echo's thinking…</span>
+                <span>Echo&apos;s thinking…</span>
               </div>
             ) : null}
           </div>
@@ -181,7 +181,7 @@ function EmptyHint({ onPick }: { onPick: (q: string) => void }) {
   return (
     <div className="space-y-2 pt-1">
       <div className="rounded-xl bg-muted px-3 py-2 text-xs leading-snug">
-        Hi! I'm <strong>Jasper Echo</strong> — ask me anything quick about your
+        Hi! I&apos;m <strong>Jasper Echo</strong> — ask me anything quick about your
         farm. For longer conversations or photos, use <strong>Ask AI</strong>.
       </div>
       <div className="space-y-1.5">

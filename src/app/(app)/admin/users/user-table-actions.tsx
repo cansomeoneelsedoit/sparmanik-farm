@@ -138,7 +138,7 @@ export function UserTableActions({
                 <Label>New password</Label>
                 <Input {...resetForm.register("password")} autoFocus />
                 <p className="text-xs text-muted-foreground">
-                  Default <code>Jasper1.0!</code>. Tell the user verbally; we don't email it.
+                  Default <code>Jasper1.0!</code>. Tell the user verbally; we don&apos;t email it.
                 </p>
               </div>
             </div>

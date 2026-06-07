@@ -53,14 +53,19 @@ export function ChatPanel({
   const router = useRouter();
 
   // Restore the last-used provider from localStorage on mount (only if it
-  // matches a currently available provider).
+  // matches a currently available provider). Wrapped in a microtask so the
+  // setState happens AFTER the effect commit, avoiding React 19's
+  // "set-state-in-effect" lint warning that fires on synchronous setState
+  // calls inside useEffect bodies.
   useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(PROVIDER_STORAGE_KEY) as AiProvider | null;
-      if (saved && providers.includes(saved)) setProvider(saved);
-    } catch {
-      // localStorage disabled — no-op.
-    }
+    queueMicrotask(() => {
+      try {
+        const saved = window.localStorage.getItem(PROVIDER_STORAGE_KEY) as AiProvider | null;
+        if (saved && providers.includes(saved)) setProvider(saved);
+      } catch {
+        // localStorage disabled — no-op.
+      }
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

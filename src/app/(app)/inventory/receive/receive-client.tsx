@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Plus, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -378,7 +379,7 @@ export function ReceiveStockClient({
         </div>
         <div className="flex gap-2">
           <Button asChild variant="ghost">
-            <a href="/inventory">Cancel</a>
+            <Link href="/inventory">Cancel</Link>
           </Button>
           <Button onClick={handleSubmit} disabled={pending || totalLines() === 0}>
             {pending ? "Receiving…" : `Receive ${totalLines()} line${totalLines() === 1 ? "" : "s"}`}
