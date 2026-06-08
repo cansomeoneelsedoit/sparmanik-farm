@@ -42,7 +42,16 @@ export type InstallAssetItem = {
   id: string;
   name: string;
   unit: string;
+  /** Amount available, expressed in pack units (rolls, bags, boxes). */
   available: number;
+  // For "sold as a pack" items: subFactor sub-units fit in one pack, and
+  // installs are entered in sub-units rather than packs. Cost charged to the
+  // greenhouse = unitPrice × (subUnitsInstalled / subFactor).
+  subUnit?: string | null;
+  subFactor?: number | null;
+  /** FIFO-top batch's unit price, used by the dialog for the live cost preview
+   *  when the item is sold as a pack. */
+  topBatchUnitPrice?: string | null;
   // The most-stock-rich batch's depreciation snapshot, surfaced here so the
   // dialog can display the per-use charge preview before submitting.
   topBatch?: {
@@ -70,26 +79,61 @@ export function InstallAssetDialog({
   const itemId = form.watch("itemId");
   const qtyStr = form.watch("qty");
   const selected = items.find((i) => i.id === itemId);
-  const qty = /^[0-9.]+$/.test(qtyStr) ? Number(qtyStr) : 0;
+  /** Raw value of the qty input (always Number). For pack-style items the
+   *  user is typing sub-units (metres). For everything else they're typing
+   *  packs (rolls / kg / pcs). */
+  const qtyInput = /^[0-9.]+$/.test(qtyStr) ? Number(qtyStr) : 0;
+  const isPack = !!(selected?.subUnit && selected?.subFactor && selected.subFactor > 0);
+  /** Always-in-packs version of the input — what we'll send to the server. */
+  const qtyInPacks = isPack && selected?.subFactor ? qtyInput / selected.subFactor : qtyInput;
+
   const depreciable =
     selected?.topBatch &&
     selected.topBatch.maxUses > 1 &&
     !!selected.topBatch.amortisedCostPerUse;
   const charge =
     depreciable && selected?.topBatch?.amortisedCostPerUse
-      ? (qty * Number(selected.topBatch.amortisedCostPerUse)).toFixed(4)
+      ? (qtyInPacks * Number(selected.topBatch.amortisedCostPerUse)).toFixed(4)
       : null;
   const nextUseLabel =
     depreciable && selected?.topBatch
       ? `use ${selected.topBatch.useCount + 1} of ${selected.topBatch.maxUses}`
       : null;
 
+  /** Live proportional-cost preview for pack-style items. Uses the FIFO-top
+   *  batch's unit price as an estimate; actual charge may span multiple
+   *  batches at different prices if the install exceeds the top batch's
+   *  remaining stock — the server does the exact math via consumeFifo. */
+  const packCostPreview =
+    isPack && selected?.topBatchUnitPrice && selected.subFactor && qtyInput > 0
+      ? (qtyInput * (Number(selected.topBatchUnitPrice) / selected.subFactor)).toFixed(2)
+      : null;
+  const packPerSubUnit =
+    isPack && selected?.topBatchUnitPrice && selected.subFactor
+      ? (Number(selected.topBatchUnitPrice) / selected.subFactor).toFixed(4)
+      : null;
+  /** Available rendered in sub-units when the item is sold as a pack. */
+  const availableLabel =
+    isPack && selected?.subFactor
+      ? `${(selected.available * selected.subFactor).toFixed(0)} ${selected.subUnit} avail`
+      : selected
+        ? `${selected.available} ${selected.unit} avail`
+        : "";
+
   function onSubmit(v: Form) {
     startT(async () => {
+      // For pack-style items, the user typed sub-units (metres) but the
+      // server consumes inventory in pack units (rolls). Convert here.
+      const sel = items.find((i) => i.id === v.itemId);
+      const isPackItem = !!(sel?.subUnit && sel?.subFactor && sel.subFactor > 0);
+      const qtyToSend =
+        isPackItem && sel?.subFactor
+          ? (Number(v.qty) / sel.subFactor).toString()
+          : v.qty;
       const r = await installHarvestAsset({
         harvestId,
         itemId: v.itemId,
-        qty: v.qty,
+        qty: qtyToSend,
         date: v.date,
         reusable: v.type === "reusable",
         condition: v.condition === "new" ? "new" : "second-hand",
@@ -130,14 +174,32 @@ export function InstallAssetDialog({
                 options={items.map((i) => ({
                   value: i.id,
                   label: i.name,
-                  description: `${i.available} ${i.unit} avail`,
+                  description:
+                    i.subUnit && i.subFactor && i.subFactor > 0
+                      ? `${(i.available * i.subFactor).toFixed(0)} ${i.subUnit} avail`
+                      : `${i.available} ${i.unit} avail`,
                 }))}
               />
+              {selected ? (
+                <p className="text-xs text-muted-foreground">{availableLabel}</p>
+              ) : null}
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
-                <Label>Quantity{selected ? ` (${selected.unit})` : ""}</Label>
+                <Label>
+                  Quantity
+                  {selected
+                    ? ` (${isPack ? selected.subUnit : selected.unit})`
+                    : ""}
+                </Label>
                 <Input type="number" step="any" min="0" {...form.register("qty")} />
+                {isPack && packCostPreview ? (
+                  <p className="text-xs text-muted-foreground">
+                    {qtyInput} {selected?.subUnit} × {packPerSubUnit}
+                    /{selected?.subUnit} ={" "}
+                    <strong className="text-foreground">{packCostPreview}</strong>
+                  </p>
+                ) : null}
               </div>
               <div className="space-y-2">
                 <Label>Date</Label>

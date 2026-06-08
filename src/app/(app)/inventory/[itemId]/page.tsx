@@ -161,6 +161,8 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
               description: item.description,
               photoPath: item.photoPath,
               unit: item.unit,
+              subUnit: item.subUnit,
+              subFactor: item.subFactor ? item.subFactor.toString() : null,
               categoryId: item.categoryId,
               defaultSupplierId: item.defaultSupplierId,
               reorder: item.reorder.toFixed(4),

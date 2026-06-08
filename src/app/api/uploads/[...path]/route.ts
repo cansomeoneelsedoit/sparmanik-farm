@@ -11,6 +11,12 @@ export const runtime = "nodejs";
  * that hot-pathed Prisma + the org-scoping extension into every image
  * request, and a single page render with 20+ image tags would queue up
  * 20 transactions behind it. That made the whole site feel laggy.
+ *
+ * Read-failures are logged so a recurring "all images 404 on local" is
+ * visible in `docker compose logs web` instead of being silently swallowed
+ * — the most common cause is the dev container running a stale build
+ * because Docker bind mounts on Windows/macOS don't propagate native fs
+ * events into Turbopack. Fix: `docker compose restart web`.
  */
 export async function GET(_req: Request, { params }: { params: Promise<{ path: string[] }> }) {
   const session = await auth();
@@ -33,7 +39,15 @@ export async function GET(_req: Request, { params }: { params: Promise<{ path: s
         "Cache-Control": "private, max-age=31536000, immutable",
       },
     });
-  } catch {
+  } catch (err) {
+    console.error(
+      "[uploads] failed to serve",
+      relative,
+      "UPLOAD_DIR=",
+      process.env.UPLOAD_DIR,
+      "err=",
+      err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+    );
     return new Response("Not found", { status: 404 });
   }
 }

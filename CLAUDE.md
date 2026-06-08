@@ -267,6 +267,32 @@ prisma/
     overrides where it has to (e.g. `DATABASE_URL` for the docker-net
     `db` hostname).
 
+22. **Turbopack hot-reload is broken in Docker on Windows. Restart the
+    `web` container after every code edit.** Docker bind mounts on
+    Windows don't propagate native fs events into the Linux container,
+    so Turbopack silently serves a stale compiled bundle. Symptoms:
+    "I just edited code and the change isn't showing", routes 404ing
+    that previously worked, images 404ing even though the files are on
+    disk, server actions running an older version of their handler.
+    Polling env vars (`WATCHPACK_POLLING`, `CHOKIDAR_USEPOLLING`) DO
+    NOT help — tried them in `docker-compose.yml`, they broke
+    Turbopack's route discovery entirely (every `/api/*` route 404'd).
+    Reverted.
+    - **Fix**: `npm run dev:restart` (alias for `docker compose restart web`).
+      Takes ~20 s. Available as `restart-dev.cmd` in the project root
+      for one-click. **Run this after any source edit** — including
+      your own, including Claude's.
+    - **If a simple restart isn't enough** (added an npm dep, changed
+      `prisma/schema.prisma`, edited `docker-compose.yml` or `Dockerfile.dev`):
+      `npm run dev:rebuild` or `restart-dev-full.cmd` does a full
+      `compose down && up --build` cycle (~2–3 min).
+    - **For Claude sessions**: if you've edited any file under `src/`
+      while helping Boyd vibe-code, restart the container before
+      claiming the change is verified. Don't assume hot-reload picked
+      it up. The classic trap is "I edited the route — it works in
+      curl unauth → 401" but the route was actually still the OLD
+      compiled bundle: you tested cached behavior, not your edit.
+
 ## Auth flow
 
 1. Unauthenticated user hits any `/(app)/*` route.

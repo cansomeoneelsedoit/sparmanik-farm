@@ -45,6 +45,8 @@ export default async function InventoryPage({
     description: string | null;
     photoPath: string | null;
     unit: string;
+    subUnit: string | null;
+    subFactor: Decimal | null;
     reorder: Decimal;
     category: { name: string } | null;
     batches: {
@@ -289,6 +291,8 @@ export default async function InventoryPage({
               description: r.description,
               photoPath: r.photoPath,
               unit: r.unit,
+              subUnit: r.subUnit ?? null,
+              subFactor: r.subFactor ? r.subFactor.toString() : null,
               reorder: reorder.toFixed(0),
               stock: r.stock.toFixed(0),
               // Format on the server (cheap, no extra Prisma calls) so the

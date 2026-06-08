@@ -55,10 +55,22 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
     }),
     prisma.item.findMany({
       orderBy: { name: "asc" },
+      // subUnit + subFactor (e.g. "metres" + 500) drive the pack-style
+      // install UX. price is per-batch, used by the install dialog's cost
+      // preview to charge proportional cost when only a fraction of the
+      // pack is installed.
       include: {
         batches: {
           orderBy: [{ date: "asc" }, { createdAt: "asc" }],
-          include: { consumptions: { select: { qty: true } } },
+          select: {
+            id: true,
+            qty: true,
+            price: true,
+            maxUses: true,
+            useCount: true,
+            amortisedCostPerUse: true,
+            consumptions: { select: { qty: true } },
+          },
         },
       },
     }),
@@ -165,7 +177,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
   type AssetRow = {
     id: string;
     date: Date;
-    item: { name: string; unit: string };
+    item: { name: string; unit: string; subUnit: string | null; subFactor: Decimal | null };
     qty: Decimal;
     reusable: boolean;
     condition: string | null;
@@ -179,6 +191,16 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
     returnNote: string | null;
     consumptions: { qty: Decimal; unitCost: Decimal }[];
   };
+  /** Render an asset's qty in the user's preferred unit. For pack-style
+   *  items (`subFactor` set) we display the install in sub-units so "50
+   *  metres" reads naturally instead of "0.1 rolls". */
+  function fmtAssetQty(a: AssetRow): string {
+    if (a.item.subFactor && a.item.subUnit) {
+      const subQty = new Decimal(a.qty).times(a.item.subFactor);
+      return `${Number(subQty)} ${a.item.subUnit}`;
+    }
+    return `${Number(a.qty)} ${a.item.unit}`;
+  }
   const assetRows = (harvest.assets as AssetRow[]).map((a) => {
     const fifoCost = a.consumptions.reduce(
       (s: Decimal, c) => s.plus(new Decimal(c.qty).times(c.unitCost)),
@@ -197,9 +219,12 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
     id: string;
     name: string;
     unit: string;
+    subUnit: string | null;
+    subFactor: Decimal | null;
     batches: {
       id: string;
       qty: Decimal;
+      price: Decimal;
       maxUses: number;
       useCount: number;
       amortisedCostPerUse: Decimal | null;
@@ -210,6 +235,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
     .map((i) => {
       let available = new Decimal(0);
       let topBatch: InstallAssetItem["topBatch"] = null;
+      let topBatchUnitPrice: string | null = null;
       for (const b of i.batches) {
         const consumed = b.consumptions.reduce(
           (s: Decimal, c) => s.plus(c.qty),
@@ -225,6 +251,12 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
               ? new Decimal(b.amortisedCostPerUse).toFixed(4)
               : null,
           };
+          // Unit price for the cost preview on pack-style items. price is
+          // stored as the total batch price (e.g. $50 for the whole roll),
+          // so unit price = price / qty (e.g. $50 / 1 roll = $50/roll).
+          topBatchUnitPrice = new Decimal(b.price)
+            .div(new Decimal(b.qty))
+            .toFixed(4);
         }
         available = available.plus(rem);
       }
@@ -232,6 +264,9 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
         id: i.id,
         name: i.name,
         unit: i.unit,
+        subUnit: i.subUnit,
+        subFactor: i.subFactor ? Number(i.subFactor) : null,
+        topBatchUnitPrice,
         available: Number(available),
         topBatch,
       };
@@ -494,7 +529,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                     <TableRow key={a.id}>
                       <TableCell className="text-muted-foreground">{a.date.toISOString().slice(0, 10)}</TableCell>
                       <TableCell>{a.item.name}</TableCell>
-                      <TableCell className="text-right">{Number(a.qty)} {a.item.unit}</TableCell>
+                      <TableCell className="text-right">{fmtAssetQty(a)}</TableCell>
                       <TableCell className="text-muted-foreground">
                         <strong className="text-foreground">{usesRemaining}</strong> of {a.maxUses}
                       </TableCell>
@@ -561,7 +596,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                   <TableRow key={a.id}>
                     <TableCell className="text-muted-foreground">{a.date.toISOString().slice(0, 10)}</TableCell>
                     <TableCell>{a.item.name}</TableCell>
-                    <TableCell className="text-right">{Number(a.qty)} {a.item.unit}</TableCell>
+                    <TableCell className="text-right">{fmtAssetQty(a)}</TableCell>
                     <TableCell>{a.reusable ? <Badge variant="outline">Reusable</Badge> : "—"}</TableCell>
                     <TableCell className="text-muted-foreground">{a.condition ?? "—"}</TableCell>
                     <TableCell className="text-right text-muted-foreground"><Money value={a.fifoCost.toFixed(4)} /></TableCell>
@@ -619,7 +654,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                 {depreciableAssets.map((a) => (
                   <li key={a.id} className="flex items-center justify-between">
                     <span className="text-muted-foreground">
-                      {a.date.toISOString().slice(0, 10)} — {a.item.name} × {Number(a.qty)} {a.item.unit} (use {a.useCount} of {a.maxUses})
+                      {a.date.toISOString().slice(0, 10)} — {a.item.name} × {fmtAssetQty(a)} (use {a.useCount} of {a.maxUses})
                     </span>
                     <span className="text-red-600"><Money value={(a.amortisedCharge ?? new Decimal(0)).toFixed(4)} /></span>
                   </li>

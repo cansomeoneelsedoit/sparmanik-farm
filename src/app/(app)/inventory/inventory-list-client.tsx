@@ -20,8 +20,13 @@ export type InventoryRow = {
   description: string | null;
   photoPath: string | null;
   unit: string;
+  /** For "sold as pack" items (e.g. drip pipe roll measured in metres):
+   *  the sub-unit noun. Null on regular discrete items. */
+  subUnit: string | null;
+  /** Sub-units per pack — e.g. 500 metres per 1 roll. Null on regular items. */
+  subFactor: string | null;
   reorder: string; // serialised Decimal
-  stock: string; // serialised Decimal
+  stock: string; // serialised Decimal (in pack units, e.g. rolls)
   /** Pre-formatted by the server-side <Money> component so this client
    * file doesn't need to import @/server/money (which transitively pulls
    * Prisma into the client bundle). */
@@ -217,6 +222,15 @@ export function InventoryListClient({ rows }: { rows: InventoryRow[] }) {
                       <Badge variant="secondary">Warn</Badge>
                     ) : null}
                   </div>
+                  {/* For pack-style items (drip pipe rolls, dripper bags etc),
+                      show the total sub-unit stock below the pack count so
+                      "3 rolls" reads as "= 1,500 metres" at a glance. */}
+                  {r.subUnit && r.subFactor && Number(r.subFactor) > 0 ? (
+                    <span className="text-[10px] text-muted-foreground">
+                      = {(Number(r.stock) * Number(r.subFactor)).toFixed(0)}{" "}
+                      {r.subUnit}
+                    </span>
+                  ) : null}
                   {r.usesRemaining !== null && r.usesMax !== null ? (
                     <span className="text-[10px] text-muted-foreground">
                       {r.usesRemaining} / {r.usesMax} uses left

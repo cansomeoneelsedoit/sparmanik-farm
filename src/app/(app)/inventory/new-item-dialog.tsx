@@ -30,6 +30,17 @@ const schema = z.object({
   description: z.string().optional(),
   photoPath: z.string().optional(),
   unit: z.string().min(1, "Required"),
+  // When the item is sold as a PACK (e.g. a 500-metre roll of drip pipe, or a
+  // 500-piece bag of emitters) and used in fractions, capture the sub-unit
+  // (metres / pieces / kg / ml) and how many of those fit in one pack. The
+  // install dialog then asks for "Quantity (metres)" instead of "Quantity
+  // (rolls)" and charges the greenhouse proportional cost: `unitPrice ×
+  // (qtyInstalled / subFactor)`.
+  subUnit: z.string().optional(),
+  subFactor: z
+    .string()
+    .regex(/^[0-9.]*$/, "Number")
+    .optional(),
   categoryId: z.string().optional(),
   defaultSupplierId: z.string().optional(),
   reorder: z.string().regex(/^[0-9.]+$/, "Number").default("0"),
@@ -55,6 +66,8 @@ export function NewItemDialog({
     description: string | null;
     photoPath: string | null;
     unit: string;
+    subUnit: string | null;
+    subFactor: string | null;
     categoryId: string | null;
     defaultSupplierId: string | null;
     reorder: string;
@@ -78,6 +91,8 @@ export function NewItemDialog({
           description: existing.description ?? "",
           photoPath: existing.photoPath ?? "",
           unit: existing.unit,
+          subUnit: existing.subUnit ?? "",
+          subFactor: existing.subFactor ?? "",
           categoryId: existing.categoryId ?? undefined,
           defaultSupplierId: existing.defaultSupplierId ?? undefined,
           reorder: existing.reorder,
@@ -85,8 +100,14 @@ export function NewItemDialog({
           reusable: existing.reusable,
           shopeeUrl: existing.shopeeUrl ?? "",
         }
-      : { name: "", description: "", photoPath: "", unit: "", reorder: "0", reusable: false },
+      : { name: "", description: "", photoPath: "", unit: "", subUnit: "", subFactor: "", reorder: "0", reusable: false },
   });
+
+  // Open the "sold as a pack" section by default if the item already has
+  // pack info; users editing a roll-style item shouldn't have to dig for it.
+  const [isPack, setIsPack] = useState<boolean>(
+    !!(existing?.subUnit && existing?.subFactor),
+  );
 
   const photoPath = form.watch("photoPath");
 
@@ -117,6 +138,14 @@ export function NewItemDialog({
         categoryId: values.categoryId || null,
         defaultSupplierId: values.defaultSupplierId || null,
         shopeeUrl: values.shopeeUrl || null,
+        // Only persist sub-unit info when the pack switch is on AND both
+        // fields are filled; otherwise null both out so a user who toggled
+        // off doesn't keep stale pack data on the item.
+        subUnit: isPack && values.subUnit?.trim() ? values.subUnit.trim() : null,
+        subFactor:
+          isPack && values.subFactor?.trim() && Number(values.subFactor) > 0
+            ? values.subFactor.trim()
+            : null,
       };
       const r = isEdit ? await updateItem(existing.id, payload) : await createItem(payload);
       if (r.ok) {
@@ -199,11 +228,66 @@ export function NewItemDialog({
             </Row>
             <div className="grid grid-cols-2 gap-3">
               <Row label="Unit" error={form.formState.errors.unit?.message}>
-                <Input {...form.register("unit")} placeholder="rolls / litres / pcs" />
+                <Input
+                  {...form.register("unit")}
+                  placeholder={isPack ? "roll / bag / box" : "kg / litres / pcs"}
+                />
               </Row>
               <Row label="Reorder threshold" error={form.formState.errors.reorder?.message}>
                 <Input {...form.register("reorder")} type="number" min="0" step="any" />
               </Row>
+            </div>
+
+            {/* Pack-with-sub-unit (rolls, bags, boxes used in fractions).
+                Off by default for new items; on when editing an item that
+                already has pack info. */}
+            <div className="space-y-3 rounded-md border p-3">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label>Sold as a pack used in fractions</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Turn on for things like a 500&nbsp;m roll of drip pipe, or
+                    a 500&nbsp;pc bag of emitters, where the greenhouse uses
+                    only part of the pack each install. We&rsquo;ll charge
+                    the greenhouse proportional cost.
+                  </p>
+                </div>
+                <Switch
+                  checked={isPack}
+                  onCheckedChange={(v) => {
+                    setIsPack(v);
+                    if (!v) {
+                      form.setValue("subUnit", "");
+                      form.setValue("subFactor", "");
+                    }
+                  }}
+                />
+              </div>
+              {isPack ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <Row
+                    label="Measured in"
+                    error={form.formState.errors.subUnit?.message}
+                  >
+                    <Input
+                      {...form.register("subUnit")}
+                      placeholder="metres / pieces / kg / ml"
+                    />
+                  </Row>
+                  <Row
+                    label="Pack size"
+                    error={form.formState.errors.subFactor?.message}
+                  >
+                    <Input
+                      {...form.register("subFactor")}
+                      type="number"
+                      min="0"
+                      step="any"
+                      placeholder="500"
+                    />
+                  </Row>
+                </div>
+              ) : null}
             </div>
             <div className="grid grid-cols-2 gap-3">
               <Row label="Category">
