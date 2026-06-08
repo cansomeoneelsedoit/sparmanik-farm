@@ -6,6 +6,7 @@
     "dev": "next dev",
     "dev:restart": "docker compose restart web",
     "dev:rebuild": "docker compose down && docker compose up -d",
+    "sync:local-to-prod": "node scripts/sync-local-to-prod.mjs",
     "build": "prisma generate && next build",
     "start": "next start",
     "start:prod": "prisma migrate deploy && (tsx prisma/seed.ts || true) && next start",

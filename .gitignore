@@ -51,3 +51,9 @@ next-env.d.ts
 
 # Understand Anything indexing artefacts
 .understand-anything/
+
+# Local-only data-sync artifacts — never commit these. Backup .sql files
+# include prod data and pg_dump's connection-string-derived strings.
+prod-backup-*.sql
+tmp-sync/
+
