@@ -1,4 +1,12 @@
-import { CheckCircle2, AlertTriangle, AlertOctagon, Info } from "lucide-react";
+import Link from "next/link";
+import {
+  CheckCircle2,
+  AlertTriangle,
+  AlertOctagon,
+  Info,
+  ListChecks,
+  ChevronRight,
+} from "lucide-react";
 
 import { computeHealthScore, runHealthChecks } from "@/server/health-checks";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -59,6 +67,27 @@ export default async function HealthCheckPage() {
           </div>
         </div>
       </header>
+
+      {/* Stock-take entry point — surfaced at the top because it's the
+          single most common "fix prod data" lever the user has. */}
+      <Link
+        href="/health-check/stocktake"
+        className="group flex items-center gap-4 rounded-xl border bg-card p-4 transition-colors hover:border-foreground/30 hover:bg-muted/40"
+      >
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-accent/20 text-accent-foreground">
+          <ListChecks className="h-5 w-5" />
+        </div>
+        <div className="flex-1">
+          <div className="text-sm font-semibold">Stock-take</div>
+          <div className="text-xs text-muted-foreground">
+            Walk the warehouse with this page open. Set pack sizes
+            (polybag-50pc, 500m roll, 500-seed bag) and fix actual on-hand
+            stock per item — useful when stock got bought or used without
+            being logged.
+          </div>
+        </div>
+        <ChevronRight className="h-5 w-5 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+      </Link>
 
       {/* Critical */}
       {critical.length > 0 ? (

@@ -982,3 +982,222 @@ export async function deleteItems(ids: string[]): Promise<ActionResult<{ deleted
     return { ok: false, error: e instanceof Error ? e.message : "Failed to delete items" };
   }
 }
+
+// ============================================================================
+// Stock-take
+// ============================================================================
+
+/**
+ * One-shot per-item stock-take adjustment.
+ *
+ * Used by the wizard at /health-check/stocktake to fix:
+ *   1. Items that should be tracked as packs of sub-units (set subUnit +
+ *      subFactor so polybag-with-50-pcs reads as 50 pcs).
+ *   2. Stock levels that drifted because purchases / usages weren't logged
+ *      while the farm was bootstrapping the app.
+ *
+ * Behaviour:
+ *   - If `subUnit` + `subFactor` are passed, they're applied to the Item.
+ *   - If `actualQtyInSubUnit` is non-null, the stock level is adjusted to
+ *     that amount. The actual value is interpreted in SUB-UNITS when the
+ *     item has a subFactor (after the optional update above), otherwise
+ *     in the item's plain unit.
+ *     - delta > 0 → create a new Batch (qty = delta, price = 0,
+ *       supplierId = null, date = today) marked as a stock-take fill.
+ *     - delta < 0 → consume the missing qty via FIFO (BatchConsumption rows
+ *       with both harvestAssetId and harvestUsageId NULL — these are the
+ *       canonical "stock-take consumed" entries).
+ *     - delta = 0 → no batches touched; only the Item update (if any).
+ *   - A single audit log entry records the before/after stock so the
+ *     Financials page can attribute the change to a stock-take, not a
+ *     phantom harvest.
+ */
+const stocktakeSchema = z.object({
+  itemId: z.string(),
+  // Pack info (optional — only sent when the user toggled "this is a pack").
+  subUnit: z.string().nullable().optional(),
+  subFactor: z.string().regex(/^[0-9.]*$/).nullable().optional(),
+  // Actual on-hand quantity, in sub-units when subFactor is set on the item,
+  // else in plain units. Null = skip the stock adjustment (only update item).
+  actualQtyInSubUnit: z.string().regex(/^[0-9.]+$/).nullable().optional(),
+  /** Free-text note shown in the audit log, e.g. "Counted shelf 3 after
+   *  morning harvest". Optional. */
+  note: z.string().max(500).optional(),
+});
+
+export async function applyStocktake(input: unknown): Promise<ActionResult<{
+  beforePacks: string;
+  afterPacks: string;
+  deltaPacks: string;
+}>> {
+  const parsed = stocktakeSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: "Invalid stock-take input",
+      fieldErrors: parsed.error.flatten().fieldErrors,
+    };
+  }
+  const uid = await userId();
+  try {
+    const result = await prisma.$transaction(async (tx: TransactionClient) => {
+      // 1. Load the item.
+      const item = await tx.item.findFirst({
+        where: { id: parsed.data.itemId },
+        select: {
+          id: true,
+          name: true,
+          unit: true,
+          subUnit: true,
+          subFactor: true,
+        },
+      });
+      if (!item) throw new Error("Item not found");
+
+      // 2. Apply pack-info update if passed. We treat empty strings the same
+      // as "leave alone" — the wizard sends nulls when the toggle is off.
+      const newSubUnit = parsed.data.subUnit?.trim() || null;
+      const newSubFactor =
+        parsed.data.subFactor?.trim() && Number(parsed.data.subFactor) > 0
+          ? new Decimal(parsed.data.subFactor)
+          : null;
+      const subUnitChanged = newSubUnit !== (item.subUnit ?? null);
+      const subFactorChanged =
+        (newSubFactor?.toString() ?? null) !==
+        (item.subFactor?.toString() ?? null);
+      if (subUnitChanged || subFactorChanged) {
+        await tx.item.update({
+          where: { id: item.id },
+          data: { subUnit: newSubUnit, subFactor: newSubFactor },
+        });
+      }
+
+      // Effective pack factor for the stock-adjust math below — use the
+      // new value if just set, else fall back to the existing item value.
+      const effectiveSubFactor = newSubFactor ?? item.subFactor ?? null;
+
+      // 3. Compute current stock in packs.
+      const batches = await tx.batch.findMany({
+        where: { itemId: item.id },
+        select: {
+          id: true,
+          qty: true,
+          price: true,
+          exchangeRate: true,
+          consumptions: { select: { qty: true } },
+        },
+      });
+      const currentPacks = batches.reduce((sum: Decimal, b) => {
+        const consumed = b.consumptions.reduce(
+          (s: Decimal, c) => s.plus(c.qty),
+          new Decimal(0),
+        );
+        return sum.plus(new Decimal(b.qty).minus(consumed));
+      }, new Decimal(0));
+
+      // 4. If no actual qty given, we're done (just updating pack info).
+      if (
+        parsed.data.actualQtyInSubUnit === undefined ||
+        parsed.data.actualQtyInSubUnit === null
+      ) {
+        await recordAction(tx, {
+          type: "inventory.stocktake_packinfo",
+          entityType: "Item",
+          entityId: item.id,
+          description: `Stock-take: pack info updated for "${item.name}"`,
+          userId: uid,
+          payload: {
+            itemId: item.id,
+            subUnit: newSubUnit,
+            subFactor: newSubFactor?.toString() ?? null,
+          },
+        });
+        return {
+          beforePacks: currentPacks.toFixed(4),
+          afterPacks: currentPacks.toFixed(4),
+          deltaPacks: "0",
+        };
+      }
+
+      // 5. Convert the user's input → packs.
+      const enteredAsSub = new Decimal(parsed.data.actualQtyInSubUnit);
+      const targetPacks =
+        effectiveSubFactor && effectiveSubFactor.gt(0)
+          ? enteredAsSub.div(effectiveSubFactor)
+          : enteredAsSub;
+      const deltaPacks = targetPacks.minus(currentPacks);
+
+      // 6. Apply the delta.
+      if (deltaPacks.gt(0)) {
+        // Need more stock. Create a price=0 batch dated today. The exchange
+        // rate from the most recent batch (or 1 if none) is preserved so
+        // financials views don't NaN.
+        const lastRate =
+          batches[batches.length - 1]?.exchangeRate ?? new Decimal(1);
+        await tx.batch.create({
+          data: {
+            itemId: item.id,
+            qty: deltaPacks,
+            price: new Decimal(0),
+            exchangeRate: lastRate,
+            date: new Date(),
+            supplierId: null,
+          },
+        });
+      } else if (deltaPacks.lt(0)) {
+        // Need less stock. Consume |delta| from FIFO-top batches.
+        const { consumed } = await consumeFifo(
+          tx,
+          item.id,
+          deltaPacks.abs(),
+        );
+        for (const c of consumed) {
+          await tx.batchConsumption.create({
+            data: {
+              batchId: c.batchId,
+              qty: new Decimal(c.qty),
+              unitCost: new Decimal(c.unitCost),
+              // harvestAssetId + harvestUsageId stay NULL — that's the
+              // signal that this row is a stock-take adjustment, not a
+              // harvest install or a recorded usage.
+            },
+          });
+        }
+      }
+
+      await recordAction(tx, {
+        type: "inventory.stocktake",
+        entityType: "Item",
+        entityId: item.id,
+        description: `Stock-take: "${item.name}" ${currentPacks.toFixed(2)} → ${targetPacks.toFixed(2)} ${item.unit}${parsed.data.note ? ` (${parsed.data.note})` : ""}`,
+        userId: uid,
+        payload: {
+          itemId: item.id,
+          beforePacks: currentPacks.toFixed(4),
+          afterPacks: targetPacks.toFixed(4),
+          deltaPacks: deltaPacks.toFixed(4),
+          subUnit: newSubUnit,
+          subFactor: newSubFactor?.toString() ?? null,
+          note: parsed.data.note ?? null,
+        },
+      });
+
+      return {
+        beforePacks: currentPacks.toFixed(4),
+        afterPacks: targetPacks.toFixed(4),
+        deltaPacks: deltaPacks.toFixed(4),
+      };
+    });
+
+    revalidatePath("/inventory");
+    revalidatePath("/health-check");
+    revalidatePath("/health-check/stocktake");
+    revalidatePath("/financials");
+    return { ok: true, data: result };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Stock-take failed",
+    };
+  }
+}

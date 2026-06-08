@@ -21,9 +21,8 @@ import { Badge } from "@/components/ui/badge";
 import { Money } from "@/components/shared/money";
 import { InventoryFilters } from "@/app/(app)/inventory/inventory-filters";
 import { InventoryListClient, type InventoryRow } from "@/app/(app)/inventory/inventory-list-client";
+import { InventoryGridClient, type GridRow } from "@/app/(app)/inventory/inventory-grid-client";
 import { NewItemDialog } from "@/app/(app)/inventory/new-item-dialog";
-import { CategoryChipLink } from "@/app/(app)/inventory/category-chip-link";
-import { SmartImage } from "@/components/shared/smart-image";
 
 export const dynamic = "force-dynamic";
 
@@ -209,75 +208,31 @@ export default async function InventoryPage({
       {rows.length === 0 ? (
         <EmptyState hasFilters={!!q || !!cat} />
       ) : view === "grid" ? (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-          {rows.map((r) => {
+        <InventoryGridClient
+          rows={rows.map<GridRow>((r) => {
             const reorder = new Decimal(r.reorder);
             const low = reorder.gt(0) && r.stock.lte(reorder.times(0.5));
             const crit = reorder.gt(0) && r.stock.lte(reorder.times(0.2));
-            return (
-              <Link
-                key={r.id}
-                href={`/inventory/${r.id}`}
-                className="group block overflow-hidden rounded-xl border bg-card transition-all hover:-translate-y-0.5 hover:shadow-lg"
-              >
-                <div className="relative aspect-square w-full overflow-hidden bg-muted">
-                  <SmartImage
-                    src={r.photoPath ? `/api/uploads/${r.photoPath}` : null}
-                    alt={r.name}
-                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                  />
-                  {crit ? (
-                    <Badge variant="destructive" className="absolute right-2 top-2">
-                      Low
-                    </Badge>
-                  ) : low ? (
-                    <Badge variant="secondary" className="absolute right-2 top-2">
-                      Warn
-                    </Badge>
-                  ) : null}
-                </div>
-                <div className="space-y-1.5 p-3">
-                  <div className="line-clamp-1 text-sm font-medium">
-                    {r.name?.trim() || (
-                      <span className="italic text-muted-foreground">Untitled item</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] tracking-wider text-muted-foreground">
-                      {r.code}
-                    </span>
-                    {r.category?.name ? (
-                      <CategoryChipLink name={r.category.name} />
-                    ) : null}
-                  </div>
-                  {r.description ? (
-                    <div className="line-clamp-2 text-xs text-muted-foreground">
-                      {r.description}
-                    </div>
-                  ) : null}
-                  <div className="flex items-center justify-between pt-1.5">
-                    <span
-                      className={cn(
-                        "text-xs font-medium",
-                        crit ? "text-destructive" : low ? "text-yellow-600" : "text-muted-foreground",
-                      )}
-                    >
-                      {r.stock.toFixed(0)} {r.unit}
-                    </span>
-                    <span className="text-xs font-semibold">
-                      <Money value={r.value.toFixed(4)} />
-                    </span>
-                  </div>
-                  {r.usesRemaining !== null && r.usesMax !== null ? (
-                    <div className="rounded bg-muted/50 px-2 py-0.5 text-center text-[10px] text-muted-foreground">
-                      {r.usesRemaining} / {r.usesMax} uses left
-                    </div>
-                  ) : null}
-                </div>
-              </Link>
-            );
+            return {
+              id: r.id,
+              code: r.code,
+              name: r.name,
+              description: r.description,
+              photoPath: r.photoPath,
+              unit: r.unit,
+              subUnit: r.subUnit ?? null,
+              subFactor: r.subFactor ? r.subFactor.toString() : null,
+              reorderStr: reorder.toFixed(0),
+              stockStr: r.stock.toFixed(0),
+              valueRaw: r.value.toFixed(4),
+              categoryName: r.category?.name ?? null,
+              usesRemaining: r.usesRemaining,
+              usesMax: r.usesMax,
+              low,
+              crit,
+            };
           })}
-        </div>
+        />
       ) : (
         <InventoryListClient
           rows={rows.map<InventoryRow>((r) => {
