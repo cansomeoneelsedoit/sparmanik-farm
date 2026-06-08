@@ -9,7 +9,6 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Money } from "@/components/shared/money";
 import { SmartImage } from "@/components/shared/smart-image";
 import { CategoryChipLink } from "@/app/(app)/inventory/category-chip-link";
 import { deleteItems } from "@/app/(app)/inventory/actions";
@@ -25,9 +24,12 @@ export type GridRow = {
   subFactor: string | null;
   reorderStr: string;
   stockStr: string;
-  /** Pre-formatted by the server-side <Money> component so this client
-   *  file doesn't pull Prisma into the bundle. */
-  valueRaw: string;
+  /** Pre-formatted (e.g. "Rp 12,345") by the server page so this client
+   *  file doesn't have to import @/components/shared/money. Importing
+   *  `<Money>` into a "use client" file pulls @/server/prisma into the
+   *  client bundle and Turbopack errors with "chunking context does not
+   *  support external modules" — see CLAUDE.md gotcha #18. */
+  valueFormatted: string;
   categoryName: string | null;
   usesRemaining: number | null;
   usesMax: number | null;
@@ -224,9 +226,7 @@ export function InventoryGridClient({ rows }: { rows: GridRow[] }) {
                       </span>
                     ) : null}
                   </span>
-                  <span className="text-xs font-semibold">
-                    <Money value={r.valueRaw} />
-                  </span>
+                  <span className="text-xs font-semibold">{r.valueFormatted}</span>
                 </div>
                 {r.usesRemaining !== null && r.usesMax !== null ? (
                   <div className="rounded bg-muted/50 px-2 py-0.5 text-center text-[10px] text-muted-foreground">

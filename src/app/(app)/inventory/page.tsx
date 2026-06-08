@@ -224,7 +224,10 @@ export default async function InventoryPage({
               subFactor: r.subFactor ? r.subFactor.toString() : null,
               reorderStr: reorder.toFixed(0),
               stockStr: r.stock.toFixed(0),
-              valueRaw: r.value.toFixed(4),
+              // Pre-format here (server-side) — see CLAUDE.md gotcha #18:
+              // importing <Money> into the client grid pulls Prisma into
+              // the browser bundle and crashes Turbopack at build time.
+              valueFormatted: `Rp ${Number(r.value.toFixed(0)).toLocaleString("id-ID")}`,
               categoryName: r.category?.name ?? null,
               usesRemaining: r.usesRemaining,
               usesMax: r.usesMax,
