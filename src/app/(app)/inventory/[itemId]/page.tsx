@@ -146,6 +146,8 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
           <ReceiveStockDialog
             itemId={item.id}
             itemUnit={item.unit}
+            itemSubUnit={item.subUnit}
+            itemSubFactor={item.subFactor ? Number(item.subFactor) : null}
             itemReusable={item.reusable}
             suppliers={suppliers.map((s: { id: string; name: string }) => ({ id: s.id, name: s.name }))}
             defaultSupplierId={item.defaultSupplierId ?? undefined}

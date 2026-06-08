@@ -19,7 +19,15 @@ import {
   receiveStockBulk,
 } from "@/app/(app)/inventory/actions";
 
-type ItemOpt = { id: string; name: string; unit: string };
+type ItemOpt = {
+  id: string;
+  name: string;
+  unit: string;
+  /** Pack sub-unit ("metres" / "pieces") for items sold as a pack — null on
+   *  regular discrete items. Drives the qty input label + conversion. */
+  subUnit: string | null;
+  subFactor: number | null;
+};
 type SupplierOpt = { id: string; name: string };
 type ItemHistory = { lastSupplierId: string | null; lastPrice: string; lastDate: string };
 type SupplierChip = {
@@ -117,7 +125,15 @@ export function ReceiveStockClient({
   async function handleCreateItem(idx: number, typed: string) {
     const r = await createItemQuick(typed);
     if (r.ok && r.data) {
-      const newItem: ItemOpt = { id: r.data.id, name: r.data.name, unit: r.data.unit };
+      // Quick-create items default to discrete (no sub-unit) — staff can
+      // edit the item afterwards to add pack info if needed.
+      const newItem: ItemOpt = {
+        id: r.data.id,
+        name: r.data.name,
+        unit: r.data.unit,
+        subUnit: null,
+        subFactor: null,
+      };
       setItems((prev) => [...prev, newItem].sort((a, b) => a.name.localeCompare(b.name)));
       updateLine(idx, { itemId: newItem.id });
       toast.success(`Created "${newItem.name}"`);
@@ -143,10 +159,19 @@ export function ReceiveStockClient({
   }
 
   function totalCost(): string {
-    const sum = lines.reduce(
-      (s, l) => (l.itemId ? s + Number(l.qty) * Number(l.price) : s),
-      0,
-    );
+    // For pack items the user typed sub-units; the line's contribution to
+    // total cost is (typedQty / subFactor) × pricePerPack. For non-pack
+    // items it's the plain qty × price.
+    const sum = lines.reduce((s, l) => {
+      if (!l.itemId) return s;
+      const it = itemMap.get(l.itemId);
+      const qtyNum = Number(l.qty);
+      const priceNum = Number(l.price);
+      if (it?.subFactor && it.subFactor > 0) {
+        return s + (qtyNum / it.subFactor) * priceNum;
+      }
+      return s + qtyNum * priceNum;
+    }, 0);
     return sum.toFixed(2);
   }
 
@@ -161,12 +186,22 @@ export function ReceiveStockClient({
         date,
         supplierId,
         exchangeRate: exchangeRate || "1",
-        lines: validLines.map((l) => ({
-          itemId: l.itemId!,
-          qty: l.qty,
-          price: l.price,
-          maxUses: l.reusable ? Math.max(1, Number(l.maxUses) || 1) : 1,
-        })),
+        lines: validLines.map((l) => {
+          // For pack items the user typed sub-units (e.g. 50 pieces of a
+          // 50-pcs polybag); convert to packs (1 pack) before the action
+          // hits the DB.
+          const it = itemMap.get(l.itemId!);
+          const qtyToSend =
+            it?.subFactor && it.subFactor > 0
+              ? (Number(l.qty) / it.subFactor).toString()
+              : l.qty;
+          return {
+            itemId: l.itemId!,
+            qty: qtyToSend,
+            price: l.price,
+            maxUses: l.reusable ? Math.max(1, Number(l.maxUses) || 1) : 1,
+          };
+        }),
       });
       if (r.ok && r.data) {
         toast.success(
@@ -181,15 +216,21 @@ export function ReceiveStockClient({
   }
 
   // Build item-picker options once — annotate each with a hint of the last
-  // supplier + price so the staff sees prior context before clicking.
+  // supplier + price so the staff sees prior context before clicking. Pack
+  // items get a "pack of N pieces" tag so it's clear this item is roll/bag
+  // style before clicking.
   const itemOptions = useMemo(() => {
     const supById = new Map(suppliers.map((s) => [s.id, s.name]));
     return items.map((i) => {
       const h = itemHistory[i.id];
-      let desc = i.unit;
+      const packTag =
+        i.subUnit && i.subFactor && i.subFactor > 0
+          ? `${i.unit} of ${i.subFactor} ${i.subUnit}`
+          : i.unit;
+      let desc = packTag;
       if (h) {
         const sup = h.lastSupplierId ? supById.get(h.lastSupplierId) : null;
-        desc = `${i.unit} · last: ${h.lastPrice}${sup ? ` from ${sup}` : ""} (${h.lastDate})`;
+        desc = `${packTag} · last: ${h.lastPrice}${sup ? ` from ${sup}` : ""} (${h.lastDate})`;
       }
       return { value: i.id, label: i.name, description: desc };
     });
@@ -309,24 +350,55 @@ export function ReceiveStockClient({
                     options={itemOptions}
                     onCreate={(typed) => handleCreateItem(idx, typed)}
                   />
-                  <Input
-                    type="number"
-                    step="any"
-                    min="0"
-                    value={line.qty}
-                    onChange={(e) => updateLine(idx, { qty: e.target.value })}
-                    placeholder="qty"
-                    title="Quantity"
-                  />
-                  <Input
-                    type="number"
-                    step="any"
-                    min="0"
-                    value={line.price}
-                    onChange={(e) => updateLine(idx, { price: e.target.value })}
-                    placeholder="unit price"
-                    title="Unit price"
-                  />
+                  <div className="space-y-0.5">
+                    <Input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={line.qty}
+                      onChange={(e) => updateLine(idx, { qty: e.target.value })}
+                      placeholder={
+                        item?.subUnit && item.subFactor
+                          ? `qty (${item.subUnit})`
+                          : "qty"
+                      }
+                      title={
+                        item?.subUnit && item.subFactor
+                          ? `Quantity in ${item.subUnit}`
+                          : "Quantity"
+                      }
+                    />
+                    {item?.subFactor &&
+                    item.subFactor > 0 &&
+                    Number(line.qty) > 0 ? (
+                      <p className="text-[10px] text-muted-foreground">
+                        = {(Number(line.qty) / item.subFactor).toFixed(2)}{" "}
+                        {item.unit}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="space-y-0.5">
+                    <Input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={line.price}
+                      onChange={(e) => updateLine(idx, { price: e.target.value })}
+                      placeholder={
+                        item ? `IDR / ${item.unit}` : "unit price"
+                      }
+                      title="Unit price (per pack)"
+                    />
+                    {item?.subFactor &&
+                    item.subFactor > 0 &&
+                    Number(line.price) > 0 ? (
+                      <p className="text-[10px] text-muted-foreground">
+                        ={" "}
+                        {(Number(line.price) / item.subFactor).toFixed(2)}{" "}
+                        / {item.subUnit}
+                      </p>
+                    ) : null}
+                  </div>
                   <div className="flex h-9 items-center gap-2 rounded-md border bg-muted/20 px-2.5">
                     <Switch
                       checked={line.reusable}

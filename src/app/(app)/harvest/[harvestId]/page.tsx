@@ -32,6 +32,7 @@ import { DeleteHarvestButton } from "@/app/(app)/harvest/[harvestId]/harvest-act
 import {
   DeleteSaleButton,
   DeleteUsageButton,
+  DeleteLabourButton,
 } from "@/app/(app)/harvest/[harvestId]/row-actions";
 
 export const dynamic = "force-dynamic";
@@ -483,6 +484,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                   <TableHead>Task</TableHead>
                   <TableHead className="text-right">Hourly rate</TableHead>
                   <TableHead className="text-right">Cost</TableHead>
+                  <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -494,6 +496,12 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                     <TableCell className="text-muted-foreground">{l.task ?? "—"}</TableCell>
                     <TableCell className="text-right"><Money value={l.rate.toFixed(4)} /></TableCell>
                     <TableCell className="text-right font-medium"><Money value={l.cost.toFixed(4)} /></TableCell>
+                    <TableCell className="p-0">
+                      <DeleteLabourButton
+                        id={l.id}
+                        summary={`${l.name} — ${l.hours.toFixed(2)}h on ${l.date.toISOString().slice(0, 10)}${l.task ? ` (${l.task})` : ""}`}
+                      />
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

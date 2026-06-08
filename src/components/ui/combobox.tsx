@@ -93,8 +93,13 @@ export function Combobox({
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          "flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors",
-          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          // Matches Input + SelectTrigger so all three controls have the
+          // same height, padding, background and border treatment — the
+          // earlier `h-9 bg-transparent shadow-xs` made the Combobox look
+          // visibly different inside a Dialog, which read as a "broken
+          // border" bug.
+          "flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background transition-colors",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
           "disabled:cursor-not-allowed disabled:opacity-50",
           !selected && "text-muted-foreground",
         )}

@@ -169,6 +169,27 @@ export async function deleteHarvestAsset(id: string): Promise<ActionResult> {
   return { ok: true };
 }
 
+/**
+ * Delete a single labour line (one WageEntryLine) without touching the
+ * other lines on the same WageEntry. The wage entry itself stays — it's
+ * possible to have a day with hours allocated to other harvests or to
+ * general farm work, and removing one allocation shouldn't blow away
+ * the staff member's whole day.
+ */
+export async function deleteLabourLine(id: string): Promise<ActionResult> {
+  const line = await prisma.wageEntryLine.findUnique({
+    where: { id },
+    select: { harvestId: true },
+  });
+  if (!line) return { ok: false, error: "Labour line not found" };
+  await prisma.wageEntryLine.delete({ where: { id } });
+  if (line.harvestId) revalidatePath(`/harvest/${line.harvestId}`);
+  // Wages also feed Financials and the staff page.
+  revalidatePath("/financials");
+  revalidatePath("/staff");
+  return { ok: true };
+}
+
 // Shared types used by endHarvest + checkInHarvestAsset.
 type ConsumptionWithBatch = {
   id: string;

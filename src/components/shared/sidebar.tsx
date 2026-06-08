@@ -53,12 +53,28 @@ function isGroup(n: NavNode): n is NavGroup {
   return "children" in n;
 }
 
-export function Sidebar({
+/**
+ * SidebarContent renders the nav graph itself. Two callers wrap it:
+ *  - `<Sidebar>` (this file) — mounts inside a desktop `<aside>` (hidden on
+ *    mobile via `hidden md:flex`)
+ *  - `<MobileSidebar>` (in `mobile-sidebar.tsx`) — mounts inside a Sheet
+ *    opened by the hamburger in the topbar
+ *
+ * Lifting it out means we don't re-implement the nav graph in two places
+ * and the localStorage-persisted open/closed group state behaves identically
+ * on both surfaces.
+ */
+export function SidebarContent({
   isSuperuser = false,
   openTaskCount = 0,
+  onNavigate,
 }: {
   isSuperuser?: boolean;
   openTaskCount?: number;
+  /** Called whenever the user clicks a nav leaf — the mobile sheet uses this
+   *  to close itself on selection so the user lands on the page without a
+   *  manual close step. */
+  onNavigate?: () => void;
 }) {
   const t = useTranslations("nav");
   const tCommon = useTranslations("common");
@@ -176,7 +192,7 @@ export function Sidebar({
   }
 
   return (
-    <aside className="hidden w-64 shrink-0 flex-col border-r bg-card md:flex">
+    <div className="flex h-full w-full flex-col">
       <div className="flex items-center gap-3 border-b px-5 py-4">
         <div className="flex h-9 w-9 items-center justify-center rounded-md bg-accent font-serif text-accent-foreground">
           S
@@ -189,7 +205,15 @@ export function Sidebar({
       <nav className="flex-1 overflow-y-auto p-2">
         {nav.map((node, idx) => {
           if (!isGroup(node)) {
-            return <NavLeaf key={node.key} item={node} active={isActive(node.href)} label={labelFor(node)} />;
+            return (
+              <NavLeaf
+                key={node.key}
+                item={node}
+                active={isActive(node.href)}
+                label={labelFor(node)}
+                onNavigate={onNavigate}
+              />
+            );
           }
           const groupOpen = openGroups[node.id] ?? true;
           const Icon = node.icon;
@@ -223,6 +247,7 @@ export function Sidebar({
                       item={c}
                       active={isActive(c.href)}
                       label={labelFor(c)}
+                      onNavigate={onNavigate}
                       indent
                     />
                   ))}
@@ -235,6 +260,25 @@ export function Sidebar({
       <div className="flex items-center gap-2 border-t p-3 text-[10px] text-muted-foreground">
         <MessageSquare className="h-3 w-3" /> v0.3 · {tCommon("appName")}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Desktop sidebar — hidden under md (768px), fixed-width column on larger
+ * viewports. On mobile, `MobileSidebar` takes over via the hamburger in the
+ * topbar.
+ */
+export function Sidebar({
+  isSuperuser = false,
+  openTaskCount = 0,
+}: {
+  isSuperuser?: boolean;
+  openTaskCount?: number;
+}) {
+  return (
+    <aside className="hidden w-64 shrink-0 flex-col border-r bg-card md:flex">
+      <SidebarContent isSuperuser={isSuperuser} openTaskCount={openTaskCount} />
     </aside>
   );
 }
@@ -244,16 +288,19 @@ function NavLeaf({
   active,
   label,
   indent,
+  onNavigate,
 }: {
   item: LeafItem;
   active: boolean;
   label: string;
   indent?: boolean;
+  onNavigate?: () => void;
 }) {
   const Icon = item.icon;
   return (
     <Link
       href={item.href}
+      onClick={onNavigate}
       className={cn(
         "group flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
         indent && "pl-5",

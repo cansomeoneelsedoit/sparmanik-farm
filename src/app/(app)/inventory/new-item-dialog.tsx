@@ -226,7 +226,7 @@ export function NewItemDialog({
                 rows={3}
               />
             </Row>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Row label="Unit" error={form.formState.errors.unit?.message}>
                 <Input
                   {...form.register("unit")}
@@ -264,7 +264,7 @@ export function NewItemDialog({
                 />
               </div>
               {isPack ? (
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <Row
                     label="Measured in"
                     error={form.formState.errors.subUnit?.message}
@@ -289,7 +289,7 @@ export function NewItemDialog({
                 </div>
               ) : null}
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Row label="Category">
                 <Combobox
                   value={form.watch("categoryId") || null}

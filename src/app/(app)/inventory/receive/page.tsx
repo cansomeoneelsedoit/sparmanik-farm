@@ -15,7 +15,14 @@ export default async function ReceiveStockPage() {
   const [items, suppliers, setting, batches] = await Promise.all([
     prisma.item.findMany({
       orderBy: { name: "asc" },
-      select: { id: true, code: true, name: true, unit: true },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        unit: true,
+        subUnit: true,
+        subFactor: true,
+      },
     }),
     prisma.supplier.findMany({
       orderBy: { name: "asc" },
@@ -62,7 +69,7 @@ export default async function ReceiveStockPage() {
   };
   const supplierHistory: Record<string, SupplierChip[]> = {};
   const itemById = new Map(
-    (items as { id: string; name: string; unit: string }[]).map((i) => [i.id, i]),
+    (items as { id: string; name: string; unit: string; subUnit: string | null; subFactor: Decimal | null }[]).map((i) => [i.id, i]),
   );
   for (const b of batches as BatchRow[]) {
     if (!itemHistory[b.itemId]) {
@@ -108,10 +115,12 @@ export default async function ReceiveStockPage() {
       </header>
 
       <ReceiveStockClient
-        items={(items as { id: string; name: string; unit: string }[]).map((i) => ({
+        items={(items as { id: string; name: string; unit: string; subUnit: string | null; subFactor: Decimal | null }[]).map((i) => ({
           id: i.id,
           name: i.name,
           unit: i.unit,
+          subUnit: i.subUnit,
+          subFactor: i.subFactor ? Number(i.subFactor) : null,
         }))}
         suppliers={(suppliers as { id: string; name: string }[]).map((s) => ({ id: s.id, name: s.name }))}
         defaultExchangeRate={defaultExchangeRate}

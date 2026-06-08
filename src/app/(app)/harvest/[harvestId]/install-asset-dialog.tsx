@@ -184,7 +184,7 @@ export function InstallAssetDialog({
                 <p className="text-xs text-muted-foreground">{availableLabel}</p>
               ) : null}
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label>
                   Quantity
@@ -206,7 +206,7 @@ export function InstallAssetDialog({
                 <Input type="date" {...form.register("date")} />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label>Type</Label>
                 <Select value={form.watch("type")} onValueChange={(v) => form.setValue("type", v as "reusable" | "onetime")}>

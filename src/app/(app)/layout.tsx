@@ -29,8 +29,14 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       <div className="flex h-screen overflow-hidden">
         <Sidebar isSuperuser={isSuperuser} openTaskCount={openTaskCount} />
         <div className="flex flex-1 flex-col overflow-hidden">
-          <Topbar userName={session.user.name ?? session.user.email ?? null} />
-          <main className="flex-1 overflow-auto bg-muted/20 p-6">{children}</main>
+          <Topbar
+            userName={session.user.name ?? session.user.email ?? null}
+            isSuperuser={isSuperuser}
+            openTaskCount={openTaskCount}
+          />
+          {/* Reduce padding on mobile (p-3) so content gets more usable
+              width — full p-6 only kicks in at sm+ (640px). */}
+          <main className="flex-1 overflow-auto bg-muted/20 p-3 sm:p-6">{children}</main>
         </div>
       </div>
       {echoEnabled ? <EchoWidget /> : null}

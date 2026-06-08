@@ -38,12 +38,22 @@ type Form = z.infer<typeof schema>;
 export function ReceiveStockDialog({
   itemId,
   itemUnit,
+  itemSubUnit,
+  itemSubFactor,
   itemReusable,
   suppliers,
   defaultSupplierId,
 }: {
   itemId: string;
   itemUnit: string;
+  /** Pack sub-unit ("metres" / "pieces") or null for discrete items. */
+  itemSubUnit?: string | null;
+  /** How many sub-units fit in one pack (e.g. 50 for a 50 pc polybag).
+   *  When set, the qty input asks for sub-units and the dialog converts
+   *  to packs before calling receiveStock — so a 1-pack-of-50-pcs polybag
+   *  is recorded as the user thinks of it ("50 pieces") instead of the
+   *  abstract "1 pack". */
+  itemSubFactor?: number | null;
   itemReusable: boolean;
   suppliers: { id: string; name: string }[];
   defaultSupplierId?: string;
@@ -76,14 +86,42 @@ export function ReceiveStockDialog({
       ? (parsedPrice / parsedMaxUses).toFixed(4)
       : null;
 
+  const isPack = !!(itemSubUnit && itemSubFactor && itemSubFactor > 0);
+  /** What the qty input is labelled with. For pack items the user types
+   *  pieces (e.g. "50") not packs (e.g. "1"); we convert before sending. */
+  const qtyUnitLabel = isPack ? itemSubUnit : itemUnit;
+  const qtyStr = form.watch("qty");
+  const qtyInput = /^[0-9.]+$/.test(qtyStr) ? Number(qtyStr) : 0;
+  /** Live "= X pack" preview so the user can sanity-check their entry. */
+  const packEquivalentPreview =
+    isPack && itemSubFactor && qtyInput > 0
+      ? (qtyInput / itemSubFactor).toFixed(3).replace(/\.?0+$/, "")
+      : null;
+  /** Live cost-per-piece preview, mirroring the install dialog's UX. */
+  const pricePerSubUnitPreview =
+    isPack && itemSubFactor && parsedPrice > 0
+      ? (parsedPrice / itemSubFactor).toFixed(2)
+      : null;
+
   function onSubmit(v: Form) {
     startTransition(async () => {
       const maxUses = v.reusableAcrossHarvests ? Number(v.maxUses) : 1;
+      // For pack items the user typed pieces; convert to packs (the
+      // canonical unit Batch.qty is stored in) before hitting the action.
+      const qtyToSend =
+        isPack && itemSubFactor
+          ? (Number(v.qty) / itemSubFactor).toString()
+          : v.qty;
+      // Unit price in DB is per-pack. If the user typed "10000 IDR per pack"
+      // and the polybag has 50pcs, that becomes 200 IDR/pc. We keep "price"
+      // as the value they entered (assumed per-pack). For pack items we
+      // could show a "price per pc" toggle later if it confuses people, but
+      // most invoices price per pack.
       const r = await receiveStock({
         itemId,
         date: v.date,
         supplierId: v.supplierId || null,
-        qty: v.qty,
+        qty: qtyToSend,
         price: v.price,
         exchangeRate: v.exchangeRate,
         maxUses,
@@ -116,7 +154,7 @@ export function ReceiveStockDialog({
         <form onSubmit={form.handleSubmit(onSubmit)}>
           <DialogHeader><DialogTitle>Receive stock</DialogTitle></DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label>Date</Label>
                 <Input type="date" {...form.register("date")} />
@@ -131,13 +169,23 @@ export function ReceiveStockDialog({
                 />
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div className="space-y-2">
-                <Label>Quantity</Label>
+                <Label>
+                  Quantity ({qtyUnitLabel})
+                </Label>
                 <Input type="number" step="any" min="0" {...form.register("qty")} />
+                {isPack && packEquivalentPreview ? (
+                  <p className="text-[11px] text-muted-foreground">
+                    = {packEquivalentPreview} {itemUnit}
+                    {pricePerSubUnitPreview
+                      ? ` · ${pricePerSubUnitPreview} IDR / ${itemSubUnit}`
+                      : ""}
+                  </p>
+                ) : null}
               </div>
               <div className="space-y-2">
-                <Label>Unit price (IDR)</Label>
+                <Label>Unit price (IDR / {itemUnit})</Label>
                 <Input type="number" step="any" min="0" {...form.register("price")} />
               </div>
               <div className="space-y-2">
@@ -157,7 +205,7 @@ export function ReceiveStockDialog({
                 <span>Reusable across harvests (depreciable — e.g. cocopeat, rockwool)</span>
               </label>
               {showAmortisation ? (
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Expected harvest uses</Label>
                     <Input
