@@ -21,6 +21,7 @@ import { UseStockDialog } from "@/app/(app)/inventory/[itemId]/use-stock-dialog"
 import { NewItemDialog } from "@/app/(app)/inventory/new-item-dialog";
 import { DeleteItemButton } from "@/app/(app)/inventory/[itemId]/item-actions";
 import { DeleteBatchButton } from "@/app/(app)/inventory/[itemId]/batch-actions";
+import { IdentifyItemPanel } from "@/app/(app)/inventory/[itemId]/identify-item-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -176,6 +177,39 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
           <DeleteItemButton id={item.id} name={item.name} />
         </div>
       </header>
+
+      {/* IdentifyItemPanel renders ONLY for items with a blank / whitespace
+          name — surfaces the strongest clues + an "AI: guess what this is"
+          button so the user can rename legacy "Untitled item" rows from the
+          original farm-legacy.js seed without leaving the page. */}
+      {!item.name?.trim() ? (
+        <IdentifyItemPanel
+          itemId={item.id}
+          code={item.code}
+          unit={item.unit}
+          categoryName={item.category?.name ?? null}
+          defaultSupplierName={item.defaultSupplier?.name ?? null}
+          topSupplierName={
+            // The most recent supplier seen on any batch — usually the
+            // strongest naming clue.
+            supplierRows[0]?.name ?? null
+          }
+          lastReceivedDate={
+            item.batches.length
+              ? item.batches[item.batches.length - 1].date
+                  .toISOString()
+                  .slice(0, 10)
+              : null
+          }
+          lastPaidLabel={
+            lastPrice.gt(0)
+              ? `Rp ${Number(lastPrice.toFixed(0)).toLocaleString("id-ID")}`
+              : null
+          }
+          batchCount={item.batches.length}
+          installCount={0}
+        />
+      ) : null}
 
       {item.photoPath || item.description ? (
         <Card>

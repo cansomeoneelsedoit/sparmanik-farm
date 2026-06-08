@@ -984,6 +984,255 @@ export async function deleteItems(ids: string[]): Promise<ActionResult<{ deleted
 }
 
 // ============================================================================
+// AI: guess what an unnamed item is from its context
+// ============================================================================
+
+/**
+ * For inventory items that came in with an empty / blank name (~265 came
+ * from the legacy farm-legacy.js seed). Builds a context bundle from every
+ * signal we have on the row — code, category, suppliers we've bought it
+ * from, recent batch prices, recent harvest usage — and asks the AI chain
+ * to guess a name + a one-line description.
+ *
+ * The caller (the IdentifyItemPanel on /inventory/[itemId]) renders the
+ * suggestion in an editable form so the user can accept-as-is or tweak
+ * before saving via `updateItem`.
+ */
+const identifyInputSchema = z.object({ itemId: z.string().min(1) });
+
+export async function suggestItemIdentity(input: unknown): Promise<
+  ActionResult<{
+    name: string;
+    description: string;
+    confidence: "Strong" | "Plausible" | "Weak";
+    reason: string;
+  }>
+> {
+  const parsed = identifyInputSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Invalid input" };
+
+  // Lazy imports so the bundle penalty (and Anthropic SDK) stays out of
+  // anyone who only needs the rest of this module.
+  const { ask } = await import("@/server/ai-chain");
+  const { extractJson } = await import("@/server/json-extract");
+
+  const item = await prisma.item.findFirst({
+    where: { id: parsed.data.itemId },
+    include: {
+      category: { select: { name: true } },
+      defaultSupplier: { select: { name: true } },
+      batches: {
+        orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+        take: 10,
+        select: {
+          date: true,
+          qty: true,
+          price: true,
+          supplier: { select: { name: true } },
+        },
+      },
+      harvestUsages: {
+        orderBy: { date: "desc" },
+        take: 5,
+        select: {
+          qty: true,
+          displayQty: true,
+          date: true,
+          harvest: { select: { name: true, produce: { select: { name: true } } } },
+        },
+      },
+      harvestAssets: {
+        orderBy: { date: "desc" },
+        take: 5,
+        select: {
+          qty: true,
+          date: true,
+          reusable: true,
+          harvest: { select: { name: true } },
+        },
+      },
+    },
+  });
+  if (!item) return { ok: false, error: "Item not found" };
+  if (item.name?.trim()) {
+    return {
+      ok: false,
+      error: "Item already has a name — edit it directly via the Edit button.",
+    };
+  }
+
+  // Build a tight context blob the model can reason over. Keep it under a
+  // few hundred tokens so latency stays low even on the slowest provider
+  // in the chain.
+  type BatchLite = {
+    date: Date;
+    qty: { toString: () => string };
+    price: { toString: () => string };
+    supplier: { name: string } | null;
+  };
+  type UsageLite = {
+    qty: { toString: () => string };
+    displayQty: string | null;
+    date: Date;
+    harvest: { name: string; produce: { name: string } | null };
+  };
+  type AssetLite = {
+    qty: { toString: () => string };
+    date: Date;
+    reusable: boolean;
+    harvest: { name: string };
+  };
+
+  const supplierLine = (item.batches as BatchLite[])
+    .filter((b) => !!b.supplier)
+    .slice(0, 5)
+    .map(
+      (b) =>
+        `  - ${b.supplier!.name} · ${b.qty.toString()} ${item.unit} @ ${b.price.toString()} on ${b.date.toISOString().slice(0, 10)}`,
+    )
+    .join("\n");
+
+  const usageLines = (item.harvestUsages as UsageLite[])
+    .slice(0, 3)
+    .map(
+      (u) =>
+        `  - used ${u.displayQty ?? `${u.qty.toString()} ${item.unit}`} on ${u.harvest.produce?.name ?? "harvest"} "${u.harvest.name}"`,
+    )
+    .join("\n");
+
+  const assetLines = (item.harvestAssets as AssetLite[])
+    .slice(0, 3)
+    .map(
+      (a) =>
+        `  - installed ${a.qty.toString()} ${item.unit} on greenhouse cycle "${a.harvest.name}" (${a.reusable ? "reusable" : "fixed"})`,
+    )
+    .join("\n");
+
+  const prompt = `You identify hydroponic-farm inventory items that came in with a blank name.
+
+Use every signal available to guess what this item most likely is. Be specific (brand, size, format when inferable). If the signal is too weak to guess, return name "Unknown item".
+
+Item:
+  Code: ${item.code}
+  Unit: ${item.unit}${item.subUnit && item.subFactor ? ` (pack of ${item.subFactor.toString()} ${item.subUnit})` : ""}
+  Category: ${item.category?.name ?? "(none)"}
+  Default supplier: ${item.defaultSupplier?.name ?? "(none)"}
+  Reusable: ${item.reusable ? "yes" : "no"}
+  Existing description: ${item.description?.trim() || "(none)"}
+
+Recent purchases:
+${supplierLine || "  (no purchases recorded)"}
+
+Recent greenhouse usage:
+${usageLines || "  (none)"}
+
+Recent greenhouse installs:
+${assetLines || "  (none)"}
+
+Reply with ONE JSON object, no markdown:
+{
+  "name": "Rockwool propagation cube 50mm",
+  "description": "Single-line description, ≤ 18 words.",
+  "confidence": "Strong" | "Plausible" | "Weak",
+  "reason": "Brief justification — which signal led you to this guess."
+}`;
+
+  let raw: string;
+  try {
+    raw = await ask({
+      prompt,
+      json: true,
+      maxTokens: 600,
+      disableThinking: true,
+      timeoutMs: 60_000,
+    });
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "AI request failed" };
+  }
+
+  type ModelOut = {
+    name?: string;
+    description?: string;
+    confidence?: string;
+    reason?: string;
+  };
+  let parsedOut: ModelOut;
+  try {
+    parsedOut = extractJson<ModelOut>(raw);
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "AI returned malformed JSON",
+    };
+  }
+
+  const name = typeof parsedOut.name === "string" ? parsedOut.name.trim() : "";
+  const description =
+    typeof parsedOut.description === "string" ? parsedOut.description.trim() : "";
+  const conf = (parsedOut.confidence ?? "").toString();
+  const confidence: "Strong" | "Plausible" | "Weak" =
+    /strong/i.test(conf) ? "Strong" : /weak/i.test(conf) ? "Weak" : "Plausible";
+
+  if (!name) {
+    return { ok: false, error: "AI couldn't infer a name from the available context." };
+  }
+
+  return {
+    ok: true,
+    data: {
+      name,
+      description,
+      confidence,
+      reason: typeof parsedOut.reason === "string" ? parsedOut.reason : "",
+    },
+  };
+}
+
+/**
+ * Save an identity decision (name + description) onto an item.
+ *
+ * Slimmer than updateItem because the panel only ever changes these two
+ * fields — there's no risk of stomping the user's photo, category, etc.
+ */
+const acceptIdentitySchema = z.object({
+  itemId: z.string().min(1),
+  name: z.string().min(1).max(200),
+  description: z.string().max(2000).optional(),
+});
+
+export async function acceptItemIdentity(
+  input: unknown,
+): Promise<ActionResult<{ id: string; name: string }>> {
+  const parsed = acceptIdentitySchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Invalid input" };
+  const uid = await userId();
+  try {
+    const updated = await prisma.item.update({
+      where: { id: parsed.data.itemId },
+      data: {
+        name: parsed.data.name.trim(),
+        description: parsed.data.description?.trim() || null,
+      },
+      select: { id: true, name: true },
+    });
+    await recordAction(prisma, {
+      type: "item.identified",
+      entityType: "Item",
+      entityId: updated.id,
+      description: `Identified item as "${updated.name}"`,
+      userId: uid,
+      payload: { name: parsed.data.name, description: parsed.data.description },
+    });
+    revalidatePath(`/inventory/${parsed.data.itemId}`);
+    revalidatePath("/inventory");
+    revalidatePath("/health-check");
+    return { ok: true, data: updated };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to save" };
+  }
+}
+
+// ============================================================================
 // Stock-take
 // ============================================================================
 
