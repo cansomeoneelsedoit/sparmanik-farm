@@ -18,6 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  combineItems,
   mergeItems,
   mergeItemsPreview,
   searchMergeTargets,
@@ -39,8 +40,9 @@ type Preview = {
   assetsToMove: number;
   unitMismatch: string | null;
   /** Optional warning for items whose pack size (subFactor) differs.
-   *  Merge would silently flatten a 25 kg bag and a 1 kg bag both as
-   *  "pcs", losing the weight context. Better to use Product Family. */
+   *  When this is set, the dialog offers the **Combine** action as an
+   *  alternative — converts both items' batches into a single sub-unit-
+   *  denominated SKU (e.g. 25 kg bag + 1 kg bag → "Calnit · 60 kg"). */
   packSizeMismatch?: string | null;
 };
 
@@ -141,6 +143,31 @@ export function MergeItemDialog({
       if (r.ok && r.data) {
         toast.success(
           `Merged into "${target.name}" (${r.data.batchesMoved} batches + ${r.data.usagesMoved + r.data.assetsMoved} harvest links moved)`,
+        );
+        setOpen(false);
+        reset();
+        onMerged?.(target.id);
+        router.refresh();
+      } else if (!r.ok) {
+        toast.error(r.error);
+      }
+    });
+  }
+
+  /**
+   * Smart alternative to the flat merge — used when source/target have
+   * different pack sizes (e.g. 25 kg bag + 1 kg bag of Calnit). The
+   * server converts every batch via qty × subFactor / price ÷ subFactor
+   * and re-records both items as one SKU measured in the shared sub-unit.
+   * Result: one item ("Meroke Calnit") with stock denominated in kg.
+   */
+  function commitCombine() {
+    if (!target) return;
+    startT(async () => {
+      const r = await combineItems({ sourceId, targetId: target.id });
+      if (r.ok && r.data) {
+        toast.success(
+          `Combined into "${target.name}" — ${r.data.newTotalSubUnits} ${r.data.subUnit} total`,
         );
         setOpen(false);
         reset();
@@ -286,9 +313,32 @@ export function MergeItemDialog({
                 </p>
               ) : null}
               {preview.packSizeMismatch ? (
-                <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-900 dark:text-amber-200">
-                  ⚠ {preview.packSizeMismatch}
-                </p>
+                <div className="space-y-2 rounded-md border-2 border-emerald-500/40 bg-emerald-50/60 p-3 text-xs dark:bg-emerald-950/30">
+                  <div className="flex items-center gap-2 font-semibold text-emerald-900 dark:text-emerald-200">
+                    <Combine className="h-3.5 w-3.5" />
+                    Better option: <strong>Combine</strong>
+                  </div>
+                  <p className="text-emerald-900/80 dark:text-emerald-200/80">
+                    {preview.packSizeMismatch}
+                  </p>
+                  <p className="text-emerald-900/80 dark:text-emerald-200/80">
+                    <strong>Combine</strong> instead — every batch gets
+                    re-recorded in the shared sub-unit (e.g. all bags
+                    converted to kg) so you end up with one item showing
+                    the true substance total + full per-supplier purchase
+                    history visible underneath.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="bg-emerald-600 hover:bg-emerald-700"
+                    disabled={pending}
+                    onClick={commitCombine}
+                  >
+                    <Combine className="h-3.5 w-3.5" />
+                    {pending ? "Combining…" : `Combine into one (kg)`}
+                  </Button>
+                </div>
               ) : null}
             </div>
           ) : null}

@@ -1320,6 +1320,271 @@ export async function mergeItems(input: unknown): Promise<
 }
 
 /**
+ * Combine two pack-style items into ONE item denominated in their shared
+ * sub-unit (e.g. a 25 kg bag and a 1 kg bag of "Meroke Calnit" both with
+ * subUnit="kg" — after combine you have a single SKU with unit="kg" and
+ * the full purchase history visible in kg).
+ *
+ * Requirements:
+ *   - Both items must have a sub_unit set, and the sub_units must match.
+ *     (If they don't, the merge action is wrong too — different substances.)
+ *   - The target's existing batches get re-recorded in sub-units in place
+ *     (qty × subFactor, price ÷ subFactor — total cost per batch invariant).
+ *   - The source's batches move to the target and get the same treatment.
+ *   - HarvestUsage / HarvestAsset rows from the source also re-point and
+ *     get qty multiplied — so a "used 3 pcs of source" usage becomes
+ *     "used 3 × sourceSubFactor kg of target".
+ *   - The target's `unit` becomes the shared sub_unit; its sub_unit /
+ *     sub_factor get cleared (no longer a pack — it IS the canonical unit).
+ *   - The source row is deleted.
+ *
+ * Audit-logged so the user can see exactly what got rewritten and roll
+ * back via the action history if it was a mistake.
+ */
+const combineSchema = z.object({
+  sourceId: z.string().min(1),
+  targetId: z.string().min(1),
+});
+
+export async function combineItems(input: unknown): Promise<
+  ActionResult<{
+    targetId: string;
+    /** Total stock on the resulting item, denominated in the shared
+     *  sub-unit (e.g. 60 if 25 kg + 25 kg + 10 × 1 kg combined). */
+    newTotalSubUnits: string;
+    /** The sub-unit the combined item is now measured in. */
+    subUnit: string;
+    /** Batches re-recorded on the target (source's batches that moved
+     *  + target's existing batches that got converted in-place). */
+    batchesAffected: number;
+  }>
+> {
+  const parsed = combineSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Invalid input" };
+  if (parsed.data.sourceId === parsed.data.targetId) {
+    return { ok: false, error: "Can't combine an item with itself" };
+  }
+  const uid = await userId();
+  try {
+    const result = await prisma.$transaction(async (tx: TransactionClient) => {
+      const [source, target] = await Promise.all([
+        tx.item.findFirst({
+          where: { id: parsed.data.sourceId },
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            unit: true,
+            subUnit: true,
+            subFactor: true,
+          },
+        }),
+        tx.item.findFirst({
+          where: { id: parsed.data.targetId },
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            unit: true,
+            subUnit: true,
+            subFactor: true,
+          },
+        }),
+      ]);
+      if (!source) throw new Error("Source item not found");
+      if (!target) throw new Error("Target item not found");
+      if (!source.subUnit || !source.subFactor)
+        throw new Error(
+          `Source "${source.code}" needs pack info set first (Edit → "Sold as a pack used in fractions" + sub-unit + pack size).`,
+        );
+      if (!target.subUnit || !target.subFactor)
+        throw new Error(
+          `Target "${target.code}" needs pack info set first (Edit → "Sold as a pack used in fractions" + sub-unit + pack size).`,
+        );
+      if (source.subUnit !== target.subUnit) {
+        throw new Error(
+          `Sub-units differ (${source.subUnit} vs ${target.subUnit}) — these aren't really the same substance.`,
+        );
+      }
+      const sFactor = new Decimal(source.subFactor);
+      const tFactor = new Decimal(target.subFactor);
+      const subUnit = source.subUnit;
+
+      // --- 1. Convert TARGET's existing batches in-place ----------------
+      // qty × subFactor       (e.g. 10 bags × 1 kg → 10 kg)
+      // price ÷ subFactor     (e.g. Rp 10,000/bag ÷ 1 kg/bag → Rp 10,000/kg)
+      // Total batch cost (qty × price) stays invariant.
+      const targetBatches = await tx.batch.findMany({
+        where: { itemId: target.id },
+        select: { id: true, qty: true, price: true, amortisedCostPerUse: true },
+      });
+      for (const b of targetBatches as {
+        id: string;
+        qty: Decimal;
+        price: Decimal;
+        amortisedCostPerUse: Decimal | null;
+      }[]) {
+        await tx.batch.update({
+          where: { id: b.id },
+          data: {
+            qty: new Decimal(b.qty).times(tFactor),
+            price: new Decimal(b.price).div(tFactor),
+            amortisedCostPerUse: b.amortisedCostPerUse
+              ? new Decimal(b.amortisedCostPerUse).div(tFactor)
+              : null,
+          },
+        });
+      }
+
+      // --- 2. Convert SOURCE's batches + re-point to target -------------
+      const sourceBatches = await tx.batch.findMany({
+        where: { itemId: source.id },
+        select: { id: true, qty: true, price: true, amortisedCostPerUse: true },
+      });
+      for (const b of sourceBatches as {
+        id: string;
+        qty: Decimal;
+        price: Decimal;
+        amortisedCostPerUse: Decimal | null;
+      }[]) {
+        await tx.batch.update({
+          where: { id: b.id },
+          data: {
+            itemId: target.id,
+            qty: new Decimal(b.qty).times(sFactor),
+            price: new Decimal(b.price).div(sFactor),
+            amortisedCostPerUse: b.amortisedCostPerUse
+              ? new Decimal(b.amortisedCostPerUse).div(sFactor)
+              : null,
+          },
+        });
+      }
+
+      // --- 3. HarvestUsage / HarvestAsset for SOURCE ---------------------
+      // These reference itemId (no batch link required for the qty) — move
+      // them and multiply qty by source's subFactor so "used 2 source-bags"
+      // becomes "used 50 kg".
+      const sourceUsages = await tx.harvestUsage.findMany({
+        where: { itemId: source.id },
+        select: { id: true, qty: true },
+      });
+      for (const u of sourceUsages as { id: string; qty: Decimal }[]) {
+        await tx.harvestUsage.update({
+          where: { id: u.id },
+          data: { itemId: target.id, qty: new Decimal(u.qty).times(sFactor) },
+        });
+      }
+      const sourceAssets = await tx.harvestAsset.findMany({
+        where: { itemId: source.id },
+        select: { id: true, qty: true, amortisedCharge: true },
+      });
+      for (const a of sourceAssets as {
+        id: string;
+        qty: Decimal;
+        amortisedCharge: Decimal | null;
+      }[]) {
+        await tx.harvestAsset.update({
+          where: { id: a.id },
+          data: {
+            itemId: target.id,
+            qty: new Decimal(a.qty).times(sFactor),
+            // amortisedCharge is a TOTAL cost figure already, not per-unit —
+            // it stays the same (the charge was on the old pack basis).
+            amortisedCharge: a.amortisedCharge,
+          },
+        });
+      }
+
+      // --- 4. HarvestUsage / HarvestAsset for TARGET ---------------------
+      // Convert in-place too (qty × tFactor).
+      const targetUsages = await tx.harvestUsage.findMany({
+        where: { itemId: target.id },
+        select: { id: true, qty: true },
+      });
+      for (const u of targetUsages as { id: string; qty: Decimal }[]) {
+        await tx.harvestUsage.update({
+          where: { id: u.id },
+          data: { qty: new Decimal(u.qty).times(tFactor) },
+        });
+      }
+      const targetAssets = await tx.harvestAsset.findMany({
+        where: { itemId: target.id },
+        select: { id: true, qty: true },
+      });
+      for (const a of targetAssets as { id: string; qty: Decimal }[]) {
+        await tx.harvestAsset.update({
+          where: { id: a.id },
+          data: { qty: new Decimal(a.qty).times(tFactor) },
+        });
+      }
+
+      // --- 5. Promote target's unit to the sub-unit, clear pack info ----
+      await tx.item.update({
+        where: { id: target.id },
+        data: { unit: subUnit, subUnit: null, subFactor: null },
+      });
+
+      // --- 6. Delete source ---------------------------------------------
+      await tx.item.delete({ where: { id: source.id } });
+
+      // Compute new stock total in sub-units for the result message.
+      const finalBatches = await tx.batch.findMany({
+        where: { itemId: target.id },
+        select: { qty: true, consumptions: { select: { qty: true } } },
+      });
+      type FB = { qty: Decimal; consumptions: { qty: Decimal }[] };
+      const newTotalSubUnits = (finalBatches as FB[]).reduce(
+        (s: Decimal, b: FB) => {
+          const consumed = b.consumptions.reduce(
+            (cs: Decimal, c: { qty: Decimal }) => cs.plus(c.qty),
+            new Decimal(0),
+          );
+          return s.plus(new Decimal(b.qty).minus(consumed));
+        },
+        new Decimal(0),
+      );
+
+      const batchesAffected = sourceBatches.length + targetBatches.length;
+
+      await recordAction(tx, {
+        type: "item.combined",
+        entityType: "Item",
+        entityId: target.id,
+        description: `Combined "${source.name?.trim() || source.code}" + "${target.name?.trim() || target.code}" into one ${subUnit}-based item (${newTotalSubUnits.toFixed(2)} ${subUnit} total)`,
+        userId: uid,
+        payload: {
+          sourceId: source.id,
+          sourceCode: source.code,
+          sourceName: source.name,
+          sourceSubFactor: sFactor.toString(),
+          targetId: target.id,
+          targetCode: target.code,
+          targetSubFactor: tFactor.toString(),
+          subUnit,
+          batchesAffected,
+          newTotalSubUnits: newTotalSubUnits.toString(),
+        },
+      });
+
+      return {
+        targetId: target.id,
+        newTotalSubUnits: newTotalSubUnits.toFixed(2).replace(/\.?0+$/, ""),
+        subUnit,
+        batchesAffected,
+      };
+    });
+
+    revalidatePath("/inventory");
+    revalidatePath(`/inventory/${parsed.data.targetId}`);
+    revalidatePath("/health-check");
+    revalidatePath("/health-check/stocktake");
+    return { ok: true, data: result };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Combine failed" };
+  }
+}
+
+/**
  * Tiny autocomplete query used by the merge dialog's "merge into …" picker.
  * Caps at 20 results — the dialog only needs enough to pick the right one,
  * and a 561-row dropdown is unusable anyway.
