@@ -1,25 +1,31 @@
 @echo off
 REM ============================================================
-REM   Sparmanik Farm — push your local data to Railway (one-time)
+REM   Sparmanik Farm — push your local data + photos to Railway
 REM ============================================================
 REM
 REM Double-click this file. It will:
 REM   1. Ask you to paste your Railway database URL
-REM   2. Run a backup of Railway (saved next to this file)
-REM   3. Copy your local data over
-REM   4. Print "DONE" when finished
+REM   2. Ask you to paste your sync admin secret (so photos sync too)
+REM   3. Back up Railway prod first (rollback parachute)
+REM   4. Push your local database to Railway
+REM   5. Push your local uploads/ folder (photos) to Railway's Volume
 REM
-REM Safety: the URL stays in this terminal window only. The moment
-REM you close the window, it's gone. The script never writes it
-REM to any file. The backup .sql file is git-ignored so it can't
-REM accidentally be pushed.
+REM Safety: secrets stay in this terminal window only. The moment you
+REM close the window they're gone. The script never writes them to any
+REM file. The backup .sql is git-ignored.
+REM
+REM ONE-TIME SETUP (only needed first time):
+REM   On Railway → web service → Variables tab → click "+ New Variable"
+REM     name:  SYNC_ADMIN_SECRET
+REM     value: any random string >= 8 chars (e.g. type your face on the keyboard)
+REM   Railway redeploys automatically (~2 min). Then run this script.
 REM ============================================================
 
 cd /d "%~dp0"
 cls
 echo.
 echo  ============================================================
-echo    Sparmanik Farm — push local data to Railway prod
+echo    Sparmanik Farm — push local data + photos to Railway
 echo  ============================================================
 echo.
 echo  STEP 1.  Get your Railway database URL.
@@ -31,11 +37,10 @@ echo     d) Click the "Connect" tab at the top
 echo     e) Find "Postgres Connection URL" and click the copy icon
 echo.
 echo  STEP 2.  Paste it below and press Enter.
+echo  (Right-click in this window to paste. Pasted text WILL be visible —
+echo   that's normal for Windows cmd.)
 echo.
-echo  (Right-click in this window to paste. The pasted text WILL be
-echo   visible — that's normal for Windows cmd. Nobody else can see it.)
-echo.
-set /p PROD_DATABASE_URL=" Paste URL here: "
+set /p PROD_DATABASE_URL=" Paste DATABASE URL: "
 echo.
 
 if "%PROD_DATABASE_URL%"=="" (
@@ -45,19 +50,42 @@ if "%PROD_DATABASE_URL%"=="" (
     exit /b 1
 )
 
-REM Basic sanity check — the URL should start with postgres://
 echo %PROD_DATABASE_URL% | findstr /b /c:"postgres" >nul
 if errorlevel 1 (
     echo  ERROR: That doesn't look like a Postgres URL.
     echo  It should start with "postgresql://" or "postgres://".
-    echo  Try again.
     echo.
     set PROD_DATABASE_URL=
     pause
     exit /b 1
 )
 
-echo  STEP 3.  Running sync. You'll be asked to type "yes" once to
+echo.
+echo  STEP 3.  Get your sync admin secret (used to upload photo files).
+echo.
+echo     a) Same Railway dashboard, click the WEB service (not Postgres)
+echo     b) Click the "Variables" tab
+echo     c) Find "SYNC_ADMIN_SECRET" and click the eye icon to reveal it,
+echo        then the copy icon
+echo.
+echo  IF you don't see SYNC_ADMIN_SECRET:
+echo     a) Click "+ New Variable"
+echo     b) Name:  SYNC_ADMIN_SECRET
+echo     c) Value: any random string at least 8 chars (mash the keyboard)
+echo     d) Save. Railway redeploys (about 2 min).
+echo     e) Then re-run this script after the redeploy.
+echo.
+echo  STEP 4.  Paste the secret below and press Enter.
+echo  (Leave blank to skip photo sync — your database will still update.)
+echo.
+set /p SYNC_ADMIN_SECRET=" Paste SYNC_ADMIN_SECRET: "
+echo.
+
+REM Default prod app URL — used by the script when SYNC_ADMIN_SECRET is set.
+set PROD_APP_URL=https://web-production-1e6de.up.railway.app
+
+echo.
+echo  STEP 5.  Running sync. You'll be asked to type "yes" once to
 echo           confirm — that's the script's last safety check.
 echo.
 echo  ============================================================
@@ -69,8 +97,10 @@ set EXITCODE=%ERRORLEVEL%
 
 echo.
 echo  ============================================================
-echo  Clearing the URL from this terminal session...
+echo  Clearing secrets from this terminal session...
 set PROD_DATABASE_URL=
+set SYNC_ADMIN_SECRET=
+set PROD_APP_URL=
 echo  Done.
 echo.
 

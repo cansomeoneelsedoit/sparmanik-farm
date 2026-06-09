@@ -36,12 +36,21 @@
  */
 
 import { execSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, statSync, readFileSync } from "node:fs";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 
 const PROD_URL = process.env.PROD_DATABASE_URL;
+/** Optional — when set, the script also syncs the local uploads/ dir to
+ *  Railway via the /api/admin/upload-passthrough endpoint. Two env vars:
+ *   - PROD_APP_URL: e.g. https://web-production-1e6de.up.railway.app
+ *   - SYNC_ADMIN_SECRET: must match the env var of the same name on Railway
+ *  When either is missing the DB-only path runs and the user is told to
+ *  set them next time. */
+const PROD_APP_URL = (process.env.PROD_APP_URL ?? "").replace(/\/$/, "");
+const SYNC_ADMIN_SECRET = process.env.SYNC_ADMIN_SECRET ?? "";
+const UPLOAD_DIR = path.join(process.cwd(), "uploads");
 
 if (!PROD_URL) {
   console.error(`
@@ -226,6 +235,87 @@ async function main() {
     }
   }
 
+  // -------- 5. Upload local photos / receipts to prod's Volume ----------
+
+  if (PROD_APP_URL && SYNC_ADMIN_SECRET && existsSync(UPLOAD_DIR)) {
+    console.log(`\n[4/4] Pushing local uploads/ to prod's Volume ...`);
+    const files = listFilesRecursive(UPLOAD_DIR).filter(
+      (f) => !path.basename(f).startsWith("."),
+    );
+    console.log(`     ${files.length} files to push.`);
+
+    let pushed = 0;
+    let failed = 0;
+    let skipped = 0;
+    let bytes = 0;
+    const startedAt = Date.now();
+    for (const abs of files) {
+      const rel = path.relative(UPLOAD_DIR, abs).replace(/\\/g, "/");
+      const size = statSync(abs).size;
+      // Skip anything obviously broken (zero-byte) or way too big — the
+      // route caps at ~10 MB for non-images but 20 MB here is the upper
+      // bound we'll bother with.
+      if (size === 0 || size > 20 * 1024 * 1024) {
+        skipped++;
+        continue;
+      }
+      try {
+        const fd = new FormData();
+        fd.set("relativePath", rel);
+        fd.set("file", new Blob([readFileSync(abs)]), path.basename(abs));
+        const r = await fetch(
+          `${PROD_APP_URL}/api/admin/upload-passthrough`,
+          {
+            method: "POST",
+            headers: { authorization: `Bearer ${SYNC_ADMIN_SECRET}` },
+            body: fd,
+          },
+        );
+        if (!r.ok) {
+          failed++;
+          if (failed <= 5) {
+            // Print only the first few failures so the console doesn't
+            // drown in identical 401s when the secret is wrong.
+            console.log(
+              `     ${rel}: HTTP ${r.status} — ${(await r.text()).slice(0, 200)}`,
+            );
+          }
+          continue;
+        }
+        pushed++;
+        bytes += size;
+        if (pushed % 50 === 0) {
+          const secs = ((Date.now() - startedAt) / 1000).toFixed(0);
+          console.log(`     ${pushed}/${files.length} uploaded (${secs}s)...`);
+        }
+      } catch (e) {
+        failed++;
+        if (failed <= 3) {
+          console.log(`     ${rel}: ${e instanceof Error ? e.message : e}`);
+        }
+      }
+    }
+    const secs = ((Date.now() - startedAt) / 1000).toFixed(0);
+    console.log(
+      `     Done — pushed ${pushed}, failed ${failed}, skipped ${skipped} (${(bytes / 1024 / 1024).toFixed(1)} MB in ${secs}s)`,
+    );
+  } else {
+    console.log(`\n[4/4] Skipping photo sync.`);
+    if (!PROD_APP_URL) {
+      console.log(
+        `     Set PROD_APP_URL=https://web-production-1e6de.up.railway.app to enable.`,
+      );
+    }
+    if (!SYNC_ADMIN_SECRET) {
+      console.log(
+        `     Set SYNC_ADMIN_SECRET=<your secret> to enable (must match the env var on Railway).`,
+      );
+    }
+    if (!existsSync(UPLOAD_DIR)) {
+      console.log(`     No local uploads/ directory at ${UPLOAD_DIR}.`);
+    }
+  }
+
   console.log(`\n=== DONE ===`);
   console.log(`\nBackup of prod-as-it-was kept at ${BACKUP_FILE}`);
   console.log(
@@ -234,6 +324,20 @@ async function main() {
   console.log(
     `\nProd is now identical to local. From now on, edit data on prod (https://web-production-1e6de.up.railway.app) so the two stay in sync.`,
   );
+}
+
+function listFilesRecursive(dir) {
+  const out = [];
+  function walk(d) {
+    for (const e of readdirSync(d)) {
+      const p = path.join(d, e);
+      const s = statSync(p);
+      if (s.isDirectory()) walk(p);
+      else if (s.isFile()) out.push(p);
+    }
+  }
+  walk(dir);
+  return out;
 }
 
 function maskUrl(u) {
