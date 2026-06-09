@@ -188,9 +188,11 @@ export function SimulatorClient({
 
   // Restore the saved-scenario index on first paint. Doing this in an
   // effect (rather than at useState init time) keeps the SSR pass and
-  // the first client render in agreement.
+  // the first client render in agreement. The queueMicrotask dodge
+  // satisfies React 19's set-state-in-effect lint rule — same pattern
+  // we use in ask-ai/chat-panel.tsx (see CLAUDE.md gotcha #17 sibling).
   useEffect(() => {
-    setStore(loadStore());
+    queueMicrotask(() => setStore(loadStore()));
   }, []);
 
   const scenarioKeys = useMemo(() => Object.keys(store).sort(), [store]);
