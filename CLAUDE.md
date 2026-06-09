@@ -293,6 +293,29 @@ prisma/
       curl unauth → 401" but the route was actually still the OLD
       compiled bundle: you tested cached behavior, not your edit.
 
+23. **React 19's `set-state-in-effect` lint fires on debounced search
+    effects and localStorage-restore effects.** Any `setState(...)` call
+    inside `useEffect` triggers the rule (level: error in CI). Pure
+    React Compiler limitation — calling setState synchronously can
+    cascade renders. **The dodge we use everywhere** is to wrap the
+    setState in `queueMicrotask`:
+
+    ```tsx
+    // Won't lint:
+    useEffect(() => { setState(loadStore()); }, []);
+
+    // Will lint clean:
+    useEffect(() => { queueMicrotask(() => setState(loadStore())); }, []);
+    ```
+
+    Applied in `theme-toggle.tsx` (via `useSyncExternalStore`),
+    `ask-ai/chat-panel.tsx`, `simulator/simulator-client.tsx`, and
+    `inventory/merge-item-dialog.tsx`. **`useSyncExternalStore` is the
+    "real" fix** when the state mirrors something genuinely external
+    (DOM class, window dimension); `queueMicrotask` is the pragmatic
+    dodge for the common case where you're loading from localStorage
+    or running a debounced fetch.
+
 ## Auth flow
 
 1. Unauthenticated user hits any `/(app)/*` route.

@@ -88,8 +88,12 @@ export function MergeItemDialog({
           excludeId: sourceId,
         });
         // queueMicrotask dodges the React 19 set-state-in-effect lint —
-        // same dodge we use elsewhere (simulator, chat-panel).
-        if (r.ok && r.data) queueMicrotask(() => setResults(r.data));
+        // same dodge we use elsewhere (simulator, chat-panel). TS narrowing
+        // is lost across the closure, so capture data first.
+        if (r.ok && r.data) {
+          const data = r.data;
+          queueMicrotask(() => setResults(data));
+        }
       })();
     }, 200);
     return () => clearTimeout(handle);
@@ -107,7 +111,10 @@ export function MergeItemDialog({
         sourceId,
         targetId: target.id,
       });
-      if (r.ok && r.data) queueMicrotask(() => setPreview(r.data));
+      if (r.ok && r.data) {
+        const data = r.data;
+        queueMicrotask(() => setPreview(data));
+      }
     })();
   }, [target, sourceId]);
 
