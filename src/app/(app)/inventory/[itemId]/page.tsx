@@ -248,7 +248,7 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
             {item.photoPath ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={`/api/uploads/${item.photoPath}`}
+                src={`/api/items/${item.id}/photo`}
                 alt={item.name}
                 className="h-32 w-32 shrink-0 rounded-md border object-cover"
               />

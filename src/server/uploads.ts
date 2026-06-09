@@ -27,6 +27,50 @@ export type SavedImage = {
   height: number;
 };
 
+/** In-memory variant of SavedImage: holds the resized WebP buffer itself so
+ *  the caller can stash it directly into a DB column instead of a file. Used
+ *  by the item-photo upload action which writes to `items.photo_data`. The
+ *  filesystem path is intentionally omitted — DB-backed photos don't have one. */
+export type ImageBuffer = {
+  buffer: Buffer;
+  /** "image/webp" — for now everything we keep in the DB is normalised to
+   *  WebP by sharp. Kept as a field so a future raw-passthrough path
+   *  (e.g. PDF receipts) won't break the API. */
+  mime: string;
+  width: number;
+  height: number;
+};
+
+/**
+ * Resize-and-encode without ever touching the filesystem. Returns the WebP
+ * bytes + dimensions in memory so the caller can save them to wherever they
+ * actually belong (DB row, S3, etc). Same pipeline as `saveImageUpload`
+ * (sharp.rotate → resize fit:inside → webp q82) so the on-disk and in-DB
+ * photos look identical.
+ *
+ * Use this for entities where photos used to disappear on prod because the
+ * file lived on the laptop's filesystem and never made it through the sync
+ * — Item especially.
+ */
+export async function processImageToBuffer(file: File): Promise<ImageBuffer> {
+  if (file.size > MAX_BYTES) {
+    throw new Error(`File too large (max ${MAX_BYTES / 1024 / 1024} MB)`);
+  }
+  const input = Buffer.from(await file.arrayBuffer());
+  const resized = await sharp(input)
+    .rotate()
+    .resize({ width: MAX_DIMENSION, height: MAX_DIMENSION, fit: "inside", withoutEnlargement: true })
+    .webp({ quality: 82 })
+    .toBuffer();
+  const meta = await sharp(resized).metadata();
+  return {
+    buffer: resized,
+    mime: "image/webp",
+    width: meta.width ?? 0,
+    height: meta.height ?? 0,
+  };
+}
+
 /**
  * Saves an image File from a Server Action. Resizes to MAX_DIMENSION on the
  * longest side and re-encodes as WebP. Returns a path that can be stored on

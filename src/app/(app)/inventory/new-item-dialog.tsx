@@ -119,6 +119,15 @@ export function NewItemDialog({
   );
 
   const photoPath = form.watch("photoPath");
+  // Buffer the upload response so the bytes (not just the disk path) get
+  // submitted with create/update — that's what lets the photo land on the
+  // items.photo_data column and survive future DB syncs.
+  const [pendingPhoto, setPendingPhoto] = useState<{
+    base64: string;
+    mime: string;
+    width: number;
+    height: number;
+  } | null>(null);
 
   async function handleFileSelect(file: File) {
     setUploading(true);
@@ -128,6 +137,12 @@ export function NewItemDialog({
       const r = await uploadItemPhoto(fd);
       if (r.ok && r.data) {
         form.setValue("photoPath", r.data.path);
+        setPendingPhoto({
+          base64: r.data.previewBase64,
+          mime: r.data.mime,
+          width: r.data.width,
+          height: r.data.height,
+        });
         toast.success("Photo uploaded");
       } else if (!r.ok) {
         toast.error(r.error);
@@ -144,6 +159,12 @@ export function NewItemDialog({
         ...values,
         description: values.description || null,
         photoPath: values.photoPath || null,
+        // Forward the bytes from the upload — server saves them to
+        // items.photo_data so the photo survives DB sync / restore.
+        photoBase64: pendingPhoto?.base64 || null,
+        photoMime: pendingPhoto?.mime || null,
+        photoWidth: pendingPhoto?.width ?? null,
+        photoHeight: pendingPhoto?.height ?? null,
         categoryId: values.categoryId || null,
         defaultSupplierId: values.defaultSupplierId || null,
         shopeeUrl: values.shopeeUrl || null,
@@ -181,9 +202,18 @@ export function NewItemDialog({
             <Row label="Photo">
               <div className="flex items-center gap-3">
                 {photoPath ? (
+                  // For an existing item, prefer the DB-backed route so we
+                  // get the canonical photo even after a sync wiped the
+                  // filesystem. For a brand new item (no `existing.id` yet)
+                  // the only thing that exists is the freshly-uploaded
+                  // filesystem file — point at it.
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={`/api/uploads/${photoPath}`}
+                    src={
+                      existing?.id
+                        ? `/api/items/${existing.id}/photo?v=${encodeURIComponent(photoPath)}`
+                        : `/api/uploads/${photoPath}`
+                    }
                     alt=""
                     className="h-20 w-20 rounded-md border object-cover"
                   />

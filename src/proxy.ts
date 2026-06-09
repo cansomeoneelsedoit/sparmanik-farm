@@ -35,6 +35,6 @@ export const config = {
     // /api/admin/upload-passthrough (bearer-token gated, used by the
     // sync-to-prod script — doesn't need a logged-in session), Next
     // internals, and static files.
-    "/((?!api/auth|api/health|api/uploads|api/admin/upload-passthrough|_next/static|_next/image|favicon.ico|farm-legacy.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!api/auth|api/health|api/uploads|api/admin/upload-passthrough|api/items/.+/photo|_next/static|_next/image|favicon.ico|farm-legacy.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

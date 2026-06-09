@@ -120,7 +120,7 @@ export function StocktakeRow({
           <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
         )}
         <SmartImage
-          src={item.photoPath ? `/api/uploads/${item.photoPath}` : null}
+          src={item.photoPath ? `/api/items/${item.id}/photo` : null}
           alt={item.name}
           className="h-10 w-10 shrink-0 rounded-md border object-cover"
           fallbackClassName="border-dashed"

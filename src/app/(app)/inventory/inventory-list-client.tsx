@@ -170,7 +170,7 @@ export function InventoryListClient({ rows }: { rows: InventoryRow[] }) {
                 </div>
                 <Link href={`/inventory/${r.id}`} className="shrink-0">
                   <SmartImage
-                    src={r.photoPath ? `/api/uploads/${r.photoPath}` : null}
+                    src={r.photoPath ? `/api/items/${r.id}/photo` : null}
                     alt={r.name}
                     className="h-20 w-20 rounded-md border object-cover"
                     fallbackClassName="border-dashed"

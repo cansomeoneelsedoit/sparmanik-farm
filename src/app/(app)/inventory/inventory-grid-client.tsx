@@ -165,7 +165,7 @@ export function InventoryGridClient({ rows }: { rows: GridRow[] }) {
             >
               <div className="relative aspect-square w-full overflow-hidden bg-muted">
                 <SmartImage
-                  src={r.photoPath ? `/api/uploads/${r.photoPath}` : null}
+                  src={r.photoPath ? `/api/items/${r.id}/photo` : null}
                   alt={r.name}
                   className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
                 />

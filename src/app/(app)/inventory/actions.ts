@@ -9,7 +9,12 @@ import { auth } from "@/auth";
 import { recordAction } from "@/server/audit";
 import { consumeFifo } from "@/server/fifo";
 import { Decimal, type TransactionClient } from "@/server/decimal";
-import { saveImageBuffer, saveImageUpload } from "@/server/uploads";
+import {
+  getUploadDir,
+  processImageToBuffer,
+  saveImageBuffer,
+  saveImageUpload,
+} from "@/server/uploads";
 import { getActiveOrgId } from "@/server/org";
 
 /**
@@ -48,6 +53,13 @@ const newItemSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional().nullable(),
   photoPath: z.string().optional().nullable(),
+  /** Base64-encoded WebP bytes from the upload — comes from uploadItemPhoto
+   *  and gets stored on items.photo_data so the photo travels with the row
+   *  during any sync. Empty when the user didn't change the photo. */
+  photoBase64: z.string().optional().nullable(),
+  photoMime: z.string().optional().nullable(),
+  photoWidth: z.number().int().optional().nullable(),
+  photoHeight: z.number().int().optional().nullable(),
   categoryId: z.string().optional().nullable(),
   unit: z.string().min(1),
   subUnit: z.string().optional().nullable(),
@@ -61,22 +73,112 @@ const newItemSchema = z.object({
 });
 
 /**
- * Upload an item photo. Reuses the existing sharp + WebP pipeline that the
- * Ask AI vision upload uses. Returns a relative `path` that the caller
- * stores on the Item (the `/api/uploads/[...path]` route serves it back).
+ * Resolve which bytes / mime / width / height to commit to the row from a
+ * given create/update payload. Order of preference:
+ *
+ *   1. Fresh base64 from this submission (the user just uploaded).
+ *   2. Existing on-disk file at the supplied photoPath (legacy items
+ *      first-time saved post-migration).
+ *
+ * Returns `null` for every column when the user cleared the photo or never
+ * uploaded one — caller treats that as "set photo_data = null".
+ */
+async function resolvePhotoColumns(payload: {
+  photoPath?: string | null;
+  photoBase64?: string | null;
+  photoMime?: string | null;
+  photoWidth?: number | null;
+  photoHeight?: number | null;
+}): Promise<{
+  data: Buffer | null;
+  mime: string | null;
+  width: number | null;
+  height: number | null;
+}> {
+  if (payload.photoBase64) {
+    return {
+      data: Buffer.from(payload.photoBase64, "base64"),
+      mime: payload.photoMime || "image/webp",
+      width: payload.photoWidth ?? null,
+      height: payload.photoHeight ?? null,
+    };
+  }
+  if (payload.photoPath) {
+    const disk = await readPhotoBytesFromDisk(payload.photoPath);
+    if (disk) {
+      return { data: disk.data, mime: disk.mime, width: null, height: null };
+    }
+  }
+  return { data: null, mime: null, width: null, height: null };
+}
+
+/**
+ * Upload an item photo. Two-track flow now:
+ *
+ *   1. The bytes are written to filesystem (legacy) so the dialog can show
+ *      a preview via /api/uploads/<path> immediately.
+ *   2. The bytes are ALSO base64-stuffed into the returned path token, so
+ *      createItem/updateItem can pull them back without a separate fetch
+ *      and stash them in `items.photo_data`. This is the bit that makes the
+ *      photo travel with the item row during sync — see migration
+ *      20260609010000_item_photo_blob for the why.
+ *
+ * Once an item is committed with bytes in `photo_data`, the serve route
+ * (/api/items/[id]/photo) streams from the DB and the filesystem copy is
+ * effectively a redundant backup. We keep writing both so a future migration
+ * back to filesystem-only would be cheap.
  */
 export async function uploadItemPhoto(
   formData: FormData,
-): Promise<ActionResult<{ path: string }>> {
+): Promise<ActionResult<{ path: string; previewBase64: string; mime: string; width: number; height: number }>> {
   const s = await auth();
   if (!s?.user?.id) return { ok: false, error: "Not signed in" };
   const file = formData.get("file");
   if (!(file instanceof File)) return { ok: false, error: "No file provided" };
   try {
+    // Disk path for the in-dialog preview (existing UX).
     const saved = await saveImageUpload(file, "items");
-    return { ok: true, data: { path: saved.path } };
+    // Process again to get the bytes back. (sharp is cheap enough — a couple
+    // of hundred ms for a typical phone photo. A future optimisation would
+    // be to teach saveImageUpload to return the buffer directly.)
+    const processed = await processImageToBuffer(file);
+    return {
+      ok: true,
+      data: {
+        path: saved.path,
+        previewBase64: processed.buffer.toString("base64"),
+        mime: processed.mime,
+        width: processed.width,
+        height: processed.height,
+      },
+    };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Upload failed" };
+  }
+}
+
+/**
+ * Backfill helper — reads the on-disk file for a photoPath and returns the
+ * bytes. Used by createItem/updateItem to embed legacy filesystem photos
+ * into the new DB column when an existing photoPath is being saved.
+ *
+ * Returns null on any read failure — no need to abort the entire save just
+ * because the legacy file is missing. The row still gets the photoPath
+ * pointer and the SmartImage fallback handles the 404 gracefully.
+ */
+async function readPhotoBytesFromDisk(
+  photoPath: string,
+): Promise<{ data: Buffer; mime: string } | null> {
+  try {
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const safe = photoPath.replace(/\\/g, "/").replace(/\.\./g, "");
+    const absolute = path.join(getUploadDir(), safe);
+    const buf = await fs.readFile(absolute);
+    // We only ever write WebP via the sharp pipeline so this is safe.
+    return { data: buf, mime: "image/webp" };
+  } catch {
+    return null;
   }
 }
 
@@ -90,6 +192,7 @@ export async function createItem(input: unknown): Promise<ActionResult<{ id: str
   // create — extremely unlikely in practice but cheap to guard against.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
+      const photo = await resolvePhotoColumns(parsed.data);
       const item = await prisma.$transaction(async (tx: TransactionClient) => {
         const code = await nextItemCode(tx);
         const created = await tx.item.create({
@@ -98,6 +201,12 @@ export async function createItem(input: unknown): Promise<ActionResult<{ id: str
             name: parsed.data.name,
             description: parsed.data.description || null,
             photoPath: parsed.data.photoPath || null,
+            // Node Buffer extends Uint8Array, but Prisma 6's generated
+            // types want a strict Uint8Array<ArrayBuffer>. Wrap explicitly.
+            photoData: photo.data ? new Uint8Array(photo.data) : null,
+            photoMime: photo.mime,
+            photoWidth: photo.width,
+            photoHeight: photo.height,
             categoryId: parsed.data.categoryId || null,
             unit: parsed.data.unit,
             subUnit: parsed.data.subUnit || null,
@@ -139,12 +248,17 @@ export async function updateItem(id: string, input: unknown): Promise<ActionResu
   if (!parsed.success) {
     return { ok: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
   }
+  const photo = await resolvePhotoColumns(parsed.data);
   await prisma.item.update({
     where: { id },
     data: {
       name: parsed.data.name,
       description: parsed.data.description || null,
       photoPath: parsed.data.photoPath || null,
+      photoData: photo.data,
+      photoMime: photo.mime,
+      photoWidth: photo.width,
+      photoHeight: photo.height,
       categoryId: parsed.data.categoryId || null,
       unit: parsed.data.unit,
       subUnit: parsed.data.subUnit || null,

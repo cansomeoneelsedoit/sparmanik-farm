@@ -308,6 +308,15 @@ model Item {
   name              String
   description       String?
   photoPath         String?  @map("photo_path")
+  /** Photo bytes stored INLINE on the row. Travel with the item during
+   * sync / backup / restore so we never desync between the filesystem
+   * and the row pointer. `photo_path` stays as a legacy field for items
+   * that haven't been migrated yet (the backfill script + the
+   * `/api/uploads/[...path]` route still serve those off disk). */
+  photoData         Bytes?   @map("photo_data")
+  photoMime         String?  @map("photo_mime")
+  photoWidth        Int?     @map("photo_width")
+  photoHeight       Int?     @map("photo_height")
   categoryId        String?  @map("category_id")
   unit              String
   subUnit           String?  @map("sub_unit")
