@@ -182,16 +182,16 @@ export function StocktakeRow({
             {isPack ? (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="space-y-1">
-                  <Label className="text-xs">Measured in</Label>
+                  <Label className="text-xs">Measured in (what each pack contains)</Label>
                   <Input
                     value={subUnit}
                     onChange={(e) => setSubUnit(e.target.value)}
-                    placeholder="metres / pieces / kg / seeds"
+                    placeholder="metres · pieces · kg · seeds · ml"
                   />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">
-                    Pack size (per 1 {item.unit})
+                    Pack size — how many {subUnit || "sub-units"} in 1 {item.unit}?
                   </Label>
                   <Input
                     type="number"
@@ -199,7 +199,7 @@ export function StocktakeRow({
                     min="0"
                     value={subFactor}
                     onChange={(e) => setSubFactor(e.target.value)}
-                    placeholder="50"
+                    placeholder="e.g. 50, 100, 500"
                   />
                 </div>
               </div>

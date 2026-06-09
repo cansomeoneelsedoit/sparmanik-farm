@@ -174,7 +174,13 @@ export function ReceiveStockDialog({
                 <Label>
                   Quantity ({qtyUnitLabel})
                 </Label>
-                <Input type="number" step="any" min="0" {...form.register("qty")} />
+                <Input
+                  type="number"
+                  step="any"
+                  min="0"
+                  autoFocus
+                  {...form.register("qty")}
+                />
                 {isPack && packEquivalentPreview ? (
                   <p className="text-[11px] text-muted-foreground">
                     = {packEquivalentPreview} {itemUnit}

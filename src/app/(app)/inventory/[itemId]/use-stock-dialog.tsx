@@ -61,12 +61,31 @@ export function UseStockDialog({
           <DialogHeader><DialogTitle>Use stock</DialogTitle></DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label>Quantity to use</Label>
+              <Label>
+                Quantity to use{" "}
+                <span className="text-xs font-normal text-muted-foreground">
+                  (max: {maxQty} {unit})
+                </span>
+              </Label>
               <div className="flex items-center gap-2">
-                <Input type="number" step="any" min="0" {...form.register("qty")} />
-                <span className="text-sm text-muted-foreground whitespace-nowrap">{unit}</span>
+                <Input
+                  type="number"
+                  step="any"
+                  min="0"
+                  max={maxQty}
+                  autoFocus
+                  placeholder={`0 to ${maxQty}`}
+                  {...form.register("qty")}
+                />
+                <span className="text-sm text-muted-foreground whitespace-nowrap">
+                  {unit}
+                </span>
               </div>
-              <p className="text-xs text-muted-foreground">On hand: {maxQty} {unit}. FIFO consumes oldest batch first.</p>
+              <p className="text-xs text-muted-foreground">
+                On hand: <strong className="text-foreground">{maxQty} {unit}</strong>.
+                FIFO consumes oldest batch first so cost-of-use comes from
+                what you paid for the earliest receive.
+              </p>
             </div>
           </div>
           <DialogFooter>

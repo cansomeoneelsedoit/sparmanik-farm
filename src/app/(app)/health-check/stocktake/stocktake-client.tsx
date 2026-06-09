@@ -97,7 +97,10 @@ export function StocktakeClient({
             className="pl-9"
           />
         </div>
-        <div className="flex items-center gap-2">
+        {/* Categories wrap to as many rows as needed — the original cap at
+            5 hid most of the warehouse on any farm with > 5 buckets. With
+            wrap + max-h, even an org with 30 categories stays scannable. */}
+        <div className="flex max-h-32 flex-wrap items-center gap-2 overflow-y-auto">
           <Button
             type="button"
             size="sm"
@@ -106,7 +109,7 @@ export function StocktakeClient({
           >
             All
           </Button>
-          {categories.slice(0, 5).map((c) => (
+          {categories.map((c) => (
             <Button
               key={c.id}
               type="button"
