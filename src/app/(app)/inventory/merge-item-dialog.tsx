@@ -13,6 +13,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -155,7 +156,11 @@ export function MergeItemDialog({
         if (!o) reset();
       }}
     >
-      <div onClick={(e) => e.stopPropagation()}>{trigger}</div>
+      {/* DialogTrigger asChild forwards the open-state click to whatever
+          button (or element) the caller passed in. The earlier version
+          just rendered `trigger` inside a div with stopPropagation, which
+          meant the button NEVER opened the dialog at all. */}
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Merge into another item</DialogTitle>
