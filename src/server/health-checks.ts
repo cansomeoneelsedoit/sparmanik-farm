@@ -403,12 +403,72 @@ export async function runHealthChecks(): Promise<HealthCheckResult[]> {
     checkItemsWithoutDescription(),
     checkItemsWithoutPhoto(),
     checkPossiblyMisflaggedReusable(),
+    checkLikelyPacksMissingPackInfo(),
     checkStaleLiveHarvests(),
     checkSuppliersWithoutContact(),
     checkStaffWithoutRate(),
     checkExpensesWithoutCategory(),
     checkSingletonCategories(),
   ]);
+}
+
+/**
+ * Items whose NAME strongly suggests they're a pack (rol, meter, isi N gr,
+ * benih, X pcs, etc.) but `sub_factor` is still NULL — meaning the system
+ * doesn't know how many sub-units fit in one "unit". Without pack info, a
+ * 100 m roll of drip pipe gets installed as "1 pc" instead of "30 metres"
+ * and cost can't be apportioned correctly.
+ *
+ * Pattern hits:
+ *   - rol / roll / meter / m)  → length-based packs (drip pipe, hoses)
+ *   - benih / seed / biji / gram / isi N  → seed packets and chemical packs
+ *   - polybag / polly / pack / isi N pcs  → discrete-count packs
+ *
+ * The fix path is the existing stock-take wizard — already has the toggle
+ * to set sub_unit + sub_factor.
+ */
+async function checkLikelyPacksMissingPackInfo(): Promise<HealthCheckResult> {
+  const rows = (await prisma.$queryRawUnsafe(`
+    SELECT id, code, name, unit
+      FROM items
+     WHERE sub_factor IS NULL
+       AND (
+         name ~* 'benih|seed\\b|biji|isi\\s*\\d+|gram\\b'
+         OR name ~* 'rol\\s|roll\\s|meter\\)|\\sm\\)|^[0-9]+\\s*m\\s|per\\s+meter'
+         OR name ~* 'polybag|polly|kantong'
+         OR name ~* '\\d+\\s*pcs|\\d+\\s*pieces'
+       )
+     ORDER BY code ASC
+     LIMIT 50
+  `)) as { id: string; code: string; name: string; unit: string }[];
+  const totalRow = (await prisma.$queryRawUnsafe(`
+    SELECT COUNT(*)::int AS n
+      FROM items
+     WHERE sub_factor IS NULL
+       AND (
+         name ~* 'benih|seed\\b|biji|isi\\s*\\d+|gram\\b'
+         OR name ~* 'rol\\s|roll\\s|meter\\)|\\sm\\)|^[0-9]+\\s*m\\s|per\\s+meter'
+         OR name ~* 'polybag|polly|kantong'
+         OR name ~* '\\d+\\s*pcs|\\d+\\s*pieces'
+       )
+  `)) as { n: number }[];
+  const count = totalRow[0]?.n ?? 0;
+  return {
+    id: "missing-pack-info",
+    title: "Likely packs missing pack info",
+    description:
+      "Items whose name says 'roll', 'meter', 'isi 500', 'benih', 'pcs', etc., but the system doesn't know how many sub-units fit in one pack. Open each row in the stock-take wizard and turn on 'Sold as a pack used in fractions' so you can install / consume / sell by the metre or piece.",
+    severity: count > 0 ? "warn" : "info",
+    count,
+    items: rows.map((r) => ({
+      id: r.id,
+      label: r.code,
+      detail: `${r.name.slice(0, 80)} · currently "${r.unit}"`,
+      href: `/inventory/${r.id}`,
+    })),
+    fixWith: "name",
+    clean: count === 0,
+  };
 }
 
 /**
