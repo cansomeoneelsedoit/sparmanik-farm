@@ -87,7 +87,9 @@ export function MergeItemDialog({
           query: query.trim(),
           excludeId: sourceId,
         });
-        if (r.ok && r.data) setResults(r.data);
+        // queueMicrotask dodges the React 19 set-state-in-effect lint —
+        // same dodge we use elsewhere (simulator, chat-panel).
+        if (r.ok && r.data) queueMicrotask(() => setResults(r.data));
       })();
     }, 200);
     return () => clearTimeout(handle);
@@ -97,7 +99,7 @@ export function MergeItemDialog({
   // about to move + warn on unit mismatch.
   useEffect(() => {
     if (!target) {
-      setPreview(null);
+      queueMicrotask(() => setPreview(null));
       return;
     }
     void (async () => {
@@ -105,7 +107,7 @@ export function MergeItemDialog({
         sourceId,
         targetId: target.id,
       });
-      if (r.ok && r.data) setPreview(r.data);
+      if (r.ok && r.data) queueMicrotask(() => setPreview(r.data));
     })();
   }, [target, sourceId]);
 
