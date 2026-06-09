@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronDown, ChevronRight, Check, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Check, Combine, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { SmartImage } from "@/components/shared/smart-image";
 import { applyStocktake } from "@/app/(app)/inventory/actions";
+import { MergeItemDialog } from "@/app/(app)/inventory/merge-item-dialog";
 
 export type StocktakeItem = {
   id: string;
@@ -267,6 +268,27 @@ export function StocktakeRow({
           </div>
 
           <div className="flex items-center justify-end gap-2">
+            <MergeItemDialog
+              sourceId={item.id}
+              sourceName={item.name}
+              sourceCode={item.code}
+              trigger={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  title="Merge this row into another item (same product from a different supplier)"
+                >
+                  <Combine className="h-3.5 w-3.5" /> Merge into…
+                </Button>
+              }
+              onMerged={() => {
+                // Row's underlying item just got deleted — collapse + signal
+                // the parent so it can refresh or hide this row.
+                setOpen(false);
+                onSaved?.();
+              }}
+            />
             <Button
               type="button"
               variant="ghost"

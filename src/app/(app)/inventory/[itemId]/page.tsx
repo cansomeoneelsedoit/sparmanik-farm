@@ -22,6 +22,8 @@ import { NewItemDialog } from "@/app/(app)/inventory/new-item-dialog";
 import { DeleteItemButton } from "@/app/(app)/inventory/[itemId]/item-actions";
 import { DeleteBatchButton } from "@/app/(app)/inventory/[itemId]/batch-actions";
 import { IdentifyItemPanel } from "@/app/(app)/inventory/[itemId]/identify-item-panel";
+import { MergeItemDialog } from "@/app/(app)/inventory/merge-item-dialog";
+import { Combine } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -173,6 +175,16 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
               reusable: item.reusable,
               shopeeUrl: item.shopeeUrl,
             }}
+          />
+          <MergeItemDialog
+            sourceId={item.id}
+            sourceName={item.name?.trim() || `(Untitled ${item.code})`}
+            sourceCode={item.code}
+            trigger={
+              <Button variant="outline" title="Merge into another item">
+                <Combine className="h-4 w-4" /> Merge
+              </Button>
+            }
           />
           <DeleteItemButton id={item.id} name={item.name} />
         </div>

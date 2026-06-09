@@ -984,6 +984,254 @@ export async function deleteItems(ids: string[]): Promise<ActionResult<{ deleted
 }
 
 // ============================================================================
+// Merge two items (consolidate duplicates from different suppliers)
+// ============================================================================
+
+/**
+ * Preview what would move if `sourceId` were merged into `targetId`.
+ *
+ * Used by the merge dialog to show the user "this many batches and harvest
+ * usages will move to the target" before they pull the trigger. The actual
+ * merge is a separate call so the preview can be re-rendered if the user
+ * picks a different target.
+ */
+const mergePreviewSchema = z.object({
+  sourceId: z.string().min(1),
+  targetId: z.string().min(1),
+});
+
+export async function mergeItemsPreview(input: unknown): Promise<
+  ActionResult<{
+    source: { id: string; code: string; name: string; unit: string };
+    target: { id: string; code: string; name: string; unit: string };
+    batchesToMove: number;
+    usagesToMove: number;
+    assetsToMove: number;
+    /** Set when source.unit ≠ target.unit — block the merge until the
+     *  user reconciles, otherwise qty math goes sideways. */
+    unitMismatch: string | null;
+  }>
+> {
+  const parsed = mergePreviewSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Invalid input" };
+  if (parsed.data.sourceId === parsed.data.targetId) {
+    return { ok: false, error: "Can't merge an item with itself" };
+  }
+  const [source, target, batchesToMove, usagesToMove, assetsToMove] = await Promise.all([
+    prisma.item.findFirst({
+      where: { id: parsed.data.sourceId },
+      select: { id: true, code: true, name: true, unit: true },
+    }),
+    prisma.item.findFirst({
+      where: { id: parsed.data.targetId },
+      select: { id: true, code: true, name: true, unit: true },
+    }),
+    prisma.batch.count({ where: { itemId: parsed.data.sourceId } }),
+    prisma.harvestUsage.count({ where: { itemId: parsed.data.sourceId } }),
+    prisma.harvestAsset.count({ where: { itemId: parsed.data.sourceId } }),
+  ]);
+  if (!source) return { ok: false, error: "Source item not found" };
+  if (!target) return { ok: false, error: "Target item not found" };
+  const unitMismatch =
+    source.unit !== target.unit
+      ? `Source is "${source.unit}", target is "${target.unit}". Merge would silently mix the unit. Make them match first via Edit on either item.`
+      : null;
+  return {
+    ok: true,
+    data: {
+      source: {
+        id: source.id,
+        code: source.code,
+        name: source.name?.trim() || `(Untitled ${source.code})`,
+        unit: source.unit,
+      },
+      target: {
+        id: target.id,
+        code: target.code,
+        name: target.name?.trim() || `(Untitled ${target.code})`,
+        unit: target.unit,
+      },
+      batchesToMove,
+      usagesToMove,
+      assetsToMove,
+      unitMismatch,
+    },
+  };
+}
+
+/**
+ * Move every Batch / HarvestUsage / HarvestAsset from source → target, then
+ * delete the source item. One transaction so a mid-merge failure rolls back
+ * cleanly. The source item's photo file is intentionally left on disk —
+ * cheap to keep, awkward if a future "undo" relied on it being there.
+ */
+const mergeSchema = z.object({
+  sourceId: z.string().min(1),
+  targetId: z.string().min(1),
+});
+
+export async function mergeItems(input: unknown): Promise<
+  ActionResult<{
+    batchesMoved: number;
+    usagesMoved: number;
+    assetsMoved: number;
+    targetId: string;
+  }>
+> {
+  const parsed = mergeSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Invalid input" };
+  if (parsed.data.sourceId === parsed.data.targetId) {
+    return { ok: false, error: "Can't merge an item with itself" };
+  }
+  const uid = await userId();
+  try {
+    const result = await prisma.$transaction(async (tx: TransactionClient) => {
+      const [source, target] = await Promise.all([
+        tx.item.findFirst({
+          where: { id: parsed.data.sourceId },
+          select: { id: true, code: true, name: true, unit: true },
+        }),
+        tx.item.findFirst({
+          where: { id: parsed.data.targetId },
+          select: { id: true, code: true, name: true, unit: true },
+        }),
+      ]);
+      if (!source) throw new Error("Source item not found");
+      if (!target) throw new Error("Target item not found");
+      if (source.unit !== target.unit) {
+        throw new Error(
+          `Unit mismatch: source "${source.unit}" vs target "${target.unit}". Make them match first.`,
+        );
+      }
+
+      const [bResult, uResult, aResult] = await Promise.all([
+        tx.batch.updateMany({
+          where: { itemId: source.id },
+          data: { itemId: target.id },
+        }),
+        tx.harvestUsage.updateMany({
+          where: { itemId: source.id },
+          data: { itemId: target.id },
+        }),
+        tx.harvestAsset.updateMany({
+          where: { itemId: source.id },
+          data: { itemId: target.id },
+        }),
+      ]);
+
+      // Source has no more child rows pointing at it — safe to delete.
+      await tx.item.delete({ where: { id: source.id } });
+
+      await recordAction(tx, {
+        type: "item.merged",
+        entityType: "Item",
+        entityId: target.id,
+        description: `Merged "${source.name?.trim() || source.code}" (${source.code}) into "${target.name?.trim() || target.code}" (${target.code})`,
+        userId: uid,
+        payload: {
+          sourceId: source.id,
+          sourceCode: source.code,
+          sourceName: source.name,
+          targetId: target.id,
+          targetCode: target.code,
+          batchesMoved: bResult.count,
+          usagesMoved: uResult.count,
+          assetsMoved: aResult.count,
+        },
+      });
+
+      return {
+        batchesMoved: bResult.count,
+        usagesMoved: uResult.count,
+        assetsMoved: aResult.count,
+        targetId: target.id,
+      };
+    });
+
+    revalidatePath("/inventory");
+    revalidatePath(`/inventory/${parsed.data.targetId}`);
+    revalidatePath("/health-check");
+    revalidatePath("/health-check/stocktake");
+    return { ok: true, data: result };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Merge failed" };
+  }
+}
+
+/**
+ * Tiny autocomplete query used by the merge dialog's "merge into …" picker.
+ * Caps at 20 results — the dialog only needs enough to pick the right one,
+ * and a 561-row dropdown is unusable anyway.
+ */
+const mergeSearchSchema = z.object({
+  query: z.string().max(120),
+  excludeId: z.string().optional(),
+});
+
+export async function searchMergeTargets(input: unknown): Promise<
+  ActionResult<{ id: string; code: string; name: string; unit: string; stock: string }[]>
+> {
+  const parsed = mergeSearchSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Invalid input" };
+  const q = parsed.data.query.trim();
+  if (q.length < 1) return { ok: true, data: [] };
+
+  const items = await prisma.item.findMany({
+    where: {
+      AND: [
+        parsed.data.excludeId ? { id: { not: parsed.data.excludeId } } : {},
+        {
+          OR: [
+            { name: { contains: q, mode: "insensitive" as const } },
+            { code: { contains: q, mode: "insensitive" as const } },
+          ],
+        },
+      ],
+    },
+    orderBy: { name: "asc" },
+    take: 20,
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      unit: true,
+      batches: {
+        select: {
+          qty: true,
+          consumptions: { select: { qty: true } },
+        },
+      },
+    },
+  });
+  type ItemRow = {
+    id: string;
+    code: string;
+    name: string;
+    unit: string;
+    batches: { qty: Decimal; consumptions: { qty: Decimal }[] }[];
+  };
+  return {
+    ok: true,
+    data: (items as ItemRow[]).map((it) => {
+      const stock = it.batches.reduce((s: Decimal, b) => {
+        const consumed = b.consumptions.reduce(
+          (cs: Decimal, c) => cs.plus(c.qty),
+          new Decimal(0),
+        );
+        return s.plus(new Decimal(b.qty).minus(consumed));
+      }, new Decimal(0));
+      return {
+        id: it.id,
+        code: it.code,
+        name: it.name?.trim() || `(Untitled ${it.code})`,
+        unit: it.unit,
+        stock: stock.toFixed(0),
+      };
+    }),
+  };
+}
+
+// ============================================================================
 // AI: guess what an unnamed item is from its context
 // ============================================================================
 
