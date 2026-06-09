@@ -38,6 +38,10 @@ type Preview = {
   usagesToMove: number;
   assetsToMove: number;
   unitMismatch: string | null;
+  /** Optional warning for items whose pack size (subFactor) differs.
+   *  Merge would silently flatten a 25 kg bag and a 1 kg bag both as
+   *  "pcs", losing the weight context. Better to use Product Family. */
+  packSizeMismatch?: string | null;
 };
 
 /**
@@ -161,7 +165,11 @@ export function MergeItemDialog({
           just rendered `trigger` inside a div with stopPropagation, which
           meant the button NEVER opened the dialog at all. */}
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent>
+      {/* max-w-2xl gives the preview cards room to breathe — the default
+          max-w-lg was clipping long item names. max-h-[85vh] + overflow-y
+          on the inner column means the dialog never escapes the viewport
+          even when the search returns 20 results. */}
+      <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Merge into another item</DialogTitle>
         </DialogHeader>
@@ -229,45 +237,57 @@ export function MergeItemDialog({
           </div>
 
           {preview ? (
-            <div className="space-y-2 rounded-md border-2 border-accent/40 bg-accent/5 p-3 text-sm">
+            <div className="space-y-3 rounded-md border-2 border-accent/40 bg-accent/5 p-3 text-sm">
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Combine className="h-3.5 w-3.5 text-accent-foreground" />
                 Preview
               </div>
-              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-                <div className="rounded-md border bg-background p-2 text-xs">
+              {/* min-w-0 on the grid cells is what lets line-clamp/truncate
+                  actually clip — without it the flex/grid auto-min puts the
+                  full text width into the column and content overflows. */}
+              <div className="grid grid-cols-1 items-center gap-3 sm:grid-cols-[1fr_auto_1fr]">
+                <div className="min-w-0 rounded-md border bg-background p-2 text-xs">
                   <div className="text-muted-foreground">From (deleted)</div>
-                  <div className="truncate font-medium">{preview.source.name}</div>
+                  <div className="line-clamp-2 font-medium leading-tight">
+                    {preview.source.name}
+                  </div>
                   <code className="text-[10px] tracking-wider text-muted-foreground">
                     {preview.source.code}
                   </code>
                 </div>
-                <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                <div className="rounded-md border bg-background p-2 text-xs">
+                <ArrowRight className="hidden h-4 w-4 shrink-0 text-muted-foreground sm:block" />
+                <div className="min-w-0 rounded-md border bg-background p-2 text-xs">
                   <div className="text-muted-foreground">Into (keeps)</div>
-                  <div className="truncate font-medium">{preview.target.name}</div>
+                  <div className="line-clamp-2 font-medium leading-tight">
+                    {preview.target.name}
+                  </div>
                   <code className="text-[10px] tracking-wider text-muted-foreground">
                     {preview.target.code}
                   </code>
                 </div>
               </div>
-              <ul className="space-y-0.5 text-xs">
+              <ul className="space-y-1 rounded-md border bg-background/70 p-2 text-xs">
                 <li className="flex items-center justify-between">
                   <span className="text-muted-foreground">Batches that move</span>
-                  <strong>{preview.batchesToMove}</strong>
+                  <strong className="ml-2">{preview.batchesToMove}</strong>
                 </li>
                 <li className="flex items-center justify-between">
                   <span className="text-muted-foreground">Harvest usages that move</span>
-                  <strong>{preview.usagesToMove}</strong>
+                  <strong className="ml-2">{preview.usagesToMove}</strong>
                 </li>
                 <li className="flex items-center justify-between">
                   <span className="text-muted-foreground">Harvest installs that move</span>
-                  <strong>{preview.assetsToMove}</strong>
+                  <strong className="ml-2">{preview.assetsToMove}</strong>
                 </li>
               </ul>
               {preview.unitMismatch ? (
                 <p className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
                   ⚠ {preview.unitMismatch}
+                </p>
+              ) : null}
+              {preview.packSizeMismatch ? (
+                <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-900 dark:text-amber-200">
+                  ⚠ {preview.packSizeMismatch}
                 </p>
               ) : null}
             </div>

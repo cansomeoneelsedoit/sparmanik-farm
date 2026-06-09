@@ -1138,6 +1138,10 @@ export async function mergeItemsPreview(input: unknown): Promise<
     /** Set when source.unit ≠ target.unit — block the merge until the
      *  user reconciles, otherwise qty math goes sideways. */
     unitMismatch: string | null;
+    /** Soft warning when source and target have different sub_factor (e.g.
+     *  25 kg bag vs 1 kg bag). Merge would flatten both into "pcs", losing
+     *  the weight context — better to use Product Family instead. */
+    packSizeMismatch: string | null;
   }>
 > {
   const parsed = mergePreviewSchema.safeParse(input);
@@ -1148,11 +1152,25 @@ export async function mergeItemsPreview(input: unknown): Promise<
   const [source, target, batchesToMove, usagesToMove, assetsToMove] = await Promise.all([
     prisma.item.findFirst({
       where: { id: parsed.data.sourceId },
-      select: { id: true, code: true, name: true, unit: true },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        unit: true,
+        subUnit: true,
+        subFactor: true,
+      },
     }),
     prisma.item.findFirst({
       where: { id: parsed.data.targetId },
-      select: { id: true, code: true, name: true, unit: true },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        unit: true,
+        subUnit: true,
+        subFactor: true,
+      },
     }),
     prisma.batch.count({ where: { itemId: parsed.data.sourceId } }),
     prisma.harvestUsage.count({ where: { itemId: parsed.data.sourceId } }),
@@ -1163,6 +1181,20 @@ export async function mergeItemsPreview(input: unknown): Promise<
   const unitMismatch =
     source.unit !== target.unit
       ? `Source is "${source.unit}", target is "${target.unit}". Merge would silently mix the unit. Make them match first via Edit on either item.`
+      : null;
+  // Soft warn (not blocking) when the items are clearly different pack
+  // sizes — the classic 25 kg vs 1 kg case. Both are "pcs" so the unit
+  // check passes, but consolidating them would lose the weight context.
+  // The user almost always wants Product Family in that situation, not
+  // a destructive merge.
+  const srcFactor = source.subFactor ? Number(source.subFactor) : null;
+  const tgtFactor = target.subFactor ? Number(target.subFactor) : null;
+  const packSizeMismatch =
+    !unitMismatch &&
+    srcFactor &&
+    tgtFactor &&
+    Math.abs(srcFactor - tgtFactor) > 0.001
+      ? `Different pack sizes: source is ${srcFactor} ${source.subUnit ?? "units"}/pack, target is ${tgtFactor} ${target.subUnit ?? "units"}/pack. Merging will flatten both as "${source.unit}" and lose the per-pack weight context. If you want to keep them separate but see a combined total, use the **Product Family** field on each item instead.`
       : null;
   return {
     ok: true,
@@ -1183,6 +1215,7 @@ export async function mergeItemsPreview(input: unknown): Promise<
       usagesToMove,
       assetsToMove,
       unitMismatch,
+      packSizeMismatch,
     },
   };
 }

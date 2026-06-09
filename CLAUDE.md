@@ -292,6 +292,58 @@ prisma/
       it up. The classic trap is "I edited the route — it works in
       curl unauth → 401" but the route was actually still the OLD
       compiled bundle: you tested cached behavior, not your edit.
+    - **`docker compose down` is destructive on this project**: it wipes
+      the anonymous volumes for `/app/node_modules` and `/app/.next`. If
+      you ever HAVE to use it, the recovery sequence is mandatory:
+      `up -d` → `exec web npm install` → `exec web npx prisma generate`
+      → `exec web rm -rf /app/.next/dev` → `restart web`. Otherwise the
+      site 500s on missing deps + stale Prisma client. Prefer plain
+      `restart web` 95% of the time.
+
+24. **Buttons-in-dialogs must use `<DialogTrigger asChild>`.**
+    The shadcn `<Dialog>` only opens via its trigger child OR an
+    externally controlled `open` prop. If you accept a `trigger` prop
+    from the parent and just render it inside the Dialog body, **clicking
+    the button does literally nothing** — no error, no toast, just
+    silence. The classic miss is:
+
+    ```tsx
+    // BROKEN — clicking trigger does nothing
+    <Dialog open={open} onOpenChange={setOpen}>
+      <div>{trigger}</div>
+      <DialogContent>…</DialogContent>
+    </Dialog>
+
+    // FIXED — DialogTrigger forwards the click to setOpen(true)
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      <DialogContent>…</DialogContent>
+    </Dialog>
+    ```
+
+    This bit the Merge dialog (see `inventory/merge-item-dialog.tsx`)
+    after a clean commit + push because curl can't catch a button that
+    doesn't open. **For Claude sessions**: any new dialog component that
+    takes an external trigger MUST use `DialogTrigger asChild` OR an
+    `onClick` that flips its own `open` state. If you didn't actually
+    click the button to confirm it opens, you haven't verified the
+    feature works — don't tell Boyd "try it" until you have.
+
+25. **Inventory items: same SKU vs same substance.** Two related but
+    distinct concepts users mix up — handle them with different tools:
+    - **Same SKU (literal duplicates from different suppliers)** →
+      `MergeItemDialog`. Batches/usages/installs re-point, source row
+      is deleted. Both items must have the same `unit` AND the same
+      `subFactor` — the merge preview surfaces a hard block on unit
+      mismatch and a soft warn on pack-size mismatch.
+    - **Same substance, different pack size (25 kg bag + 1 kg bag of
+      Calnit from various suppliers)** → `Item.productFamily` tag.
+      Items legitimately stay separate (different prices, suppliers,
+      bag sizes), but tagging them with the same family name surfaces
+      a roll-up on the detail page (`Σ on_hand_packs × subFactor`).
+    Picking the wrong one loses information: merge across pack sizes
+    flattens kg into "pcs"; family across true duplicates leaves them
+    visible as separate rows when they shouldn't be.
 
 23. **React 19's `set-state-in-effect` lint fires on debounced search
     effects and localStorage-restore effects.** Any `setState(...)` call
