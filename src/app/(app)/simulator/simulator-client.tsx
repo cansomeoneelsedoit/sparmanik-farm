@@ -449,6 +449,7 @@ export function SimulatorClient({
           {/* Items */}
           <ScenarioSection
             title="Items consumed (seeds, nutrients, pots…)"
+            description="Stuff you USE UP during the cycle. Each row: pick from your real catalog (price pre-fills from last paid) or type a free-text label. Qty × Rp/unit = row cost. Adds to the cycle's expenses but does NOT consume real stock — pure scenario math."
             icon={<Leaf className="h-3.5 w-3.5" />}
             subtotal={itemCost}
             onAdd={() =>
@@ -512,32 +513,40 @@ export function SimulatorClient({
                       />
                     ) : null}
                   </div>
-                  <Input
-                    type="number"
-                    step="any"
-                    min="0"
-                    value={row.qty}
-                    onChange={(e) => {
-                      const next = [...scenario.items];
-                      next[idx] = { ...row, qty: e.target.value };
-                      updateScenario({ items: next });
-                    }}
-                    placeholder={`qty (${it?.unit ?? "units"})`}
-                    title="Quantity"
-                  />
-                  <Input
-                    type="number"
-                    step="any"
-                    min="0"
-                    value={row.unitPrice}
-                    onChange={(e) => {
-                      const next = [...scenario.items];
-                      next[idx] = { ...row, unitPrice: e.target.value };
-                      updateScenario({ items: next });
-                    }}
-                    placeholder="unit price"
-                    title="Unit price"
-                  />
+                  <div className="space-y-1">
+                    <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Qty
+                    </Label>
+                    <Input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={row.qty}
+                      onChange={(e) => {
+                        const next = [...scenario.items];
+                        next[idx] = { ...row, qty: e.target.value };
+                        updateScenario({ items: next });
+                      }}
+                      placeholder={`e.g. 10 ${it?.unit ?? "units"}`}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Rp / unit
+                    </Label>
+                    <Input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={row.unitPrice}
+                      onChange={(e) => {
+                        const next = [...scenario.items];
+                        next[idx] = { ...row, unitPrice: e.target.value };
+                        updateScenario({ items: next });
+                      }}
+                      placeholder="e.g. 5000"
+                    />
+                  </div>
                   <Button
                     type="button"
                     size="icon"
@@ -558,6 +567,7 @@ export function SimulatorClient({
           {/* Labour */}
           <ScenarioSection
             title="Labour"
+            description="Estimated wages for this cycle. Each row: pick a staff member (their hourly rate pre-fills) or leave blank and type one manually. Hours × Rp/hour = row cost. Use one row per task or just one summed row — whatever's easiest."
             icon={<Calculator className="h-3.5 w-3.5" />}
             subtotal={labourCost}
             onAdd={() =>
@@ -581,64 +591,84 @@ export function SimulatorClient({
                 key={row.id}
                 className="grid grid-cols-1 gap-2 rounded-md border bg-background/40 p-2 sm:grid-cols-[1.5fr_1.5fr_1fr_1fr_auto]"
               >
-                <Combobox
-                  value={row.staffId}
-                  onChange={(v) => {
-                    const next = [...scenario.labour];
-                    next[idx] = { ...row, staffId: v };
-                    if (v) {
-                      const found = staffOptions.find((s) => s.id === v);
-                      if (
-                        found?.defaultHourlyRate &&
-                        (row.hourlyRate === "" || row.hourlyRate === "0")
-                      ) {
-                        next[idx].hourlyRate = String(found.defaultHourlyRate);
+                <div className="space-y-1">
+                  <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Staff
+                  </Label>
+                  <Combobox
+                    value={row.staffId}
+                    onChange={(v) => {
+                      const next = [...scenario.labour];
+                      next[idx] = { ...row, staffId: v };
+                      if (v) {
+                        const found = staffOptions.find((s) => s.id === v);
+                        if (
+                          found?.defaultHourlyRate &&
+                          (row.hourlyRate === "" || row.hourlyRate === "0")
+                        ) {
+                          next[idx].hourlyRate = String(found.defaultHourlyRate);
+                        }
                       }
-                    }
-                    updateScenario({ labour: next });
-                  }}
-                  placeholder="Staff (or blank)"
-                  options={staffOptions.map((s) => ({
-                    value: s.id,
-                    label: s.name,
-                    description: s.defaultHourlyRate
-                      ? `${fmtMoney(s.defaultHourlyRate)}/hr`
-                      : "",
-                  }))}
-                />
-                <Input
-                  value={row.task}
-                  onChange={(e) => {
-                    const next = [...scenario.labour];
-                    next[idx] = { ...row, task: e.target.value };
-                    updateScenario({ labour: next });
-                  }}
-                  placeholder="Task (e.g. transplanting)"
-                />
-                <Input
-                  type="number"
-                  step="any"
-                  min="0"
-                  value={row.hours}
-                  onChange={(e) => {
-                    const next = [...scenario.labour];
-                    next[idx] = { ...row, hours: e.target.value };
-                    updateScenario({ labour: next });
-                  }}
-                  placeholder="hours"
-                />
-                <Input
-                  type="number"
-                  step="any"
-                  min="0"
-                  value={row.hourlyRate}
-                  onChange={(e) => {
-                    const next = [...scenario.labour];
-                    next[idx] = { ...row, hourlyRate: e.target.value };
-                    updateScenario({ labour: next });
-                  }}
-                  placeholder="Rp / hour"
-                />
+                      updateScenario({ labour: next });
+                    }}
+                    placeholder="Pick from staff (or blank)"
+                    options={staffOptions.map((s) => ({
+                      value: s.id,
+                      label: s.name,
+                      description: s.defaultHourlyRate
+                        ? `${fmtMoney(s.defaultHourlyRate)}/hr`
+                        : "",
+                    }))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Task description
+                  </Label>
+                  <Input
+                    value={row.task}
+                    onChange={(e) => {
+                      const next = [...scenario.labour];
+                      next[idx] = { ...row, task: e.target.value };
+                      updateScenario({ labour: next });
+                    }}
+                    placeholder="e.g. transplanting"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Hours
+                  </Label>
+                  <Input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={row.hours}
+                    onChange={(e) => {
+                      const next = [...scenario.labour];
+                      next[idx] = { ...row, hours: e.target.value };
+                      updateScenario({ labour: next });
+                    }}
+                    placeholder="e.g. 6"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Rp / hour
+                  </Label>
+                  <Input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={row.hourlyRate}
+                    onChange={(e) => {
+                      const next = [...scenario.labour];
+                      next[idx] = { ...row, hourlyRate: e.target.value };
+                      updateScenario({ labour: next });
+                    }}
+                    placeholder="e.g. 18000"
+                  />
+                </div>
                 <Button
                   type="button"
                   size="icon"
@@ -659,6 +689,7 @@ export function SimulatorClient({
               the form doesn't feel busy when not relevant. */}
           <ScenarioSection
             title="Depreciable assets (rockwool, cocopeat, grow bags…)"
+            description="Stuff that gets re-used across multiple cycles but loses life with each use. Qty × Rp per use × number of uses this cycle = row cost. Skip this section if nothing in your scenario is reusable."
             icon={<Calculator className="h-3.5 w-3.5" />}
             subtotal={assetCost}
             onAdd={() =>
@@ -763,6 +794,7 @@ export function SimulatorClient({
               etc. that don't fit the other buckets. */}
           <ScenarioSection
             title="Other costs (utilities, contractors, fuel…)"
+            description="Anything that doesn't fit the buckets above — water, electricity, paid contractor for one task, fuel, transport. Just a description + amount per row."
             icon={<Calculator className="h-3.5 w-3.5" />}
             subtotal={otherCost}
             onAdd={() =>
@@ -876,12 +908,16 @@ export function SimulatorClient({
 
 function ScenarioSection({
   title,
+  description,
   subtotal,
   onAdd,
   icon,
   children,
 }: {
   title: string;
+  /** One-line explanation rendered under the title so the user knows what
+   *  this bucket is for without having to guess from the field labels. */
+  description?: string;
   subtotal: number;
   onAdd: () => void;
   icon: React.ReactNode;
@@ -890,9 +926,14 @@ function ScenarioSection({
   return (
     <Card>
       <CardContent className="space-y-2 p-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            {icon} {title}
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 space-y-0.5">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              {icon} {title}
+            </div>
+            {description ? (
+              <p className="text-xs text-muted-foreground">{description}</p>
+            ) : null}
           </div>
           <div className="flex items-center gap-2">
             <span className="rounded-md bg-muted px-2 py-1 text-xs">

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { ArrowRight, Combine, Search } from "lucide-react";
 import { toast } from "sonner";
 
@@ -80,6 +80,22 @@ export function MergeItemDialog({
   const [preview, setPreview] = useState<Preview | null>(null);
   const [pending, startT] = useTransition();
   const router = useRouter();
+  const pathname = usePathname();
+
+  /**
+   * After a successful merge/combine the source item is deleted. If the
+   * user was on the source's detail page, refresh() will re-fetch a
+   * deleted record and show a 404. Detect that and route to the target's
+   * page instead. Otherwise just refresh the current view (stock-take,
+   * inventory list, etc).
+   */
+  function afterDestructive(targetId: string) {
+    if (pathname?.startsWith(`/inventory/${sourceId}`)) {
+      router.push(`/inventory/${targetId}`);
+    } else {
+      router.refresh();
+    }
+  }
 
   // Debounce search so a fast typer doesn't fire one request per keystroke.
   useEffect(() => {
@@ -147,7 +163,7 @@ export function MergeItemDialog({
         setOpen(false);
         reset();
         onMerged?.(target.id);
-        router.refresh();
+        afterDestructive(target.id);
       } else if (!r.ok) {
         toast.error(r.error);
       }
@@ -172,7 +188,7 @@ export function MergeItemDialog({
         setOpen(false);
         reset();
         onMerged?.(target.id);
-        router.refresh();
+        afterDestructive(target.id);
       } else if (!r.ok) {
         toast.error(r.error);
       }
