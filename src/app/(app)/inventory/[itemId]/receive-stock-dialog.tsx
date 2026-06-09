@@ -186,8 +186,43 @@ export function ReceiveStockDialog({
               </div>
               <div className="space-y-2">
                 <Label>Unit price (IDR / {itemUnit})</Label>
-                <Input type="number" step="any" min="0" {...form.register("price")} />
+                <Input
+                  type="number"
+                  step="any"
+                  min="0"
+                  {...form.register("price")}
+                  onChange={(e) => {
+                    form.setValue("price", e.target.value);
+                  }}
+                />
               </div>
+              <div className="space-y-2">
+                <Label>Total paid (IDR)</Label>
+                {/* Match the way Shopee/Tokopedia invoices show line totals.
+                    Two-way bound with qty × unit price: type the total and
+                    we back-calculate unit price; type unit price + qty and
+                    we forward-calculate total. Whichever the user has from
+                    the receipt, they can enter directly. */}
+                <Input
+                  type="number"
+                  step="any"
+                  min="0"
+                  value={
+                    qtyInput > 0 && parsedPrice > 0
+                      ? (qtyInput * parsedPrice).toFixed(0)
+                      : ""
+                  }
+                  onChange={(e) => {
+                    const total = Number(e.target.value);
+                    if (qtyInput > 0 && total > 0) {
+                      form.setValue("price", (total / qtyInput).toFixed(4));
+                    }
+                  }}
+                  placeholder="auto-calc, or type and qty fills unit price"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label>FX rate (IDR/AUD)</Label>
                 <Input type="number" step="any" min="0" {...form.register("exchangeRate")} />

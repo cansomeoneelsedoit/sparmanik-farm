@@ -341,7 +341,7 @@ export function ReceiveStockClient({
               return (
                 <div
                   key={idx}
-                  className="grid grid-cols-1 gap-2 rounded-lg border bg-background/40 p-2.5 sm:grid-cols-[3fr_1fr_1.2fr_1.5fr_auto]"
+                  className="grid grid-cols-1 gap-2 rounded-lg border bg-background/40 p-2.5 sm:grid-cols-[3fr_1fr_1.2fr_1.2fr_1.5fr_auto]"
                 >
                   <Combobox
                     value={line.itemId}
@@ -398,6 +398,34 @@ export function ReceiveStockClient({
                         / {item.subUnit}
                       </p>
                     ) : null}
+                  </div>
+                  {/* "Total paid" two-way binds with qty × unit price — match
+                      what Shopee/Tokopedia invoices print as line subtotal.
+                      Type the total; we back-calc the unit price (more
+                      accurate when the invoice rounds differently than the
+                      per-unit math). */}
+                  <div className="space-y-0.5">
+                    <Input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={
+                        Number(line.qty) > 0 && Number(line.price) > 0
+                          ? (Number(line.qty) * Number(line.price)).toFixed(0)
+                          : ""
+                      }
+                      onChange={(e) => {
+                        const total = Number(e.target.value);
+                        const qty = Number(line.qty);
+                        if (qty > 0 && total > 0) {
+                          updateLine(idx, {
+                            price: (total / qty).toFixed(4),
+                          });
+                        }
+                      }}
+                      placeholder="line total (Rp)"
+                      title="Total paid for this line"
+                    />
                   </div>
                   <div className="flex h-9 items-center gap-2 rounded-md border bg-muted/20 px-2.5">
                     <Switch
