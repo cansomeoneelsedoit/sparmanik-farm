@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import {
+  Calculator,
   Calendar,
   ChevronDown,
   ClipboardList,
@@ -144,6 +145,15 @@ export function SidebarContent({
           href: "/financials",
           fallback: "Total Business Financials",
           icon: DollarSign,
+        },
+        // Sandbox "what-if" P&L calculator — no real stock touched. Lives
+        // under Financial because that's where the user thinks about
+        // whether a cycle pays off before committing to it.
+        {
+          key: "simulator",
+          href: "/simulator",
+          fallback: "Simulator",
+          icon: Calculator,
         },
       ],
     },
