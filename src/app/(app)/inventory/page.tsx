@@ -58,7 +58,7 @@ export default async function InventoryPage({
     }[];
   };
 
-  const [items, categories, suppliers] = await Promise.all([
+  const [items, categories, suppliers, familyOptions] = await Promise.all([
     prisma.item.findMany({
       where: {
         AND: [
@@ -100,6 +100,18 @@ export default async function InventoryPage({
     }),
     prisma.category.findMany({ orderBy: { name: "asc" } }),
     prisma.supplier.findMany({ orderBy: { name: "asc" } }),
+    // Distinct product-family tags so the New Item dialog can show an
+    // autocomplete datalist — keeps the user from typing "Calnit" three
+    // different ways.
+    prisma.item
+      .groupBy({
+        by: ["productFamily"],
+        where: { productFamily: { not: null } },
+        orderBy: { productFamily: "asc" },
+      })
+      .then((rows: { productFamily: string | null }[]) =>
+        rows.map((r) => r.productFamily).filter((s): s is string => !!s?.trim()),
+      ),
   ]);
 
   const rows = (items as ItemRow[]).map((item) => {
@@ -166,6 +178,7 @@ export default async function InventoryPage({
           <NewItemDialog
             categories={categories.map((c: { id: string; name: string }) => ({ id: c.id, name: c.name }))}
             suppliers={suppliers.map((s: { id: string; name: string }) => ({ id: s.id, name: s.name }))}
+            familyOptions={familyOptions}
             trigger={
               <Button size="lg" variant="ghost">
                 <Plus className="h-4 w-4" /> New item

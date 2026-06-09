@@ -312,6 +312,11 @@ model Item {
   unit              String
   subUnit           String?  @map("sub_unit")
   subFactor         Decimal? @db.Decimal(18, 4) @map("sub_factor")
+  /** Free-text tag that groups items of the same underlying substance
+   * across separate SKUs / pack sizes / suppliers. Pair with subUnit
+   * + subFactor so a 25 kg bag and a 1 kg bag can both belong to
+   * family "Meroke Calnit" and roll up to a total kilogram figure. */
+  productFamily     String?  @map("product_family")
   location          String?
   reusable          Boolean  @default(false)
   reorder           Decimal  @default(0) @db.Decimal(18, 4)
@@ -331,6 +336,7 @@ model Item {
   @@index([organizationId])
   @@index([categoryId])
   @@index([defaultSupplierId])
+  @@index([organizationId, productFamily])
   @@map("items")
 }
 

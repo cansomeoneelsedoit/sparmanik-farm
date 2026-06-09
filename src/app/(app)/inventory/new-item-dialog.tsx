@@ -41,6 +41,10 @@ const schema = z.object({
     .string()
     .regex(/^[0-9.]*$/, "Number")
     .optional(),
+  // Free-text tag that groups items of the same substance across SKUs.
+  // The dialog shows existing family names as a datalist so the user
+  // doesn't fragment "Calnit" / "calnit" / "Meroke Calnit".
+  productFamily: z.string().max(120).optional(),
   categoryId: z.string().optional(),
   defaultSupplierId: z.string().optional(),
   reorder: z.string().regex(/^[0-9.]+$/, "Number").default("0"),
@@ -56,6 +60,7 @@ export function NewItemDialog({
   categories,
   suppliers,
   existing,
+  familyOptions,
 }: {
   trigger: ReactNode;
   categories: { id: string; name: string }[];
@@ -68,6 +73,7 @@ export function NewItemDialog({
     unit: string;
     subUnit: string | null;
     subFactor: string | null;
+    productFamily: string | null;
     categoryId: string | null;
     defaultSupplierId: string | null;
     reorder: string;
@@ -75,6 +81,8 @@ export function NewItemDialog({
     reusable: boolean;
     shopeeUrl: string | null;
   };
+  /** Existing product-family tags in this org, used for autocomplete. */
+  familyOptions?: string[];
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -93,6 +101,7 @@ export function NewItemDialog({
           unit: existing.unit,
           subUnit: existing.subUnit ?? "",
           subFactor: existing.subFactor ?? "",
+          productFamily: existing.productFamily ?? "",
           categoryId: existing.categoryId ?? undefined,
           defaultSupplierId: existing.defaultSupplierId ?? undefined,
           reorder: existing.reorder,
@@ -100,7 +109,7 @@ export function NewItemDialog({
           reusable: existing.reusable,
           shopeeUrl: existing.shopeeUrl ?? "",
         }
-      : { name: "", description: "", photoPath: "", unit: "", subUnit: "", subFactor: "", reorder: "0", reusable: false },
+      : { name: "", description: "", photoPath: "", unit: "", subUnit: "", subFactor: "", productFamily: "", reorder: "0", reusable: false },
   });
 
   // Open the "sold as a pack" section by default if the item already has
@@ -146,6 +155,7 @@ export function NewItemDialog({
           isPack && values.subFactor?.trim() && Number(values.subFactor) > 0
             ? values.subFactor.trim()
             : null,
+        productFamily: values.productFamily?.trim() || null,
       };
       const r = isEdit ? await updateItem(existing.id, payload) : await createItem(payload);
       if (r.ok) {
@@ -321,6 +331,30 @@ export function NewItemDialog({
                 />
               </Row>
             </div>
+            {/* Free-text product-family tag — items tagged the same family
+                roll up together on the family detail page so the user can
+                see "I have N kg of substance X" across SKUs, pack sizes,
+                and suppliers. Datalist surfaces existing tags so we don't
+                fragment "Calnit" / "calnit" / "Meroke Calnit". */}
+            <Row label="Product family (optional)">
+              <Input
+                {...form.register("productFamily")}
+                placeholder="e.g. Meroke Calnit, Rockwool, AB Mix"
+                list="product-family-datalist"
+              />
+              {familyOptions && familyOptions.length > 0 ? (
+                <datalist id="product-family-datalist">
+                  {familyOptions.map((f) => (
+                    <option key={f} value={f} />
+                  ))}
+                </datalist>
+              ) : null}
+              <p className="text-[10px] text-muted-foreground">
+                Groups items that are the same substance across different
+                bag sizes and suppliers. Total kilograms / litres / pieces
+                roll up on the family page.
+              </p>
+            </Row>
             <Row label="Location">
               <Input {...form.register("location")} placeholder="Warehouse A" />
             </Row>

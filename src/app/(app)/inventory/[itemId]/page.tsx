@@ -23,13 +23,14 @@ import { DeleteItemButton } from "@/app/(app)/inventory/[itemId]/item-actions";
 import { DeleteBatchButton } from "@/app/(app)/inventory/[itemId]/batch-actions";
 import { IdentifyItemPanel } from "@/app/(app)/inventory/[itemId]/identify-item-panel";
 import { MergeItemDialog } from "@/app/(app)/inventory/merge-item-dialog";
-import { Combine } from "lucide-react";
+import { Combine, Boxes } from "lucide-react";
+import { getProductFamilyRollup } from "@/app/(app)/inventory/actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function ItemDetailPage({ params }: { params: Promise<{ itemId: string }> }) {
   const { itemId } = await params;
-  const [item, suppliers, categories] = await Promise.all([
+  const [item, suppliers, categories, familyOptions] = await Promise.all([
     // findFirst (not findUnique) — the prisma extension auto-appends
     // organizationId for org isolation, which findUnique rejects.
     prisma.item.findFirst({
@@ -45,6 +46,16 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
     }),
     prisma.supplier.findMany({ orderBy: { name: "asc" } }),
     prisma.category.findMany({ orderBy: { name: "asc" } }),
+    // Distinct product-family tags for the edit dialog's datalist.
+    prisma.item
+      .groupBy({
+        by: ["productFamily"],
+        where: { productFamily: { not: null } },
+        orderBy: { productFamily: "asc" },
+      })
+      .then((rows: { productFamily: string | null }[]) =>
+        rows.map((r) => r.productFamily).filter((s): s is string => !!s?.trim()),
+      ),
   ]);
 
   if (!item) notFound();
@@ -73,6 +84,12 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
         : new Decimal(0);
     return { ...b, consumed, remaining, depreciable, remainingUses, unrecoveredValue };
   });
+
+  // When the item belongs to a product family, fetch the family roll-up so
+  // the detail page can show "Family total: 99 kg across 5 items".
+  const familyRollup = item.productFamily?.trim()
+    ? await getProductFamilyRollup(item.productFamily)
+    : null;
 
   const totalStock = batchesWithRemaining.reduce((s: Decimal, b) => s.plus(b.remaining), new Decimal(0));
   const totalValue = batchesWithRemaining.reduce((s: Decimal, b) => s.plus(b.remaining.times(b.price)), new Decimal(0));
@@ -160,6 +177,7 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
             trigger={<Button variant="outline">Edit</Button>}
             categories={categories.map((c: { id: string; name: string }) => ({ id: c.id, name: c.name }))}
             suppliers={suppliers.map((s: { id: string; name: string }) => ({ id: s.id, name: s.name }))}
+            familyOptions={familyOptions}
             existing={{
               id: item.id,
               name: item.name,
@@ -168,6 +186,7 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
               unit: item.unit,
               subUnit: item.subUnit,
               subFactor: item.subFactor ? item.subFactor.toString() : null,
+              productFamily: item.productFamily,
               categoryId: item.categoryId,
               defaultSupplierId: item.defaultSupplierId,
               reorder: item.reorder.toFixed(4),
@@ -239,6 +258,102 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
                 {item.description}
               </p>
             ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/* Product-family rollup panel — only renders when the item belongs
+          to a family AND the rollup query succeeded. Surfaces the cross-
+          SKU substance total ("99 kg of Meroke Calnit") plus a per-item
+          breakdown so the user can drill in to any of the sibling SKUs. */}
+      {familyRollup?.ok && familyRollup.data && familyRollup.data.items.length > 1 ? (
+        <Card className="border-accent/40 bg-accent/5">
+          <CardContent className="space-y-3 p-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-md bg-accent/20 text-accent-foreground">
+                <Boxes className="h-5 w-5" />
+              </div>
+              <div className="flex-1">
+                <div className="text-xs uppercase tracking-wider text-muted-foreground">
+                  Product family
+                </div>
+                <div className="font-serif text-xl">
+                  {familyRollup.data.family}
+                </div>
+              </div>
+              <div className="flex items-end gap-4">
+                {familyRollup.data.subUnit ? (
+                  <div className="text-right">
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Total {familyRollup.data.subUnit}
+                    </div>
+                    <div className="text-2xl font-semibold">
+                      {familyRollup.data.totalSubUnits} {familyRollup.data.subUnit}
+                    </div>
+                  </div>
+                ) : null}
+                <div className="text-right">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    SKUs in family
+                  </div>
+                  <div className="text-2xl font-semibold">
+                    {familyRollup.data.items.length}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Item</TableHead>
+                  <TableHead className="text-right">On hand</TableHead>
+                  <TableHead className="text-right">Per pack</TableHead>
+                  <TableHead className="text-right">
+                    {familyRollup.data.subUnit ?? "Sub-unit"} total
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {familyRollup.data.items.map((row) => {
+                  const isThisItem = row.id === item.id;
+                  return (
+                    <TableRow
+                      key={row.id}
+                      className={isThisItem ? "bg-accent/10" : undefined}
+                    >
+                      <TableCell>
+                        {isThisItem ? (
+                          <span className="font-medium">{row.name} ←</span>
+                        ) : (
+                          <Link
+                            href={`/inventory/${row.id}`}
+                            className="text-foreground hover:underline"
+                          >
+                            {row.name}
+                          </Link>
+                        )}
+                        <span className="ml-2 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] tracking-wider text-muted-foreground">
+                          {row.code}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {row.onHandPacks} {row.unit}
+                      </TableCell>
+                      <TableCell className="text-right text-muted-foreground">
+                        {row.subFactor && row.subUnit
+                          ? `${row.subFactor} ${row.subUnit}`
+                          : "—"}
+                      </TableCell>
+                      <TableCell className="text-right font-medium">
+                        {row.subUnit
+                          ? `${row.onHandSubUnits} ${row.subUnit}`
+                          : "—"}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
           </CardContent>
         </Card>
       ) : null}

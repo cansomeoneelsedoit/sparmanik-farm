@@ -52,6 +52,7 @@ const newItemSchema = z.object({
   unit: z.string().min(1),
   subUnit: z.string().optional().nullable(),
   subFactor: z.string().optional().nullable(),
+  productFamily: z.string().max(120).optional().nullable(),
   location: z.string().optional().nullable(),
   reusable: z.boolean().optional().default(false),
   reorder: z.string().default("0"),
@@ -101,6 +102,7 @@ export async function createItem(input: unknown): Promise<ActionResult<{ id: str
             unit: parsed.data.unit,
             subUnit: parsed.data.subUnit || null,
             subFactor: parsed.data.subFactor ? new Decimal(parsed.data.subFactor) : null,
+            productFamily: parsed.data.productFamily?.trim() || null,
             location: parsed.data.location || null,
             reusable: parsed.data.reusable ?? false,
             reorder: new Decimal(parsed.data.reorder),
@@ -147,6 +149,7 @@ export async function updateItem(id: string, input: unknown): Promise<ActionResu
       unit: parsed.data.unit,
       subUnit: parsed.data.subUnit || null,
       subFactor: parsed.data.subFactor ? new Decimal(parsed.data.subFactor) : null,
+      productFamily: parsed.data.productFamily?.trim() || null,
       location: parsed.data.location || null,
       reusable: parsed.data.reusable ?? false,
       reorder: new Decimal(parsed.data.reorder),
@@ -157,6 +160,131 @@ export async function updateItem(id: string, input: unknown): Promise<ActionResu
   revalidatePath("/inventory");
   revalidatePath(`/inventory/${id}`);
   return { ok: true };
+}
+
+/**
+ * Distinct list of product-family tags currently in use in this org. Drives
+ * the autocomplete on the item edit dialog so the user doesn't accidentally
+ * fragment the catalog with "Calnit" vs "calnit " vs "Meroke Calnit".
+ */
+export async function listProductFamilies(): Promise<
+  ActionResult<{ name: string; itemCount: number }[]>
+> {
+  // Group-by hits the new composite index (organization_id, product_family).
+  const rows = await prisma.item.groupBy({
+    by: ["productFamily"],
+    where: { productFamily: { not: null } },
+    _count: { _all: true },
+    orderBy: { productFamily: "asc" },
+  });
+  type Row = { productFamily: string | null; _count: { _all: number } };
+  return {
+    ok: true,
+    data: (rows as Row[])
+      .filter((r) => !!r.productFamily?.trim())
+      .map((r) => ({ name: r.productFamily as string, itemCount: r._count._all })),
+  };
+}
+
+/**
+ * Roll up substance totals across every item that belongs to the same
+ * product family. Each item contributes `on_hand_packs × subFactor` to the
+ * family total. Items in the family that have no subFactor (e.g. count
+ * units, "pcs") contribute their raw pack count.
+ *
+ * Returns one row per family, plus a per-item breakdown for the detail
+ * panel.
+ */
+export async function getProductFamilyRollup(
+  family: string,
+): Promise<
+  ActionResult<{
+    family: string;
+    items: Array<{
+      id: string;
+      code: string;
+      name: string;
+      unit: string;
+      subUnit: string | null;
+      subFactor: string | null;
+      onHandPacks: string;
+      onHandSubUnits: string;
+    }>;
+    totalSubUnits: string;
+    subUnit: string | null;
+    totalPacks: string;
+  }>
+> {
+  if (!family.trim()) return { ok: false, error: "Family name required" };
+  const items = await prisma.item.findMany({
+    where: { productFamily: family.trim() },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      unit: true,
+      subUnit: true,
+      subFactor: true,
+      batches: {
+        select: {
+          qty: true,
+          consumptions: { select: { qty: true } },
+        },
+      },
+    },
+    orderBy: { name: "asc" },
+  });
+  type ItemRow = {
+    id: string;
+    code: string;
+    name: string;
+    unit: string;
+    subUnit: string | null;
+    subFactor: Decimal | null;
+    batches: { qty: Decimal; consumptions: { qty: Decimal }[] }[];
+  };
+
+  let totalSubUnits = new Decimal(0);
+  let totalPacks = new Decimal(0);
+  const subUnits = new Set<string>();
+  const rows = (items as ItemRow[]).map((it) => {
+    const stock = it.batches.reduce((s: Decimal, b) => {
+      const consumed = b.consumptions.reduce(
+        (cs: Decimal, c) => cs.plus(c.qty),
+        new Decimal(0),
+      );
+      return s.plus(new Decimal(b.qty).minus(consumed));
+    }, new Decimal(0));
+    const subFactor = it.subFactor ? new Decimal(it.subFactor) : new Decimal(1);
+    const subUnitQty = stock.times(subFactor);
+    totalPacks = totalPacks.plus(stock);
+    totalSubUnits = totalSubUnits.plus(subUnitQty);
+    if (it.subUnit) subUnits.add(it.subUnit);
+    return {
+      id: it.id,
+      code: it.code,
+      name: it.name?.trim() || `(Untitled ${it.code})`,
+      unit: it.unit,
+      subUnit: it.subUnit,
+      subFactor: it.subFactor ? new Decimal(it.subFactor).toString() : null,
+      onHandPacks: stock.toFixed(2).replace(/\.?0+$/, ""),
+      onHandSubUnits: subUnitQty.toFixed(2).replace(/\.?0+$/, ""),
+    };
+  });
+
+  return {
+    ok: true,
+    data: {
+      family: family.trim(),
+      items: rows,
+      totalSubUnits: totalSubUnits.toFixed(2).replace(/\.?0+$/, ""),
+      // If every item in the family agrees on a single sub-unit, surface it
+      // as THE family unit. Mixed sub-units (e.g. some items in kg, some in
+      // L) come back as null and the UI shows the per-item breakdown only.
+      subUnit: subUnits.size === 1 ? Array.from(subUnits)[0] : null,
+      totalPacks: totalPacks.toFixed(2).replace(/\.?0+$/, ""),
+    },
+  };
 }
 
 export async function deleteBatch(id: string): Promise<ActionResult> {
