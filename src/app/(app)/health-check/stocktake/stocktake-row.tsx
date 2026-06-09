@@ -44,9 +44,14 @@ export type StocktakeItem = {
 export function StocktakeRow({
   item,
   onSaved,
+  autoOpenNextId,
 }: {
   item: StocktakeItem;
   onSaved?: () => void;
+  /** The id of the next stock-take row in the queue. When set, this row
+   *  auto-opens its sibling and scrolls it into view after a successful
+   *  Save & next — turning the warehouse walk into a Tab/Enter rhythm. */
+  autoOpenNextId?: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startT] = useTransition();
@@ -95,6 +100,28 @@ export function StocktakeRow({
         setOpen(false);
         reset();
         onSaved?.();
+        // Auto-open the next row in the queue and scroll it into view —
+        // turns the walk into a Tab/Enter rhythm instead of a click-scroll-
+        // click chore. The next row's id is rendered as a data-attribute on
+        // its outer div + a button#expand inside; click both to open and
+        // smooth-scroll.
+        if (autoOpenNextId && typeof window !== "undefined") {
+          // The router.refresh below re-renders the parent, which would
+          // mount fresh row components. Defer a tick so the new DOM is in
+          // place before we try to click into it.
+          setTimeout(() => {
+            const nextEl = document.querySelector(
+              `[data-stocktake-row-id="${autoOpenNextId}"]`,
+            );
+            if (nextEl instanceof HTMLElement) {
+              const expandBtn = nextEl.querySelector<HTMLButtonElement>(
+                "button[data-stocktake-expand]",
+              );
+              expandBtn?.click();
+              nextEl.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          }, 100);
+        }
         router.refresh();
       } else {
         toast.error(r.error);
@@ -104,6 +131,7 @@ export function StocktakeRow({
 
   return (
     <div
+      data-stocktake-row-id={item.id}
       className={cn(
         "rounded-lg border bg-card transition-colors",
         item.done && !open && "opacity-60",
@@ -111,6 +139,7 @@ export function StocktakeRow({
     >
       <button
         type="button"
+        data-stocktake-expand
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center gap-3 p-2.5 text-left hover:bg-muted/40"
       >

@@ -142,8 +142,12 @@ export function StocktakeClient({
         </div>
       ) : (
         <div className="space-y-2">
-          {ordered.map((i) => (
-            <StocktakeRow key={i.id} item={i} />
+          {ordered.map((i, idx) => (
+            <StocktakeRow
+              key={i.id}
+              item={i}
+              autoOpenNextId={ordered[idx + 1]?.id ?? null}
+            />
           ))}
         </div>
       )}
