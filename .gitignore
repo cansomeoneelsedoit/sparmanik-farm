@@ -57,3 +57,7 @@ next-env.d.ts
 prod-backup-*.sql
 tmp-sync/
 
+
+# Local pre-merge data backup (contains data; never commit)
+local-premerge-backup.sql
+*-premerge-backup.sql
