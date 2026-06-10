@@ -205,6 +205,17 @@ prisma/
     starting the app. Don't add `USER nextjs` back.
 
 14. **Multi-org auto-scoping silently drops queries when no `activeOrgId` cookie is set in a request context.** The extension reads the cookie; if it's missing on a logged-in user (e.g. cookie expired, first visit before middleware runs) reads return empty and creates fail the NOT NULL FK. The fix is to ensure `setActiveOrg` runs before the first scoped query — `src/proxy.ts` would be the right place if this ever bites users in practice. Today it doesn't because `listMyOrgs()` in the topbar falls back to the user's first membership and `OrgSwitcher` sets the cookie on first render. Seed and CLI scripts bypass scoping deliberately (no `next/headers` in scope → `getActiveOrgIdFromCookie` returns `null`) so they must stamp `organizationId` explicitly on every `data:` payload.
+    - **Corollary — don't org-scope a fetch-by-cuid in an API route.** The
+      DB-backed item-photo route (`/api/items/[id]/photo`) used
+      `prisma.item.findFirst({ where: { id } })` and EVERY photo 404'd —
+      the extension's `where: { organizationId }` injection resolved to
+      null/mismatch in that `<img>`-fetch context, so findFirst returned
+      null. A lookup keyed by a globally-unique cuid behind an
+      authenticated session needs no org scoping (can't guess a cuid; a
+      thumbnail isn't sensitive). Use `prisma.$queryRaw` — a client-level
+      op the extension never intercepts — for these. Same pattern applies
+      to any future "serve one row by its unique id from a route handler"
+      endpoint.
 
 15. **Browser caches stale `/ask-ai` HTML across deploys.** The
     server-rendered `<Card>` saying "Set ANTHROPIC_API_KEY…" sticks
