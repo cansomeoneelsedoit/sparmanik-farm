@@ -10,8 +10,19 @@ export const runtime = "nodejs";
  *
  * Falls through to a 302 redirect to `/api/uploads/<photo_path>` when the
  * blob hasn't been backfilled yet — that route reads from disk like before.
- * Once the backfill script + a few create/updates have run, every item ends
- * up with `photo_data` set and the redirect path is never taken.
+ *
+ * IMPORTANT — uses `$queryRaw`, NOT `prisma.item.findFirst`. The Item model
+ * is org-scoped by the Prisma `$extends` extension (src/lib/prisma.ts),
+ * which injects `where: { organizationId }` resolved from the request's
+ * activeOrgId cookie. In this API-route context that resolution was
+ * intermittently coming back null/mismatched, so findFirst returned null
+ * and every photo 404'd (this is gotcha #14 biting an `<img>` fetch).
+ *
+ * A photo lookup keyed by a globally-unique cuid, behind an authenticated
+ * session, has no security need for org scoping — you can't guess a cuid,
+ * and a thumbnail isn't sensitive. `$queryRaw` is a client-level op the
+ * extension never intercepts, so it always finds the row regardless of
+ * cookie state. This is the bulletproof path.
  *
  * Auth-gated like /api/uploads — same session check, same error shape.
  */
@@ -23,39 +34,45 @@ export async function GET(
   if (!session?.user) return new Response("Unauthorized", { status: 401 });
 
   const { itemId } = await params;
-  const item = await prisma.item.findFirst({
-    where: { id: itemId },
-    select: { photoData: true, photoMime: true, photoPath: true },
-  });
+
+  // $queryRaw bypasses the org-scoping extension — see header comment.
+  const rows = (await prisma.$queryRaw`
+    SELECT photo_data, photo_mime, photo_path
+      FROM items
+     WHERE id = ${itemId}
+     LIMIT 1
+  `) as Array<{
+    photo_data: Buffer | Uint8Array | null;
+    photo_mime: string | null;
+    photo_path: string | null;
+  }>;
+
+  const item = rows[0];
   if (!item) return new Response("Not found", { status: 404 });
 
   // Path A: bytes are in the DB — stream them directly.
-  if (item.photoData) {
-    const buf = Buffer.isBuffer(item.photoData)
-      ? item.photoData
-      : Buffer.from(item.photoData as Uint8Array);
+  if (item.photo_data) {
+    const buf = Buffer.isBuffer(item.photo_data)
+      ? item.photo_data
+      : Buffer.from(item.photo_data);
     return new Response(new Uint8Array(buf), {
       headers: {
-        "Content-Type": item.photoMime || "image/webp",
+        "Content-Type": item.photo_mime || "image/webp",
         "Content-Length": String(buf.length),
         // Photos in the DB are mutable (user can replace via Edit), so we
-        // don't get to use the long-immutable cache the filesystem route
-        // does. Short-lived private cache is enough — saves a re-fetch
-        // for the next page nav but always refreshes after a few min.
+        // don't get the long-immutable cache the filesystem route uses.
+        // Short-lived private cache saves a re-fetch on the next nav but
+        // always refreshes after a few minutes.
         "Cache-Control": "private, max-age=300, must-revalidate",
       },
     });
   }
 
   // Path B: legacy item with on-disk photo only — bounce to the existing
-  // /api/uploads/<path> route. After the user next edits this item, the
-  // bytes get backfilled into the DB and Path A starts handling it.
-  if (item.photoPath) {
+  // /api/uploads/<path> route, which reads from the filesystem.
+  if (item.photo_path) {
     return Response.redirect(
-      new URL(
-        `/api/uploads/${encodeURI(item.photoPath)}`,
-        new URL(_req.url),
-      ),
+      new URL(`/api/uploads/${encodeURI(item.photo_path)}`, new URL(_req.url)),
       302,
     );
   }
