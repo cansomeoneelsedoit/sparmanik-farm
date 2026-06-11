@@ -379,6 +379,17 @@ prisma/
     dodge for the common case where you're loading from localStorage
     or running a debounced fetch.
 
+26. **PowerShell 5.1 breaks `git commit -m` when the message contains
+    double quotes.** PS 5.1 doesn't re-escape embedded `"` when it
+    builds the native command line, so git receives the message split
+    apart and fails with `error: pathspec '...' did not match` —
+    nothing gets committed (staged files stay staged). A single-quoted
+    here-string (`@'...'@`) does NOT protect you; the breakage happens
+    at the native-argument handoff, after PowerShell's own parsing.
+    **Fix: write the message to a temp file and `git commit -F <file>`**
+    whenever the message contains a `"`. Messages without double quotes
+    are fine with `-m`.
+
 ## Auth flow
 
 1. Unauthenticated user hits any `/(app)/*` route.
@@ -705,6 +716,47 @@ npm run check:i18n         # diff EN vs ID keysets
     `<Script id="theme-bootstrap" strategy="beforeInteractive">`
     in `RootLayout` (was a raw `<script>` JSX child, which Next 16
     rejects with "Scripts inside React components…").
+
+- **2026-06-12** — Data safety + staff usability sweep ("go mate, do it
+  all" batch).
+  - **`backup-prod.cmd`** (+ `scripts/backup-prod.mjs`): one-paste
+    read-only snapshot of the Railway DB into `backups\` (timestamped
+    full dump, keeps newest 10, integrity-checks pg_dump's completion
+    marker). Photos live in Postgres now, so this file IS the farm
+    backup. Also raised the sync script's prod-backup `maxBuffer` to
+    1 GB — the 1 MB default would have crashed it on photo-era dumps.
+  - **Two latent `combineItems` bugs fixed** (caught by reading while
+    writing tests): (1) source usages/assets were re-pointed to the
+    target *before* the target's rows converted, so the moved rows got
+    multiplied by both factors; (2) batch consumptions were never
+    rescaled with their batch → phantom remaining stock on any
+    already-used batch. Conversion math extracted to
+    `src/server/stock-convert.ts` (pure), orchestration order now
+    target-first. 17 new tests across `stock-convert.test.ts` (rescale
+    invariants + combine model with regressions pinned to both bugs)
+    and `stock-sale.test.ts` (FIFO sale profit/COGS, undo, sell-dialog
+    pack math).
+  - **Bahasa Indonesia for the staff-facing flows**: stock-take wizard
+    ("Stok opname"), receive stock, use/sell stock dialogs, tasks page.
+    Topbar lang-toggle switches; English copy unchanged. Guard rails:
+    `scripts/check-i18n.ts` (the npm script existed, the file didn't —
+    now key+placeholder parity en↔id) and `scripts/check-i18n-usage.mjs`
+    (every `t()` call site in src/ must resolve in BOTH locales through
+    the real ICU formatter).
+  - **Stock-take fixes/upgrades**: category filter chips actually
+    filter now (state was never read; items carry `categoryId`);
+    `?focus=packinfo` mode lists every item still missing pack size
+    (equipment regex excluded) — linked from the Health Check
+    "missing pack info" card's new bulk-fix button; "Missing pack
+    info (n)" checkbox available any time.
+  - **Shopping list** (`/inventory/shopping-list`, sidebar → Operations,
+    Ctrl+K): items at/below reorder level grouped by supplier
+    (defaultSupplier → newest batch supplier fallback), severity tiers
+    matching the alert bell, suggested order = restock to 2× reorder in
+    whole packs, **Copy list** → plain-text order in the current UI
+    language for WhatsApp.
+  - Gotcha #26 added (PS 5.1 `git commit -m` double-quote mangling —
+    use `-F <file>`).
 
 ## When in doubt
 
