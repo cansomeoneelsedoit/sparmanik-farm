@@ -11,6 +11,7 @@ import { AuditHistorySheet } from "@/components/shared/audit-history-sheet";
 import { OrgSwitcher } from "@/components/shared/org-switcher";
 import { ClearCacheButton } from "@/components/shared/clear-cache-button";
 import { MobileSidebar } from "@/components/shared/mobile-sidebar";
+import { SearchTrigger } from "@/components/shared/search-trigger";
 import { Button } from "@/components/ui/button";
 
 async function getCurrentRate() {
@@ -61,6 +62,8 @@ export async function Topbar({
         </span>
       </div>
       <div className="flex items-center gap-2 text-xs sm:gap-3">
+        {/* Global search — opens the Ctrl+K command palette. */}
+        <SearchTrigger />
         {/* Exchange rate label is informational — hide on phones, show on md+
             where we have room. */}
         <span className="hidden text-muted-foreground md:inline">

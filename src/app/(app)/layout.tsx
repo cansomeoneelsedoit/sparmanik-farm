@@ -8,6 +8,7 @@ import { prisma } from "@/server/prisma";
 import { Sidebar } from "@/components/shared/sidebar";
 import { Topbar } from "@/components/shared/topbar";
 import { EchoWidget } from "@/components/shared/echo-widget";
+import { CommandPalette } from "@/components/shared/command-palette";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +41,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         </div>
       </div>
       {echoEnabled ? <EchoWidget /> : null}
+      {/* Global Ctrl+K search — mounted once, opened from anywhere via
+          hotkey or the topbar trigger. */}
+      <CommandPalette />
     </NuqsAdapter>
   );
 }
