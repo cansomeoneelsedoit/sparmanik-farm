@@ -8,6 +8,12 @@ import { prisma } from "@/server/prisma";
 import { auth } from "@/auth";
 import { recordAction } from "@/server/audit";
 import { consumeFifo } from "@/server/fifo";
+import {
+  rescaleBatchToSubUnits,
+  rescaleConsumptionToSubUnits,
+  type BatchScalars,
+  type ConsumptionScalars,
+} from "@/server/stock-convert";
 import { Decimal, type TransactionClient } from "@/server/decimal";
 import {
   getUploadDir,
@@ -1631,113 +1637,96 @@ export async function combineItems(input: unknown): Promise<
       const tFactor = new Decimal(target.subFactor);
       const subUnit = source.subUnit;
 
-      // --- 1. Convert TARGET's existing batches in-place ----------------
+      // --- 1+2. Convert everything to sub-units --------------------------
       // qty × subFactor       (e.g. 10 bags × 1 kg → 10 kg)
       // price ÷ subFactor     (e.g. Rp 10,000/bag ÷ 1 kg/bag → Rp 10,000/kg)
-      // Total batch cost (qty × price) stays invariant.
-      const targetBatches = await tx.batch.findMany({
-        where: { itemId: target.id },
-        select: { id: true, qty: true, price: true, amortisedCostPerUse: true },
-      });
-      for (const b of targetBatches as {
-        id: string;
-        qty: Decimal;
-        price: Decimal;
-        amortisedCostPerUse: Decimal | null;
-      }[]) {
-        await tx.batch.update({
-          where: { id: b.id },
-          data: {
-            qty: new Decimal(b.qty).times(tFactor),
-            price: new Decimal(b.price).div(tFactor),
-            amortisedCostPerUse: b.amortisedCostPerUse
-              ? new Decimal(b.amortisedCostPerUse).div(tFactor)
-              : null,
+      // Total batch cost (qty × price) stays invariant. Each batch's
+      // consumptions rescale with it — otherwise `qty − Σ consumptions`
+      // would mix sub-units with packs and invent phantom stock.
+      //
+      // ORDER MATTERS: everything already on the target converts FIRST.
+      // Source rows re-point to the target as they convert — converting
+      // the target afterwards would catch the freshly-moved rows and
+      // multiply them twice (a 3-bag usage moved as 3 kg would balloon
+      // to 75 kg on a 25 kg/pack target).
+      const convertBatchesOf = async (
+        itemId: string,
+        factor: Decimal,
+        repointTo?: string,
+      ): Promise<number> => {
+        const batches = await tx.batch.findMany({
+          where: { itemId },
+          select: {
+            id: true,
+            qty: true,
+            price: true,
+            amortisedCostPerUse: true,
+            consumptions: { select: { id: true, qty: true, unitCost: true } },
           },
         });
-      }
+        for (const b of batches as (BatchScalars & {
+          id: string;
+          consumptions: (ConsumptionScalars & { id: string })[];
+        })[]) {
+          await tx.batch.update({
+            where: { id: b.id },
+            data: {
+              ...(repointTo ? { itemId: repointTo } : {}),
+              ...rescaleBatchToSubUnits(b, factor),
+            },
+          });
+          for (const c of b.consumptions) {
+            await tx.batchConsumption.update({
+              where: { id: c.id },
+              data: rescaleConsumptionToSubUnits(c, factor),
+            });
+          }
+        }
+        return batches.length;
+      };
+      const convertUsagesAndAssetsOf = async (
+        itemId: string,
+        factor: Decimal,
+        repointTo?: string,
+      ) => {
+        const usages = await tx.harvestUsage.findMany({
+          where: { itemId },
+          select: { id: true, qty: true },
+        });
+        for (const u of usages as { id: string; qty: Decimal }[]) {
+          await tx.harvestUsage.update({
+            where: { id: u.id },
+            data: {
+              ...(repointTo ? { itemId: repointTo } : {}),
+              qty: new Decimal(u.qty).times(factor),
+            },
+          });
+        }
+        const assets = await tx.harvestAsset.findMany({
+          where: { itemId },
+          select: { id: true, qty: true },
+        });
+        for (const a of assets as { id: string; qty: Decimal }[]) {
+          // amortisedCharge is a TOTAL cost figure, not per-unit — it
+          // stays as-is; only the quantity re-denominates.
+          await tx.harvestAsset.update({
+            where: { id: a.id },
+            data: {
+              ...(repointTo ? { itemId: repointTo } : {}),
+              qty: new Decimal(a.qty).times(factor),
+            },
+          });
+        }
+      };
 
-      // --- 2. Convert SOURCE's batches + re-point to target -------------
-      const sourceBatches = await tx.batch.findMany({
-        where: { itemId: source.id },
-        select: { id: true, qty: true, price: true, amortisedCostPerUse: true },
-      });
-      for (const b of sourceBatches as {
-        id: string;
-        qty: Decimal;
-        price: Decimal;
-        amortisedCostPerUse: Decimal | null;
-      }[]) {
-        await tx.batch.update({
-          where: { id: b.id },
-          data: {
-            itemId: target.id,
-            qty: new Decimal(b.qty).times(sFactor),
-            price: new Decimal(b.price).div(sFactor),
-            amortisedCostPerUse: b.amortisedCostPerUse
-              ? new Decimal(b.amortisedCostPerUse).div(sFactor)
-              : null,
-          },
-        });
-      }
-
-      // --- 3. HarvestUsage / HarvestAsset for SOURCE ---------------------
-      // These reference itemId (no batch link required for the qty) — move
-      // them and multiply qty by source's subFactor so "used 2 source-bags"
-      // becomes "used 50 kg".
-      const sourceUsages = await tx.harvestUsage.findMany({
-        where: { itemId: source.id },
-        select: { id: true, qty: true },
-      });
-      for (const u of sourceUsages as { id: string; qty: Decimal }[]) {
-        await tx.harvestUsage.update({
-          where: { id: u.id },
-          data: { itemId: target.id, qty: new Decimal(u.qty).times(sFactor) },
-        });
-      }
-      const sourceAssets = await tx.harvestAsset.findMany({
-        where: { itemId: source.id },
-        select: { id: true, qty: true, amortisedCharge: true },
-      });
-      for (const a of sourceAssets as {
-        id: string;
-        qty: Decimal;
-        amortisedCharge: Decimal | null;
-      }[]) {
-        await tx.harvestAsset.update({
-          where: { id: a.id },
-          data: {
-            itemId: target.id,
-            qty: new Decimal(a.qty).times(sFactor),
-            // amortisedCharge is a TOTAL cost figure already, not per-unit —
-            // it stays the same (the charge was on the old pack basis).
-            amortisedCharge: a.amortisedCharge,
-          },
-        });
-      }
-
-      // --- 4. HarvestUsage / HarvestAsset for TARGET ---------------------
-      // Convert in-place too (qty × tFactor).
-      const targetUsages = await tx.harvestUsage.findMany({
-        where: { itemId: target.id },
-        select: { id: true, qty: true },
-      });
-      for (const u of targetUsages as { id: string; qty: Decimal }[]) {
-        await tx.harvestUsage.update({
-          where: { id: u.id },
-          data: { qty: new Decimal(u.qty).times(tFactor) },
-        });
-      }
-      const targetAssets = await tx.harvestAsset.findMany({
-        where: { itemId: target.id },
-        select: { id: true, qty: true },
-      });
-      for (const a of targetAssets as { id: string; qty: Decimal }[]) {
-        await tx.harvestAsset.update({
-          where: { id: a.id },
-          data: { qty: new Decimal(a.qty).times(tFactor) },
-        });
-      }
+      const targetBatchCount = await convertBatchesOf(target.id, tFactor);
+      await convertUsagesAndAssetsOf(target.id, tFactor);
+      const sourceBatchCount = await convertBatchesOf(
+        source.id,
+        sFactor,
+        target.id,
+      );
+      await convertUsagesAndAssetsOf(source.id, sFactor, target.id);
 
       // --- 5. Promote target's unit to the sub-unit, clear pack info ----
       await tx.item.update({
@@ -1765,7 +1754,7 @@ export async function combineItems(input: unknown): Promise<
         new Decimal(0),
       );
 
-      const batchesAffected = sourceBatches.length + targetBatches.length;
+      const batchesAffected = sourceBatchCount + targetBatchCount;
 
       await recordAction(tx, {
         type: "item.combined",
