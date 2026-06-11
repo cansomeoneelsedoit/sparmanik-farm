@@ -188,6 +188,32 @@ export default async function DashboardPage() {
         </div>
       </header>
 
+      {/* Quick actions — the four things staff actually do every day.
+          Big tap targets so this works one-handed on a phone in the
+          greenhouse. Everything else is reachable via the sidebar. */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <QuickAction
+          href="/inventory/receive"
+          title="Receive stock"
+          hint="Log a delivery"
+        />
+        <QuickAction
+          href="/health-check/stocktake"
+          title="Stock-take"
+          hint="Count the shelves"
+        />
+        <QuickAction
+          href="/inventory/identify"
+          title="Identify item"
+          hint="Snap a photo, find it"
+        />
+        <QuickAction
+          href="/simulator"
+          title="Simulator"
+          hint="Test a cycle's profit"
+        />
+      </div>
+
       {/* Headline strip — 2 cols on phone, 4 on tablet+ */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat
@@ -422,4 +448,33 @@ function StatMoney({
     </Card>
   );
   return href ? <Link href={href}>{body}</Link> : body;
+}
+
+/**
+ * Big tappable shortcut card for the daily-operations row at the top of
+ * the dashboard. Deliberately text-first (no icon soup) — the title is
+ * the action, the hint is the explanation for newer staff.
+ */
+function QuickAction({
+  href,
+  title,
+  hint,
+}: {
+  href: string;
+  title: string;
+  hint: string;
+}) {
+  return (
+    <Link href={href}>
+      <Card className="h-full border-accent/30 transition hover:border-accent hover:shadow-md">
+        <CardContent className="flex h-full flex-col justify-center gap-0.5 p-4">
+          <div className="flex items-center gap-1.5 text-sm font-semibold">
+            {title}
+            <ArrowUpRight className="h-3.5 w-3.5 text-muted-foreground" />
+          </div>
+          <p className="text-xs text-muted-foreground">{hint}</p>
+        </CardContent>
+      </Card>
+    </Link>
+  );
 }

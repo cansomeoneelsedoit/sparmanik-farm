@@ -15,6 +15,7 @@ import {
   HeartPulse,
   LayoutDashboard,
   Leaf,
+  ListChecks,
   MessageSquare,
   Package,
   PlayCircle,
@@ -126,6 +127,15 @@ export function SidebarContent({
           // The flag icon stays whether or not we have a count, but the
           // count chip only renders when there's something pending.
           badge: openTaskCount,
+        },
+        // Stock-take was previously only reachable through Health check —
+        // but it's a primary weekly workflow, so it earns a first-class
+        // nav entry.
+        {
+          key: "stocktake",
+          href: "/health-check/stocktake",
+          fallback: "Stock-take",
+          icon: ListChecks,
         },
       ],
     },
