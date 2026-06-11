@@ -18,6 +18,7 @@ import {
 import { Money } from "@/components/shared/money";
 import { ReceiveStockDialog } from "@/app/(app)/inventory/[itemId]/receive-stock-dialog";
 import { UseStockDialog } from "@/app/(app)/inventory/[itemId]/use-stock-dialog";
+import { SellStockDialog } from "@/app/(app)/inventory/[itemId]/sell-stock-dialog";
 import { NewItemDialog } from "@/app/(app)/inventory/new-item-dialog";
 import { DeleteItemButton } from "@/app/(app)/inventory/[itemId]/item-actions";
 import { DeleteBatchButton } from "@/app/(app)/inventory/[itemId]/batch-actions";
@@ -68,6 +69,19 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
             returned: true,
             supplier: { select: { id: true, name: true } },
             consumptions: { select: { qty: true } },
+          },
+        },
+        stockSales: {
+          orderBy: { date: "desc" },
+          take: 20,
+          select: {
+            id: true,
+            date: true,
+            qty: true,
+            amount: true,
+            cogs: true,
+            buyer: true,
+            note: true,
           },
         },
       },
@@ -201,6 +215,13 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
             defaultSupplierId={item.defaultSupplierId ?? undefined}
           />
           <UseStockDialog itemId={item.id} maxQty={totalStock.toString()} unit={item.unit} />
+          <SellStockDialog
+            itemId={item.id}
+            itemUnit={item.unit}
+            itemSubUnit={item.subUnit}
+            itemSubFactor={item.subFactor ? Number(item.subFactor) : null}
+            maxPacks={totalStock.toString()}
+          />
           <NewItemDialog
             trigger={<Button variant="outline">Edit</Button>}
             categories={categories.map((c: { id: string; name: string }) => ({ id: c.id, name: c.name }))}
@@ -434,6 +455,80 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
                       <TableCell className="text-right"><Money value={avg.toFixed(4)} /></TableCell>
                       <TableCell className="text-muted-foreground">
                         {s.lastDate ? s.lastDate.toISOString().slice(0, 10) : "—"}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {item.stockSales.length > 0 ? (
+        <Card>
+          <CardContent className="p-0">
+            <div className="border-b px-4 py-3">
+              <h2 className="font-medium">Stock sales</h2>
+              <p className="text-xs text-muted-foreground">
+                Direct sales of this item to buyers — outside any greenhouse
+                cycle. Profit = what they paid − FIFO cost.
+              </p>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Buyer</TableHead>
+                  <TableHead className="text-right">Qty</TableHead>
+                  <TableHead className="text-right">Paid</TableHead>
+                  <TableHead className="text-right">Cost</TableHead>
+                  <TableHead className="text-right">Profit</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(item.stockSales as {
+                  id: string;
+                  date: Date;
+                  qty: Decimal;
+                  amount: Decimal;
+                  cogs: Decimal;
+                  buyer: string | null;
+                  note: string | null;
+                }[]).map((s) => {
+                  const profit = new Decimal(s.amount).minus(s.cogs);
+                  const qtyLabel =
+                    item.subFactor && item.subUnit
+                      ? `${new Decimal(s.qty).times(item.subFactor).toFixed(0)} ${item.subUnit}`
+                      : `${Number(s.qty)} ${item.unit}`;
+                  return (
+                    <TableRow key={s.id}>
+                      <TableCell className="text-muted-foreground">
+                        {s.date.toISOString().slice(0, 10)}
+                      </TableCell>
+                      <TableCell>
+                        {s.buyer ?? "—"}
+                        {s.note ? (
+                          <span className="ml-2 text-xs text-muted-foreground">
+                            {s.note}
+                          </span>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="text-right">{qtyLabel}</TableCell>
+                      <TableCell className="text-right">
+                        <Money value={s.amount.toFixed(4)} />
+                      </TableCell>
+                      <TableCell className="text-right text-muted-foreground">
+                        <Money value={s.cogs.toFixed(4)} />
+                      </TableCell>
+                      <TableCell
+                        className={
+                          profit.gte(0)
+                            ? "text-right font-medium text-emerald-700"
+                            : "text-right font-medium text-rose-700"
+                        }
+                      >
+                        <Money value={profit.toFixed(4)} />
                       </TableCell>
                     </TableRow>
                   );

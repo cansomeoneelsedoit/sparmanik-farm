@@ -167,6 +167,7 @@ model Organization {
   expenses        Expense[]
   labourTasks     LabourTask[]
   aiProviderKeys  AiProviderKey[]
+  stockSales      StockSale[]
 
   @@map("organizations")
 }
@@ -340,6 +341,7 @@ model Item {
   batches          Batch[]
   harvestAssets    HarvestAsset[]
   harvestUsages    HarvestUsage[]
+  stockSales       StockSale[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -394,16 +396,50 @@ model BatchConsumption {
   unitCost        Decimal  @db.Decimal(18, 4) @map("unit_cost")
   harvestAssetId  String?  @map("harvest_asset_id")
   harvestUsageId  String?  @map("harvest_usage_id")
+  stockSaleId     String?  @map("stock_sale_id")
   consumedAt      DateTime @default(now()) @map("consumed_at")
 
   batch         Batch         @relation(fields: [batchId], references: [id], onDelete: Cascade)
   harvestAsset  HarvestAsset? @relation(fields: [harvestAssetId], references: [id], onDelete: Cascade)
   harvestUsage  HarvestUsage? @relation(fields: [harvestUsageId], references: [id], onDelete: Cascade)
+  stockSale     StockSale?    @relation(fields: [stockSaleId], references: [id], onDelete: Cascade)
 
   @@index([batchId])
   @@index([harvestAssetId])
   @@index([harvestUsageId])
+  @@index([stockSaleId])
   @@map("batch_consumptions")
+}
+
+// ---------- Off-harvest stock sales ----------
+// Selling inventory directly to a buyer (e.g. 10 m of drip pipe to a
+// neighbour) — not produce from a greenhouse cycle. Consumes stock via the
+// same FIFO ledger as installs/usages, with a cost snapshot so Financials
+// can show profit = amount − cogs without re-deriving.
+model StockSale {
+  id             String   @id @default(cuid())
+  organizationId String?  @map("organization_id")
+  itemId         String   @map("item_id")
+  date           DateTime @db.Date
+  /** Quantity sold, in PACK units (the canonical Batch unit). */
+  qty            Decimal  @db.Decimal(18, 4)
+  /** What the buyer paid, total IDR. */
+  amount         Decimal  @db.Decimal(18, 4)
+  /** FIFO cost of the sold qty, snapshotted at sale time. */
+  cogs           Decimal  @db.Decimal(18, 4)
+  /** Free-text buyer name — "Pak Budi". Optional by design; upgrade to a
+   * Buyer entity later if reselling becomes a real side business. */
+  buyer          String?
+  note           String?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization?      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  item         Item               @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  consumptions BatchConsumption[]
+
+  @@index([organizationId])
+  @@index([itemId, date])
+  @@map("stock_sales")
 }
 
 // ---------- Harvests ----------

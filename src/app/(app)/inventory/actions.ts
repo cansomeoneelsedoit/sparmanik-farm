@@ -1226,6 +1226,113 @@ export async function deleteItems(ids: string[]): Promise<ActionResult<{ deleted
 }
 
 // ============================================================================
+// Off-harvest stock sale — sell inventory directly to a buyer
+// ============================================================================
+
+const sellStockSchema = z.object({
+  itemId: z.string().min(1),
+  date: z.string().min(1),
+  /** Quantity in PACK units — the dialog converts sub-units before calling. */
+  qty: z.string().regex(/^[0-9.]+$/, "Number"),
+  /** Total the buyer paid, IDR. */
+  amount: z.string().regex(/^[0-9.]+$/, "Number"),
+  buyer: z.string().max(200).optional(),
+  note: z.string().max(1000).optional(),
+});
+
+/**
+ * Sell stock straight out of inventory ("10 m of drip pipe to Pak Budi") —
+ * no greenhouse involved. Consumes via the same FIFO ledger as installs,
+ * snapshots the cost (cogs) at sale time, and audit-logs for one-click
+ * undo. Financials picks the revenue up as "Stock resale".
+ */
+export async function sellStock(input: unknown): Promise<
+  ActionResult<{ saleId: string; cogs: string; profit: string }>
+> {
+  const parsed = sellStockSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Validation failed" };
+  const qty = new Decimal(parsed.data.qty);
+  const amount = new Decimal(parsed.data.amount);
+  if (qty.lte(0)) return { ok: false, error: "Quantity must be above zero" };
+  if (amount.lte(0)) return { ok: false, error: "Sale amount must be above zero" };
+  const uid = await userId();
+  try {
+    const result = await prisma.$transaction(async (tx: TransactionClient) => {
+      const { consumed, totalCost } = await consumeFifo(
+        tx,
+        parsed.data.itemId,
+        parsed.data.qty,
+      );
+      const sale = await tx.stockSale.create({
+        data: {
+          itemId: parsed.data.itemId,
+          date: new Date(parsed.data.date),
+          qty,
+          amount,
+          cogs: new Decimal(totalCost),
+          buyer: parsed.data.buyer?.trim() || null,
+          note: parsed.data.note?.trim() || null,
+        },
+      });
+      const consumptionIds: string[] = [];
+      for (const c of consumed) {
+        const cc = await tx.batchConsumption.create({
+          data: {
+            batchId: c.batchId,
+            qty: new Decimal(c.qty),
+            unitCost: new Decimal(c.unitCost),
+            stockSaleId: sale.id,
+          },
+        });
+        consumptionIds.push(cc.id);
+      }
+      await recordAction(tx, {
+        type: "inventory.stock_sale",
+        entityType: "StockSale",
+        entityId: sale.id,
+        description: `Sold ${qty.toString()} of stock${parsed.data.buyer ? ` to ${parsed.data.buyer.trim()}` : ""}`,
+        userId: uid,
+        payload: {
+          stockSaleId: sale.id,
+          itemId: parsed.data.itemId,
+          consumptionIds,
+          amount: amount.toString(),
+          cogs: totalCost,
+        },
+      });
+      return { saleId: sale.id, cogs: totalCost };
+    });
+    revalidatePath(`/inventory/${parsed.data.itemId}`);
+    revalidatePath("/inventory");
+    revalidatePath("/financials");
+    const profit = amount.minus(new Decimal(result.cogs));
+    return {
+      ok: true,
+      data: { saleId: result.saleId, cogs: result.cogs, profit: profit.toFixed(2) },
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Sale failed" };
+  }
+}
+
+/** Delete a stock sale — consumptions cascade, so stock returns to shelf. */
+export async function deleteStockSale(id: string): Promise<ActionResult> {
+  try {
+    const sale = await prisma.stockSale.findFirst({
+      where: { id },
+      select: { itemId: true },
+    });
+    if (!sale) return { ok: false, error: "Sale not found" };
+    await prisma.stockSale.delete({ where: { id } });
+    revalidatePath(`/inventory/${sale.itemId}`);
+    revalidatePath("/financials");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Delete failed" };
+  }
+}
+
+// ============================================================================
 // Merge two items (consolidate duplicates from different suppliers)
 // ============================================================================
 

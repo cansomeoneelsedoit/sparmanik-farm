@@ -33,12 +33,24 @@ function effectiveRateFromCache(
 }
 
 export default async function FinancialsPage() {
-  // --- Revenue: every Sale.amount. ---
-  const sales = await prisma.sale.findMany({ select: { amount: true } });
-  const revenue = sales.reduce(
+  // --- Revenue: produce sales (greenhouse cycles) + direct stock sales. ---
+  const [sales, stockSales] = await Promise.all([
+    prisma.sale.findMany({ select: { amount: true } }),
+    prisma.stockSale.findMany({ select: { amount: true, cogs: true } }),
+  ]);
+  const produceRevenue = sales.reduce(
     (s: Decimal, x: { amount: Decimal }) => s.plus(x.amount),
     new Decimal(0),
   );
+  // Direct inventory resales ("10 m of pipe to Pak Budi"). Their COST is
+  // already inside cogsConsumed below — sale consumptions live in the same
+  // FIFO ledger — so adding the revenue here keeps the accrual math clean
+  // with zero double-counting.
+  const stockSaleRevenue = (stockSales as { amount: Decimal; cogs: Decimal }[]).reduce(
+    (s: Decimal, x) => s.plus(x.amount),
+    new Decimal(0),
+  );
+  const revenue = produceRevenue.plus(stockSaleRevenue);
 
   // --- COGS (accrual): cost of inventory ACTUALLY CONSUMED.
   // Sum BatchConsumption.qty * unitCost across the whole business. This is
@@ -248,7 +260,21 @@ export default async function FinancialsPage() {
           </p>
         </CardHeader>
         <CardContent className="space-y-3 p-6 text-sm">
-          <Row label="Revenue (sales across all greenhouses)" value={revenue.toFixed(4)} positive />
+          <Section title="Revenue">
+            <Row
+              label="Produce sales (greenhouse cycles)"
+              value={produceRevenue.toFixed(4)}
+              positive
+              indent
+            />
+            <Row
+              label="Stock resales (inventory sold directly to buyers)"
+              value={stockSaleRevenue.toFixed(4)}
+              positive
+              indent
+            />
+            <Row label="Total revenue" value={revenue.toFixed(4)} positive bold />
+          </Section>
           <Section title="Cost of goods sold">
             <Row
               label="Inventory consumed (Σ FIFO consumption cost)"

@@ -33,6 +33,7 @@ const ORG_SCOPED_MODELS = new Set([
   "Expense",
   "LabourTask",
   "AiProviderKey",
+  "StockSale",
 ]);
 
 const READ_OPS = new Set([

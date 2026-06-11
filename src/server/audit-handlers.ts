@@ -24,6 +24,13 @@ export function registerAllUndoHandlers() {
     await tx.batchConsumption.deleteMany({ where: { id: { in: ids } } });
   });
 
+  // Inventory: stock_sale — delete the sale; its consumptions cascade via
+  // the FK, so the sold quantity lands back on the shelf.
+  registerUndoHandler("inventory.stock_sale", async (tx, action) => {
+    const saleId = (action.payload.stockSaleId as string) ?? action.entityId;
+    await tx.stockSale.delete({ where: { id: saleId } });
+  });
+
   // Item create — delete the item.
   registerUndoHandler("item.create", async (tx, action) => {
     await tx.item.delete({ where: { id: action.entityId } });
