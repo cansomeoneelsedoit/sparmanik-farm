@@ -56,6 +56,7 @@ next-env.d.ts
 # include prod data and pg_dump's connection-string-derived strings.
 prod-backup-*.sql
 tmp-sync/
+backups/
 
 
 # Local pre-merge data backup (contains data; never commit)

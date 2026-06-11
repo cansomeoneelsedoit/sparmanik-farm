@@ -160,7 +160,12 @@ async function main() {
       "--no-privileges",
       PROD_URL,
     ],
-    { stdio: ["ignore", "pipe", "inherit"] },
+    {
+      stdio: ["ignore", "pipe", "inherit"],
+      // Photos live in the dump now — the default 1 MB maxBuffer would
+      // kill the backup step. Allow up to 1 GB.
+      maxBuffer: 1024 * 1024 * 1024,
+    },
   );
   if (dumpProd.status !== 0) {
     console.error(
