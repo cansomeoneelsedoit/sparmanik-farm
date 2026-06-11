@@ -27,19 +27,31 @@ import {
 export function StocktakeClient({
   items,
   categories,
+  initialFocus,
 }: {
   items: StocktakeItem[];
   categories: { id: string; name: string }[];
+  /** "packinfo" (from the Health Check card) starts the wizard filtered
+   *  to items that still have no pack size set. */
+  initialFocus?: "packinfo" | null;
 }) {
   const t = useTranslations("stocktake");
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [showCounted, setShowCounted] = useState(false);
+  const [packOnly, setPackOnly] = useState(initialFocus === "packinfo");
+
+  const packCandidateCount = useMemo(
+    () => items.filter((i) => i.packCandidate).length,
+    [items],
+  );
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return items
-      .filter((i) => (showCounted ? true : !i.done))
+      // Pack-info mode ignores the counted/un-counted split: an item can be
+      // counted yet still missing its pack size.
+      .filter((i) => (packOnly ? i.packCandidate : showCounted ? true : !i.done))
       .filter((i) => !categoryFilter || i.categoryId === categoryFilter)
       .filter((i) => {
         if (!q) return true;
@@ -50,7 +62,7 @@ export function StocktakeClient({
           (i.subUnit ?? "").toLowerCase().includes(q)
         );
       });
-  }, [items, search, showCounted, categoryFilter]);
+  }, [items, search, showCounted, categoryFilter, packOnly]);
 
   // Push counted items to the bottom so the queue is "what to do next" first.
   const ordered = useMemo(
@@ -120,6 +132,15 @@ export function StocktakeClient({
             </Button>
           ))}
         </div>
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={packOnly}
+            onChange={(e) => setPackOnly(e.target.checked)}
+            className="h-4 w-4"
+          />
+          {t("packOnly", { count: packCandidateCount })}
+        </label>
         <label className="flex items-center gap-2 text-xs text-muted-foreground">
           <input
             type="checkbox"

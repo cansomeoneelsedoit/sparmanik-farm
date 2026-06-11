@@ -33,7 +33,8 @@
     "financialsTotal": "Keuangan Total Bisnis",
     "settings": "Pengaturan",
     "healthCheck": "Pemeriksaan kesehatan",
-    "askAi": "Tanya AI"
+    "askAi": "Tanya AI",
+    "shopping": "Daftar belanja"
   },
   "topbar": {
     "rateLabel": "Kurs",
@@ -56,6 +57,7 @@
     "searchPlaceholder": "Cari barang: nama, kode, atau satuan…",
     "allCategories": "Semua",
     "showCounted": "Tampilkan yang sudah dihitung ({count})",
+    "packOnly": "Belum ada info kemasan ({count})",
     "noMatches": "Tidak ada barang yang cocok dengan pencarian ini.",
     "allCounted": "Semua barang sudah dihitung ✓ — centang “Tampilkan yang sudah dihitung” untuk menghitung ulang.",
     "showingOf": "Menampilkan {shown} dari {total} barang",
@@ -156,6 +158,26 @@
     "receivedToast": "{count} batch diterima",
     "needLine": "Tambahkan minimal satu baris dengan barang dan jumlah > 0",
     "createdToast": "“{name}” dibuat"
+  },
+  "shopping": {
+    "title": "Daftar belanja",
+    "intro": "Semua barang yang stoknya sudah di bawah batas pesan, dikelompokkan per pemasok. Salin daftarnya, tempel langsung ke WhatsApp.",
+    "empty": "Tidak ada yang perlu dipesan — semua stok masih di atas batas pesan.",
+    "emptyTip": "Tips: buka barang → Ubah → isi “Batas pesan”. Barang akan muncul di sini saat stoknya turun ke batas itu.",
+    "noSupplier": "Belum ada pemasok",
+    "copyGroup": "Salin daftar",
+    "copyAll": "Salin semua",
+    "copiedToast": "Tersalin — siap ditempel ke WhatsApp",
+    "colItem": "Barang",
+    "colStock": "Stok",
+    "colReorder": "Batas pesan",
+    "colOrder": "Pesan",
+    "tierOut": "Stok habis",
+    "tierCritical": "Kritis",
+    "tierLow": "Menipis",
+    "tierBelow": "Di bawah batas",
+    "copyTitle": "Pesanan — {supplier} ({date})",
+    "copyLineStock": "sisa {remaining}"
   },
   "tasks": {
     "title": "Tugas",

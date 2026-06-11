@@ -23,6 +23,9 @@ export type StocktakeItem = {
   subUnit: string | null;
   subFactor: string | null;
   categoryId: string | null;
+  /** True when the item still has no pack size set and isn't obvious
+   *  equipment — the `?focus=packinfo` queue. */
+  packCandidate: boolean;
   photoPath: string | null;
   /** Pre-formatted "current stock in packs" string from the server. */
   currentPacksStr: string;

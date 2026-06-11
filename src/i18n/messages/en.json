@@ -33,7 +33,8 @@
     "financialsTotal": "Total Business Financials",
     "settings": "Settings",
     "healthCheck": "Health check",
-    "askAi": "Ask AI"
+    "askAi": "Ask AI",
+    "shopping": "Shopping list"
   },
   "topbar": {
     "rateLabel": "Rate",
@@ -56,6 +57,7 @@
     "searchPlaceholder": "Search items by name, code, or unit…",
     "allCategories": "All",
     "showCounted": "Show counted ({count})",
+    "packOnly": "Missing pack info ({count})",
     "noMatches": "No items match this search.",
     "allCounted": "All items counted ✓ — toggle “Show counted” if you want to re-count.",
     "showingOf": "Showing {shown} of {total} items",
@@ -156,6 +158,26 @@
     "receivedToast": "{count, plural, one {Received # batch} other {Received # batches}}",
     "needLine": "Add at least one line with an item and qty > 0",
     "createdToast": "Created “{name}”"
+  },
+  "shopping": {
+    "title": "Shopping list",
+    "intro": "Everything at or below its reorder level, grouped by supplier. Copy a list and paste it straight into WhatsApp.",
+    "empty": "Nothing needs ordering — all tracked stock is above its reorder level.",
+    "emptyTip": "Tip: open an item → Edit → set “Reorder at”. Items appear here when stock falls to that level.",
+    "noSupplier": "No supplier set",
+    "copyGroup": "Copy list",
+    "copyAll": "Copy everything",
+    "copiedToast": "Copied — ready to paste into WhatsApp",
+    "colItem": "Item",
+    "colStock": "On hand",
+    "colReorder": "Reorder at",
+    "colOrder": "Order",
+    "tierOut": "Out of stock",
+    "tierCritical": "Critical",
+    "tierLow": "Low",
+    "tierBelow": "Below reorder",
+    "copyTitle": "Order — {supplier} ({date})",
+    "copyLineStock": "on hand {remaining}"
   },
   "tasks": {
     "title": "Tasks",

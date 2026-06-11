@@ -6,6 +6,14 @@ import { type StocktakeItem } from "@/app/(app)/health-check/stocktake/stocktake
 export const dynamic = "force-dynamic";
 
 /**
+ * Obvious equipment — scales, tanks, pumps, full kits — never needs pack
+ * info, so the "missing pack info" focus mode skips it. Same skip-list the
+ * backfill script (scripts/backfill-pack-info.mjs) used.
+ */
+const EQUIPMENT =
+  /timbangan|\bscale\b|toren|tandon|tangki|\btank\b|mesin|pompa|\bpump\b|aquaponik|hidroponik set|set lengkap|set premium|planter bag|grow light|growlight|lampu|sprayer/i;
+
+/**
  * Stock-take wizard. Walks the org's items, captures pack-info + actual
  * on-hand counts for each. Per-item save via the `applyStocktake` server
  * action; pure additive — never deletes anything irreversible.
@@ -13,8 +21,16 @@ export const dynamic = "force-dynamic";
  * "Done" = item has at least one `inventory.stocktake` audit entry. Used
  * to drop completed items below the un-counted queue so the user always
  * sees the next-thing-to-do at the top.
+ *
+ * `?focus=packinfo` (linked from the Health Check card) starts the wizard
+ * filtered to items that still have no pack size set, equipment excluded.
  */
-export default async function StocktakePage() {
+export default async function StocktakePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ focus?: string }>;
+}) {
+  const { focus } = await searchParams;
   const [items, categories, doneAudits] = await Promise.all([
     prisma.item.findMany({
       orderBy: { name: "asc" },
@@ -89,6 +105,8 @@ export default async function StocktakePage() {
       subUnit: i.subUnit,
       subFactor: i.subFactor ? i.subFactor.toString() : null,
       categoryId: i.categoryId ?? null,
+      packCandidate:
+        !i.subFactor && !!i.name?.trim() && !EQUIPMENT.test(i.name),
       photoPath: i.photoPath ?? null,
       currentPacksStr: currentPacks.toFixed(2),
       currentSubStr: subQty ? subQty.toFixed(0) : currentPacks.toFixed(2),
@@ -103,6 +121,7 @@ export default async function StocktakePage() {
         id: c.id,
         name: c.name,
       }))}
+      initialFocus={focus === "packinfo" ? "packinfo" : null}
     />
   );
 }

@@ -24,7 +24,7 @@ const id = JSON.parse(readFileSync(path.join(ROOT, "src/i18n/messages/id.json"),
 const PARAMS = {
   count: 2, shown: 3, total: 9, max: "9", unit: "kg", sub: "kg",
   name: "Contoh", price: "1.000", date: "2026-06-12", supplier: "Toko",
-  n: 5, amount: "10.000",
+  n: 5, amount: "10.000", remaining: "5",
 };
 
 function* walk(dir) {

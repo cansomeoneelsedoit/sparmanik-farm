@@ -140,6 +140,16 @@ export function HealthCheckCard({ check }: { check: HealthCheckResult }) {
 
       {open ? (
         <CardContent className="space-y-3">
+          {/* Bulk-fix deep link (e.g. stock-take wizard pre-filtered) */}
+          {check.actionHref && check.count > 0 ? (
+            <Button asChild size="sm" variant="default">
+              <Link href={check.actionHref}>
+                {check.actionLabel ?? "Fix these"}
+                <ExternalLink className="h-3.5 w-3.5" />
+              </Link>
+            </Button>
+          ) : null}
+
           {/* Get AI suggestions */}
           {check.fixWith ? (
             <div className="flex flex-wrap items-center gap-3">

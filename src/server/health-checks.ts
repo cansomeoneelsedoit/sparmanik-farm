@@ -38,6 +38,10 @@ export type HealthCheckResult = {
   fixWith: string | null;
   /** True if the check has zero issues — keeps the UI's "All clear" state simple. */
   clean: boolean;
+  /** Optional bulk-fix deep link rendered as a button on the card —
+   * e.g. "open the stock-take wizard pre-filtered to these items". */
+  actionHref?: string;
+  actionLabel?: string;
 };
 
 /** Items in the org that have no category set — usually legacy seeds. */
@@ -459,7 +463,7 @@ async function checkLikelyPacksMissingPackInfo(): Promise<HealthCheckResult> {
     id: "missing-pack-info",
     title: "Likely packs missing pack info",
     description:
-      "Items whose name says 'roll', 'meter', 'isi 500', 'benih', 'pcs', etc., but the system doesn't know how many sub-units fit in one pack. Open each row in the stock-take wizard and turn on 'Sold as a pack used in fractions' so you can install / consume / sell by the metre or piece.",
+      "Items whose name says 'roll', 'meter', 'isi 500', 'benih', 'pcs', etc., but the system doesn't know how many sub-units fit in one pack. Without it, a 100 m roll installs as '1 pc' instead of '30 metres'. The button below opens the stock-take wizard filtered to every item still missing pack info — set the sub-unit and pack size inline, row by row.",
     severity: count > 0 ? "warn" : "info",
     count,
     items: rows.map((r) => ({
@@ -470,6 +474,8 @@ async function checkLikelyPacksMissingPackInfo(): Promise<HealthCheckResult> {
     })),
     fixWith: "name",
     clean: count === 0,
+    actionHref: "/health-check/stocktake?focus=packinfo",
+    actionLabel: "Fix inline in the stock-take wizard",
   };
 }
 
