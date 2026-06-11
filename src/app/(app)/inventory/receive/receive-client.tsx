@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { Plus, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -69,6 +70,8 @@ export function ReceiveStockClient({
   itemHistory: Record<string, ItemHistory>;
   supplierHistory: Record<string, SupplierChip[]>;
 }) {
+  const t = useTranslations("receive");
+  const tc = useTranslations("common");
   const router = useRouter();
   const [items, setItems] = useState<ItemOpt[]>(initialItems);
   const [suppliers, setSuppliers] = useState<SupplierOpt[]>(initialSuppliers);
@@ -100,7 +103,7 @@ export function ReceiveStockClient({
    * empty line if the current first row is blank, otherwise appends. */
   function quickAddFromHistory(chip: SupplierChip) {
     if (usedItemIds.has(chip.itemId)) {
-      toast.error(`${chip.itemName} is already on the receipt`);
+      toast.error(t("alreadyOnReceipt", { name: chip.itemName }));
       return;
     }
     const emptyIdx = lines.findIndex((l) => !l.itemId);
@@ -136,7 +139,7 @@ export function ReceiveStockClient({
       };
       setItems((prev) => [...prev, newItem].sort((a, b) => a.name.localeCompare(b.name)));
       updateLine(idx, { itemId: newItem.id });
-      toast.success(`Created "${newItem.name}"`);
+      toast.success(t("createdToast", { name: newItem.name }));
     } else if (!r.ok) {
       toast.error(r.error);
     }
@@ -148,7 +151,7 @@ export function ReceiveStockClient({
       const newSup: SupplierOpt = { id: r.data.id, name: r.data.name };
       setSuppliers((prev) => [...prev, newSup].sort((a, b) => a.name.localeCompare(b.name)));
       setSupplierId(newSup.id);
-      toast.success(`Created "${newSup.name}"`);
+      toast.success(t("createdToast", { name: newSup.name }));
     } else if (!r.ok) {
       toast.error(r.error);
     }
@@ -178,7 +181,7 @@ export function ReceiveStockClient({
   function handleSubmit() {
     const validLines = lines.filter((l) => l.itemId && Number(l.qty) > 0);
     if (validLines.length === 0) {
-      toast.error("Add at least one line with an item and qty > 0");
+      toast.error(t("needLine"));
       return;
     }
     startTransition(async () => {
@@ -204,9 +207,7 @@ export function ReceiveStockClient({
         }),
       });
       if (r.ok && r.data) {
-        toast.success(
-          `Received ${r.data.lineCount} batch${r.data.lineCount === 1 ? "" : "es"}`,
-        );
+        toast.success(t("receivedToast", { count: r.data.lineCount }));
         router.push("/inventory");
         router.refresh();
       } else if (!r.ok) {
@@ -225,16 +226,19 @@ export function ReceiveStockClient({
       const h = itemHistory[i.id];
       const packTag =
         i.subUnit && i.subFactor && i.subFactor > 0
-          ? `${i.unit} of ${i.subFactor} ${i.subUnit}`
+          ? t("packOf", { unit: i.unit, n: i.subFactor, sub: i.subUnit })
           : i.unit;
       let desc = packTag;
       if (h) {
         const sup = h.lastSupplierId ? supById.get(h.lastSupplierId) : null;
-        desc = `${packTag} · last: ${h.lastPrice}${sup ? ` from ${sup}` : ""} (${h.lastDate})`;
+        const last = sup
+          ? t("lastWithSupplier", { price: h.lastPrice, supplier: sup, date: h.lastDate })
+          : t("lastNoSupplier", { price: h.lastPrice, date: h.lastDate });
+        desc = `${packTag} · ${last}`;
       }
       return { value: i.id, label: i.name, description: desc };
     });
-  }, [items, suppliers, itemHistory]);
+  }, [items, suppliers, itemHistory, t]);
 
   return (
     <>
@@ -246,25 +250,25 @@ export function ReceiveStockClient({
             <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[10px] font-bold text-accent-foreground">
               1
             </span>
-            Who and when
+            {t("step1")}
           </div>
           <div className="grid gap-3 sm:grid-cols-[1fr_2fr_1fr]">
             <div className="space-y-1.5">
-              <Label className="text-xs">Date</Label>
+              <Label className="text-xs">{t("dateLabel")}</Label>
               <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Supplier</Label>
+              <Label className="text-xs">{t("supplierLabel")}</Label>
               <Combobox
                 value={supplierId}
                 onChange={(v) => setSupplierId(v)}
-                placeholder="Pick or type to create"
+                placeholder={t("supplierPlaceholder")}
                 options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
                 onCreate={handleCreateSupplier}
               />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Exchange rate (IDR/AUD)</Label>
+              <Label className="text-xs text-muted-foreground">{t("exchangeRate")}</Label>
               <Input
                 type="number"
                 step="any"
@@ -284,7 +288,7 @@ export function ReceiveStockClient({
           <CardContent className="space-y-2 p-4">
             <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
               <Sparkles className="h-3.5 w-3.5" />
-              Previously bought from this supplier
+              {t("prevFromSupplier")}
             </div>
             <div className="flex flex-wrap gap-1.5">
               {prevFromSupplier.map((chip) => {
@@ -301,7 +305,11 @@ export function ReceiveStockClient({
                         ? "cursor-not-allowed border-dashed bg-muted/40 text-muted-foreground/60 line-through"
                         : "border-accent/40 bg-accent/10 text-foreground hover:border-accent hover:bg-accent/20",
                     )}
-                    title={`Last bought ${chip.lastDate} at ${chip.lastPrice} per ${chip.unit}`}
+                    title={t("chipTitle", {
+                      date: chip.lastDate,
+                      price: chip.lastPrice,
+                      unit: chip.unit,
+                    })}
                   >
                     {chip.itemName}
                     <span className="ml-1.5 text-[10px] text-muted-foreground">
@@ -311,9 +319,7 @@ export function ReceiveStockClient({
                 );
               })}
             </div>
-            <p className="text-[10px] text-muted-foreground">
-              Click any to add a line pre-filled with the last unit price.
-            </p>
+            <p className="text-[10px] text-muted-foreground">{t("prevHint")}</p>
           </CardContent>
         </Card>
       ) : null}
@@ -328,10 +334,10 @@ export function ReceiveStockClient({
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[10px] font-bold text-accent-foreground">
                 2
               </span>
-              What you received
+              {t("step2")}
             </div>
             <Button type="button" size="sm" variant="outline" onClick={() => addLine()}>
-              <Plus className="h-3.5 w-3.5" /> Add line
+              <Plus className="h-3.5 w-3.5" /> {t("addLine")}
             </Button>
           </div>
 
@@ -346,7 +352,7 @@ export function ReceiveStockClient({
                   <Combobox
                     value={line.itemId}
                     onChange={(v) => pickItem(idx, v)}
-                    placeholder="Search items (type to create new)"
+                    placeholder={t("itemPlaceholder")}
                     options={itemOptions}
                     onCreate={(typed) => handleCreateItem(idx, typed)}
                   />
@@ -359,13 +365,13 @@ export function ReceiveStockClient({
                       onChange={(e) => updateLine(idx, { qty: e.target.value })}
                       placeholder={
                         item?.subUnit && item.subFactor
-                          ? `qty (${item.subUnit})`
-                          : "qty"
+                          ? t("qtySubPlaceholder", { sub: item.subUnit })
+                          : t("qtyPlaceholder")
                       }
                       title={
                         item?.subUnit && item.subFactor
-                          ? `Quantity in ${item.subUnit}`
-                          : "Quantity"
+                          ? t("qtySubTitle", { sub: item.subUnit })
+                          : t("qtyTitle")
                       }
                     />
                     {item?.subFactor &&
@@ -385,9 +391,11 @@ export function ReceiveStockClient({
                       value={line.price}
                       onChange={(e) => updateLine(idx, { price: e.target.value })}
                       placeholder={
-                        item ? `IDR / ${item.unit}` : "unit price"
+                        item
+                          ? t("priceItemPlaceholder", { unit: item.unit })
+                          : t("pricePlaceholder")
                       }
-                      title="Unit price (per pack)"
+                      title={t("priceTitle")}
                     />
                     {item?.subFactor &&
                     item.subFactor > 0 &&
@@ -423,8 +431,8 @@ export function ReceiveStockClient({
                           });
                         }
                       }}
-                      placeholder="line total (Rp)"
-                      title="Total paid for this line"
+                      placeholder={t("lineTotalPlaceholder")}
+                      title={t("lineTotalTitle")}
                     />
                   </div>
                   <div className="flex h-9 items-center gap-2 rounded-md border bg-muted/20 px-2.5">
@@ -432,7 +440,7 @@ export function ReceiveStockClient({
                       checked={line.reusable}
                       onCheckedChange={(v) => updateLine(idx, { reusable: v })}
                     />
-                    <span className="text-xs text-muted-foreground">Reusable</span>
+                    <span className="text-xs text-muted-foreground">{t("reusable")}</span>
                     {line.reusable ? (
                       <Input
                         type="number"
@@ -441,8 +449,8 @@ export function ReceiveStockClient({
                         value={line.maxUses}
                         onChange={(e) => updateLine(idx, { maxUses: e.target.value })}
                         className="h-7 w-14"
-                        placeholder="uses"
-                        title="Max uses"
+                        placeholder={t("maxUsesPlaceholder")}
+                        title={t("maxUsesTitle")}
                       />
                     ) : null}
                   </div>
@@ -452,13 +460,13 @@ export function ReceiveStockClient({
                     variant="ghost"
                     onClick={() => removeLine(idx)}
                     disabled={lines.length === 1}
-                    title="Remove this line"
+                    title={t("removeLine")}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                   {item && line.reusable && Number(line.price) > 0 && Number(line.maxUses) > 0 ? (
                     <div className="col-span-full -mt-1 text-[10px] text-muted-foreground sm:col-span-5">
-                      Cost per use:{" "}
+                      {t("costPerUse")}{" "}
                       <strong className="text-foreground">
                         {(Number(line.price) / Number(line.maxUses)).toFixed(2)}
                       </strong>
@@ -473,16 +481,18 @@ export function ReceiveStockClient({
 
       <div className="sticky bottom-0 -mx-4 flex items-center justify-between gap-3 border-t bg-background/95 px-4 py-3 backdrop-blur sm:mx-0 sm:rounded-lg sm:border">
         <div className="text-sm text-muted-foreground">
-          <strong className="text-foreground">{totalLines()}</strong> line
-          {totalLines() === 1 ? "" : "s"} · estimated total{" "}
+          <strong className="text-foreground">
+            {t("summaryLines", { count: totalLines() })}
+          </strong>{" "}
+          · {t("summaryTotal")}{" "}
           <strong className="text-foreground">{totalCost()}</strong>
         </div>
         <div className="flex gap-2">
           <Button asChild variant="ghost">
-            <Link href="/inventory">Cancel</Link>
+            <Link href="/inventory">{tc("cancel")}</Link>
           </Button>
           <Button onClick={handleSubmit} disabled={pending || totalLines() === 0}>
-            {pending ? "Receiving…" : `Receive ${totalLines()} line${totalLines() === 1 ? "" : "s"}`}
+            {pending ? t("receiving") : t("submit", { count: totalLines() })}
           </Button>
         </div>
       </div>

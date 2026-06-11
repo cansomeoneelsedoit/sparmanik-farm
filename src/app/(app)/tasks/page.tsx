@@ -1,3 +1,4 @@
+import { getTranslations } from "next-intl/server";
 import { Plus } from "lucide-react";
 
 import { prisma } from "@/server/prisma";
@@ -22,6 +23,7 @@ type TaskRow = {
 };
 
 export default async function TasksPage() {
+  const t = await getTranslations("tasks");
   const today = new Date(); today.setHours(0, 0, 0, 0);
 
   const [tasks, staff, harvests] = await Promise.all([
@@ -54,25 +56,25 @@ export default async function TasksPage() {
   return (
     <div className="space-y-6">
       <header className="flex items-center justify-between">
-        <h1 className="font-serif text-3xl">Tasks</h1>
+        <h1 className="font-serif text-3xl">{t("title")}</h1>
         <AddTaskDialog
           staff={staff.map((s: { id: string; name: string }) => ({ id: s.id, name: s.name }))}
           harvests={harvests.map((h: { id: string; name: string }) => ({ id: h.id, name: h.name }))}
-          trigger={<Button><Plus className="h-4 w-4" /> Add task</Button>}
+          trigger={<Button><Plus className="h-4 w-4" /> {t("addTask")}</Button>}
         />
       </header>
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <Stat label="Overdue" count={overdue.length} accent="red" />
-        <Stat label="Due today" count={dueToday.length} accent="yellow" />
-        <Stat label="Upcoming" count={upcoming.length} accent="blue" />
-        <Stat label="Completed" count={completed.length} accent="green" />
+        <Stat label={t("overdue")} count={overdue.length} accent="red" />
+        <Stat label={t("dueToday")} count={dueToday.length} accent="yellow" />
+        <Stat label={t("upcoming")} count={upcoming.length} accent="blue" />
+        <Stat label={t("completed")} count={completed.length} accent="green" />
       </div>
 
-      <Section title="Overdue" border="border-l-destructive" tasks={overdue} staff={staffList} harvests={harvestList} />
-      <Section title="Due today" border="border-l-yellow-500" tasks={dueToday} staff={staffList} harvests={harvestList} />
-      <Section title="Upcoming" border="border-l-blue-500" tasks={upcoming} staff={staffList} harvests={harvestList} />
-      <Section title="Completed" border="border-l-green-500" tasks={completed} staff={staffList} harvests={harvestList} muted />
+      <Section title={t("overdue")} border="border-l-destructive" tasks={overdue} staff={staffList} harvests={harvestList} />
+      <Section title={t("dueToday")} border="border-l-yellow-500" tasks={dueToday} staff={staffList} harvests={harvestList} />
+      <Section title={t("upcoming")} border="border-l-blue-500" tasks={upcoming} staff={staffList} harvests={harvestList} />
+      <Section title={t("completed")} border="border-l-green-500" tasks={completed} staff={staffList} harvests={harvestList} muted />
     </div>
   );
 }

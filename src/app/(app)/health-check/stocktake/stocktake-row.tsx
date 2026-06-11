@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { ChevronDown, ChevronRight, Check, Combine, X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -21,6 +22,7 @@ export type StocktakeItem = {
   unit: string;
   subUnit: string | null;
   subFactor: string | null;
+  categoryId: string | null;
   photoPath: string | null;
   /** Pre-formatted "current stock in packs" string from the server. */
   currentPacksStr: string;
@@ -53,6 +55,8 @@ export function StocktakeRow({
    *  Save & next — turning the warehouse walk into a Tab/Enter rhythm. */
   autoOpenNextId?: string | null;
 }) {
+  const t = useTranslations("stocktake");
+  const tc = useTranslations("common");
   const [open, setOpen] = useState(false);
   const [pending, startT] = useTransition();
   const router = useRouter();
@@ -96,7 +100,7 @@ export function StocktakeRow({
         note: note.trim() || undefined,
       });
       if (r.ok) {
-        toast.success(`Saved "${item.name}"`);
+        toast.success(t("savedToast", { name: item.name }));
         setOpen(false);
         reset();
         onSaved?.();
@@ -157,7 +161,9 @@ export function StocktakeRow({
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">
             {item.name?.trim() || (
-              <span className="italic text-muted-foreground">Untitled item</span>
+              <span className="italic text-muted-foreground">
+                {t("untitledItem")}
+              </span>
             )}
           </div>
           <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
@@ -165,7 +171,7 @@ export function StocktakeRow({
               {item.code}
             </span>
             <span>
-              On hand:{" "}
+              {t("onHand")}{" "}
               <strong className="text-foreground">
                 {item.currentPacksStr} {item.unit}
               </strong>
@@ -179,7 +185,7 @@ export function StocktakeRow({
         </div>
         {item.done ? (
           <span className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-700 dark:text-emerald-300">
-            <Check className="h-3 w-3" /> Counted
+            <Check className="h-3 w-3" /> {t("countedBadge")}
           </span>
         ) : null}
       </button>
@@ -190,11 +196,9 @@ export function StocktakeRow({
           <div className="space-y-3 rounded-md border bg-background p-3">
             <div className="flex items-center justify-between gap-2">
               <div className="space-y-0.5">
-                <Label className="text-sm">Sold as a pack used in fractions</Label>
+                <Label className="text-sm">{t("packToggle")}</Label>
                 <p className="text-[11px] text-muted-foreground">
-                  E.g. a polybag pack of 50 pieces, a 500 m roll of pipe, a
-                  500-seed bag. Turn on so we can charge the right cost
-                  per piece/metre.
+                  {t("packToggleHint")}
                 </p>
               </div>
               <Switch
@@ -211,16 +215,19 @@ export function StocktakeRow({
             {isPack ? (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="space-y-1">
-                  <Label className="text-xs">Measured in (what each pack contains)</Label>
+                  <Label className="text-xs">{t("measuredIn")}</Label>
                   <Input
                     value={subUnit}
                     onChange={(e) => setSubUnit(e.target.value)}
-                    placeholder="metres · pieces · kg · seeds · ml"
+                    placeholder={t("measuredInPlaceholder")}
                   />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">
-                    Pack size — how many {subUnit || "sub-units"} in 1 {item.unit}?
+                    {t("packSize", {
+                      sub: subUnit || t("subUnitsFallback"),
+                      unit: item.unit,
+                    })}
                   </Label>
                   <Input
                     type="number"
@@ -228,7 +235,7 @@ export function StocktakeRow({
                     min="0"
                     value={subFactor}
                     onChange={(e) => setSubFactor(e.target.value)}
-                    placeholder="e.g. 50, 100, 500"
+                    placeholder={t("packSizePlaceholder")}
                   />
                 </div>
               </div>
@@ -238,20 +245,17 @@ export function StocktakeRow({
           {/* Step 2: actual stock */}
           <div className="space-y-3 rounded-md border bg-background p-3">
             <div className="space-y-0.5">
-              <Label className="text-sm">
-                How many do you actually have RIGHT NOW?
-              </Label>
+              <Label className="text-sm">{t("actualTitle")}</Label>
               <p className="text-[11px] text-muted-foreground">
-                Walk to the shelf, count, type it in. We&rsquo;ll fix the
-                stock level to match — you don&rsquo;t have to delete old
-                batches yourself.
+                {t("actualHint")}
               </p>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto]">
               <div className="space-y-1">
                 <Label className="text-xs">
-                  Actual on-hand (in{" "}
-                  {isPack && subUnit ? subUnit : item.unit})
+                  {t("actualLabel", {
+                    unit: isPack && subUnit ? subUnit : item.unit,
+                  })}
                 </Label>
                 <Input
                   type="number"
@@ -264,18 +268,18 @@ export function StocktakeRow({
                 />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Note (optional)</Label>
+                <Label className="text-xs">{t("noteLabel")}</Label>
                 <Input
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
-                  placeholder="Shelf 3 morning count"
+                  placeholder={t("notePlaceholder")}
                 />
               </div>
             </div>
             {targetPacks !== null && delta !== null ? (
               <div className="rounded-md bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground">
-                Current: <strong>{currentPacksNum.toFixed(2)}</strong> {item.unit}{" "}
-                → Will set to{" "}
+                {t("previewCurrent")} <strong>{currentPacksNum.toFixed(2)}</strong>{" "}
+                {item.unit} → {t("previewWillSet")}{" "}
                 <strong className="text-foreground">
                   {targetPacks.toFixed(2)} {item.unit}
                 </strong>{" "}
@@ -306,9 +310,9 @@ export function StocktakeRow({
                   type="button"
                   variant="outline"
                   size="sm"
-                  title="Merge this row into another item (same product from a different supplier)"
+                  title={t("mergeTitle")}
                 >
-                  <Combine className="h-3.5 w-3.5" /> Merge into…
+                  <Combine className="h-3.5 w-3.5" /> {t("mergeInto")}
                 </Button>
               }
               onMerged={() => {
@@ -328,7 +332,7 @@ export function StocktakeRow({
               }}
               disabled={pending}
             >
-              <X className="h-3.5 w-3.5" /> Cancel
+              <X className="h-3.5 w-3.5" /> {tc("cancel")}
             </Button>
             <Button
               type="button"
@@ -337,7 +341,7 @@ export function StocktakeRow({
               disabled={pending || (!isPack && !actualQty.trim())}
             >
               <Check className="h-3.5 w-3.5" />
-              {pending ? "Saving…" : "Save & next"}
+              {pending ? t("saving") : t("saveNext")}
             </Button>
           </div>
         </div>

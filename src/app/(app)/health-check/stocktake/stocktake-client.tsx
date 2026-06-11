@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { ArrowLeft, ListChecks, Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -30,6 +31,7 @@ export function StocktakeClient({
   items: StocktakeItem[];
   categories: { id: string; name: string }[];
 }) {
+  const t = useTranslations("stocktake");
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [showCounted, setShowCounted] = useState(false);
@@ -38,6 +40,7 @@ export function StocktakeClient({
     const q = search.trim().toLowerCase();
     return items
       .filter((i) => (showCounted ? true : !i.done))
+      .filter((i) => !categoryFilter || i.categoryId === categoryFilter)
       .filter((i) => {
         if (!q) return true;
         return (
@@ -47,7 +50,7 @@ export function StocktakeClient({
           (i.subUnit ?? "").toLowerCase().includes(q)
         );
       });
-  }, [items, search, showCounted]);
+  }, [items, search, showCounted, categoryFilter]);
 
   // Push counted items to the bottom so the queue is "what to do next" first.
   const ordered = useMemo(
@@ -65,16 +68,12 @@ export function StocktakeClient({
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Button asChild size="sm" variant="ghost" className="-ml-2 h-7">
               <Link href="/health-check">
-                <ArrowLeft className="h-3.5 w-3.5" /> Health check
+                <ArrowLeft className="h-3.5 w-3.5" /> {t("backToHealthCheck")}
               </Link>
             </Button>
           </div>
-          <h1 className="font-serif text-3xl">Stock-take</h1>
-          <p className="text-sm text-muted-foreground">
-            Walk the warehouse with this page open. For each item, set the
-            pack size if it&rsquo;s sold as a pack of pieces, then type the
-            actual on-hand count. We&rsquo;ll fix the stock to match.
-          </p>
+          <h1 className="font-serif text-3xl">{t("title")}</h1>
+          <p className="text-sm text-muted-foreground">{t("intro")}</p>
         </div>
         <div className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3">
           <ListChecks className="h-6 w-6 text-muted-foreground" />
@@ -82,7 +81,7 @@ export function StocktakeClient({
             <div className="text-2xl font-semibold tabular-nums text-foreground">
               {doneCount}/{totalCount}
             </div>
-            counted so far
+            {t("countedSoFar")}
           </div>
         </div>
       </header>
@@ -93,7 +92,7 @@ export function StocktakeClient({
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search items by name, code, or unit…"
+            placeholder={t("searchPlaceholder")}
             className="pl-9"
           />
         </div>
@@ -107,7 +106,7 @@ export function StocktakeClient({
             variant={categoryFilter === null ? "default" : "outline"}
             onClick={() => setCategoryFilter(null)}
           >
-            All
+            {t("allCategories")}
           </Button>
           {categories.map((c) => (
             <Button
@@ -128,17 +127,17 @@ export function StocktakeClient({
             onChange={(e) => setShowCounted(e.target.checked)}
             className="h-4 w-4"
           />
-          Show counted ({doneCount})
+          {t("showCounted", { count: doneCount })}
         </label>
       </div>
 
       {ordered.length === 0 ? (
         <div className="rounded-xl border border-dashed bg-card p-12 text-center text-sm text-muted-foreground">
           {showCounted
-            ? "No items match this search."
+            ? t("noMatches")
             : doneCount === totalCount
-              ? "All items counted ✓ — toggle 'Show counted' if you want to re-count."
-              : "No items match this search."}
+              ? t("allCounted")
+              : t("noMatches")}
         </div>
       ) : (
         <div className="space-y-2">
@@ -159,7 +158,7 @@ export function StocktakeClient({
           ordered.length === 0 && "hidden",
         )}
       >
-        Showing {ordered.length} of {items.length} items
+        {t("showingOf", { shown: ordered.length, total: items.length })}
       </Badge>
     </div>
   );

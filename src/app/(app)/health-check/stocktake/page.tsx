@@ -29,6 +29,7 @@ export default async function StocktakePage() {
         unit: true,
         subUnit: true,
         subFactor: true,
+        categoryId: true,
         photoPath: true,
         batches: {
           select: {
@@ -60,6 +61,7 @@ export default async function StocktakePage() {
     unit: string;
     subUnit: string | null;
     subFactor: Decimal | null;
+    categoryId: string | null;
     photoPath: string | null;
     batches: {
       qty: Decimal;
@@ -86,6 +88,7 @@ export default async function StocktakePage() {
       unit: i.unit,
       subUnit: i.subUnit,
       subFactor: i.subFactor ? i.subFactor.toString() : null,
+      categoryId: i.categoryId ?? null,
       photoPath: i.photoPath ?? null,
       currentPacksStr: currentPacks.toFixed(2),
       currentSubStr: subQty ? subQty.toFixed(0) : currentPacks.toFixed(2),

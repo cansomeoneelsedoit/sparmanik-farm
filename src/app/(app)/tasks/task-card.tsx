@@ -2,6 +2,7 @@
 
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -39,9 +40,16 @@ export function TaskCard({
   staff: { id: string; name: string }[];
   harvests: { id: string; name: string }[];
 }) {
+  const t = useTranslations("tasks");
   const [pending, startT] = useTransition();
   const router = useRouter();
   const priorityColour = task.priority === "HIGH" ? "destructive" : task.priority === "MEDIUM" ? "accent" : "secondary";
+  const priorityLabel =
+    task.priority === "HIGH"
+      ? t("priorityHigh")
+      : task.priority === "MEDIUM"
+        ? t("priorityMedium")
+        : t("priorityLow");
   const checked = task.status === "COMPLETED";
 
   return (
@@ -62,11 +70,13 @@ export function TaskCard({
       <div className="flex-1">
         <div className="flex items-center gap-2">
           <div className={`font-medium ${checked ? "line-through text-muted-foreground" : ""}`}>{task.title}</div>
-          <Badge variant={priorityColour as "destructive" | "accent" | "secondary"}>{task.priority}</Badge>
+          <Badge variant={priorityColour as "destructive" | "accent" | "secondary"}>{priorityLabel}</Badge>
           {task.harvest ? <Badge variant="outline">{task.harvest.name}</Badge> : null}
         </div>
         {task.description ? <div className="mt-1 text-xs text-muted-foreground">{task.description}</div> : null}
-        <div className="mt-1 text-xs text-muted-foreground">Due {task.dueDate.toISOString().slice(0, 10)}</div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          {t("due", { date: task.dueDate.toISOString().slice(0, 10) })}
+        </div>
       </div>
       <Select
         value={task.assigneeStaffId ?? ""}
@@ -79,7 +89,7 @@ export function TaskCard({
         }
       >
         <SelectTrigger className="w-40">
-          <SelectValue placeholder="Unassigned" />
+          <SelectValue placeholder={t("unassigned")} />
         </SelectTrigger>
         <SelectContent>
           {staff.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
@@ -97,7 +107,7 @@ export function TaskCard({
           harvestId: task.harvest?.id ?? null,
           description: task.description,
         }}
-        trigger={<Button size="icon" variant="ghost" title="Edit"><Pencil className="h-4 w-4" /></Button>}
+        trigger={<Button size="icon" variant="ghost" title={t("edit")}><Pencil className="h-4 w-4" /></Button>}
       />
       <Button
         size="icon"
@@ -106,12 +116,12 @@ export function TaskCard({
           startT(async () => {
             const r = await deleteTask(task.id);
             if (r.ok) {
-              toast.success("Deleted");
+              toast.success(t("deletedToast"));
               router.refresh();
             } else toast.error(r.error);
           })
         }
-        title="Delete"
+        title={t("delete")}
       >
         ×
       </Button>

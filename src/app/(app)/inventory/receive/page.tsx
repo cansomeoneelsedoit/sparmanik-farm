@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 import { ArrowLeft } from "lucide-react";
 
 import { prisma } from "@/server/prisma";
@@ -9,6 +10,7 @@ import { ReceiveStockClient } from "@/app/(app)/inventory/receive/receive-client
 export const dynamic = "force-dynamic";
 
 export default async function ReceiveStockPage() {
+  const t = await getTranslations("receive");
   // Items + suppliers for the pickers, plus their most recent purchase
   // history so the staff sees prior context instead of staring at an empty
   // search box.
@@ -101,16 +103,12 @@ export default async function ReceiveStockPage() {
       <header className="flex items-center gap-3">
         <Button asChild variant="ghost" size="sm">
           <Link href="/inventory">
-            <ArrowLeft className="h-4 w-4" /> Inventory
+            <ArrowLeft className="h-4 w-4" /> {t("back")}
           </Link>
         </Button>
         <div>
-          <h1 className="font-serif text-3xl">Receive stock</h1>
-          <p className="text-sm text-muted-foreground">
-            Pick the supplier and date once, then add every item from that
-            invoice. Reusable items (rockwool, grow bags) come back from a
-            greenhouse — tick the toggle.
-          </p>
+          <h1 className="font-serif text-3xl">{t("title")}</h1>
+          <p className="text-sm text-muted-foreground">{t("intro")}</p>
         </div>
       </header>
 

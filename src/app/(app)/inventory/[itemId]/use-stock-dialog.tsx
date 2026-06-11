@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -32,6 +33,8 @@ export function UseStockDialog({
   maxQty: string;
   unit: string;
 }) {
+  const t = useTranslations("useStock");
+  const tc = useTranslations("common");
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
@@ -41,7 +44,7 @@ export function UseStockDialog({
     startTransition(async () => {
       const r = await consumeItem({ itemId, qty: v.qty });
       if (r.ok) {
-        toast.success("Stock used (FIFO)");
+        toast.success(t("successToast"));
         setOpen(false);
         form.reset({ qty: "0" });
         router.refresh();
@@ -54,17 +57,17 @@ export function UseStockDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button>Use stock</Button>
+        <Button>{t("trigger")}</Button>
       </DialogTrigger>
       <DialogContent>
         <form onSubmit={form.handleSubmit(onSubmit)}>
-          <DialogHeader><DialogTitle>Use stock</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t("title")}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>
-                Quantity to use{" "}
+                {t("qtyLabel")}{" "}
                 <span className="text-xs font-normal text-muted-foreground">
-                  (max: {maxQty} {unit})
+                  {t("maxHint", { max: maxQty, unit })}
                 </span>
               </Label>
               <div className="flex items-center gap-2">
@@ -74,7 +77,7 @@ export function UseStockDialog({
                   min="0"
                   max={maxQty}
                   autoFocus
-                  placeholder={`0 to ${maxQty}`}
+                  placeholder={t("placeholder", { max: maxQty })}
                   {...form.register("qty")}
                 />
                 <span className="text-sm text-muted-foreground whitespace-nowrap">
@@ -82,15 +85,13 @@ export function UseStockDialog({
                 </span>
               </div>
               <p className="text-xs text-muted-foreground">
-                On hand: <strong className="text-foreground">{maxQty} {unit}</strong>.
-                FIFO consumes oldest batch first so cost-of-use comes from
-                what you paid for the earliest receive.
+                {t("fifoHint", { max: maxQty, unit })}
               </p>
             </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={pending}>Cancel</Button>
-            <Button type="submit" disabled={pending}>{pending ? "Using…" : "Use"}</Button>
+            <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={pending}>{tc("cancel")}</Button>
+            <Button type="submit" disabled={pending}>{pending ? t("using") : t("use")}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { HandCoins } from "lucide-react";
 import { toast } from "sonner";
 
@@ -44,6 +45,8 @@ export function SellStockDialog({
   itemSubFactor?: number | null;
   maxPacks: string;
 }) {
+  const t = useTranslations("sellStock");
+  const tc = useTranslations("common");
   const [open, setOpen] = useState(false);
   const [pending, startT] = useTransition();
   const [qty, setQty] = useState("");
@@ -54,7 +57,7 @@ export function SellStockDialog({
   const router = useRouter();
 
   const isPack = !!(itemSubUnit && itemSubFactor && itemSubFactor > 0);
-  const qtyUnitLabel = isPack ? itemSubUnit : itemUnit;
+  const qtyUnitLabel = isPack ? (itemSubUnit as string) : itemUnit;
   const maxInEntryUnits = isPack
     ? Number(maxPacks) * (itemSubFactor as number)
     : Number(maxPacks);
@@ -74,12 +77,15 @@ export function SellStockDialog({
 
   function submit() {
     if (qtyNum <= 0 || amountNum <= 0) {
-      toast.error("Enter the quantity sold and what the buyer paid.");
+      toast.error(t("errNeedBoth"));
       return;
     }
     if (overStock) {
       toast.error(
-        `Only ${maxInEntryUnits.toFixed(0)} ${qtyUnitLabel} on hand.`,
+        t("errOnlyOnHand", {
+          max: maxInEntryUnits.toFixed(0),
+          unit: qtyUnitLabel,
+        }),
       );
       return;
     }
@@ -96,10 +102,11 @@ export function SellStockDialog({
       });
       if (r.ok && r.data) {
         const profit = Number(r.data.profit);
+        const formatted = Math.abs(Math.round(profit)).toLocaleString("id-ID");
         toast.success(
-          `Sale recorded — ${profit >= 0 ? "profit" : "loss"} Rp ${Math.abs(
-            Math.round(profit),
-          ).toLocaleString("id-ID")}`,
+          profit >= 0
+            ? t("toastProfit", { amount: formatted })
+            : t("toastLoss", { amount: formatted }),
         );
         setOpen(false);
         reset();
@@ -120,26 +127,23 @@ export function SellStockDialog({
     >
       <DialogTrigger asChild>
         <Button variant="outline">
-          <HandCoins className="h-4 w-4" /> Sell
+          <HandCoins className="h-4 w-4" /> {t("trigger")}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Sell stock to a buyer</DialogTitle>
+          <DialogTitle>{t("title")}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-4">
           <p className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-            For selling inventory directly — not produce from a greenhouse.
-            Stock comes off the shelf at FIFO cost; the profit lands on{" "}
-            <strong className="text-foreground">Financials</strong> as
-            stock-resale revenue.
+            {t("intro")}
           </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label>
-                Quantity sold ({qtyUnitLabel}){" "}
+                {t("qtyLabel", { unit: qtyUnitLabel })}{" "}
                 <span className="text-xs font-normal text-muted-foreground">
-                  max {maxInEntryUnits.toFixed(0)}
+                  {t("maxHint", { max: maxInEntryUnits.toFixed(0) })}
                 </span>
               </Label>
               <Input
@@ -149,42 +153,42 @@ export function SellStockDialog({
                 autoFocus
                 value={qty}
                 onChange={(e) => setQty(e.target.value)}
-                placeholder={`0 to ${maxInEntryUnits.toFixed(0)}`}
+                placeholder={t("qtyPlaceholder", {
+                  max: maxInEntryUnits.toFixed(0),
+                })}
               />
               {overStock ? (
-                <p className="text-xs text-destructive">
-                  More than you have on hand.
-                </p>
+                <p className="text-xs text-destructive">{t("overStock")}</p>
               ) : null}
             </div>
             <div className="space-y-2">
-              <Label>Buyer paid (Rp total)</Label>
+              <Label>{t("paidLabel")}</Label>
               <Input
                 type="number"
                 step="any"
                 min="0"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                placeholder="e.g. 50000"
+                placeholder={t("paidPlaceholder")}
               />
               {perUnitPreview ? (
                 <p className="text-[11px] text-muted-foreground">
-                  = Rp {perUnitPreview} / {qtyUnitLabel}
+                  {t("perUnit", { price: perUnitPreview, unit: qtyUnitLabel })}
                 </p>
               ) : null}
             </div>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label>Buyer (optional)</Label>
+              <Label>{t("buyerLabel")}</Label>
               <Input
                 value={buyer}
                 onChange={(e) => setBuyer(e.target.value)}
-                placeholder="Pak Budi"
+                placeholder={t("buyerPlaceholder")}
               />
             </div>
             <div className="space-y-2">
-              <Label>Date</Label>
+              <Label>{t("dateLabel")}</Label>
               <Input
                 type="date"
                 value={date}
@@ -193,11 +197,11 @@ export function SellStockDialog({
             </div>
           </div>
           <div className="space-y-2">
-            <Label>Note (optional)</Label>
+            <Label>{t("noteLabel")}</Label>
             <Input
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="e.g. cut from the 100 m roll"
+              placeholder={t("notePlaceholder")}
             />
           </div>
         </div>
@@ -208,7 +212,7 @@ export function SellStockDialog({
             onClick={() => setOpen(false)}
             disabled={pending}
           >
-            Cancel
+            {tc("cancel")}
           </Button>
           <Button
             type="button"
@@ -216,7 +220,7 @@ export function SellStockDialog({
             disabled={pending || qtyNum <= 0 || amountNum <= 0 || overStock}
           >
             <HandCoins className="h-4 w-4" />
-            {pending ? "Recording…" : "Record sale"}
+            {pending ? t("recording") : t("record")}
           </Button>
         </DialogFooter>
       </DialogContent>
