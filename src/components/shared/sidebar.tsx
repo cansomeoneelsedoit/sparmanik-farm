@@ -20,6 +20,7 @@ import {
   Package,
   PlayCircle,
   Settings,
+  ShoppingCart,
   Sparkles,
   Truck,
   UserCircle2,
@@ -136,6 +137,12 @@ export function SidebarContent({
           href: "/health-check/stocktake",
           fallback: "Stock-take",
           icon: ListChecks,
+        },
+        // What to order, grouped by supplier, copy-paste into WhatsApp.
+        {
+          key: "shopping",
+          href: "/inventory/shopping-list",
+          icon: ShoppingCart,
         },
       ],
     },

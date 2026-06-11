@@ -44,6 +44,7 @@ const PAGES: PageEntry[] = [
   { href: "/inventory", label: "Inventory", detail: "All stock items", icon: Package },
   { href: "/inventory/receive", label: "Receive stock", detail: "Log a delivery", icon: PackagePlus, keywords: "delivery purchase buy" },
   { href: "/health-check/stocktake", label: "Stock-take", detail: "Count the shelves", icon: ListChecks, keywords: "count audit warehouse" },
+  { href: "/inventory/shopping-list", label: "Shopping list", detail: "What to order, by supplier", icon: Package, keywords: "order buy reorder belanja whatsapp low stock" },
   { href: "/inventory/identify", label: "Identify item", detail: "Snap a photo, find it", icon: Camera, keywords: "photo camera ai" },
   { href: "/simulator", label: "Simulator", detail: "What-if cycle P&L", icon: Calculator, keywords: "test profit scenario" },
   { href: "/sales", label: "Sales", detail: "Revenue & filters", icon: DollarSign },
