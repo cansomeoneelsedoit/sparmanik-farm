@@ -59,8 +59,14 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
       // subUnit + subFactor (e.g. "metres" + 500) drive the pack-style
       // install UX. price is per-batch, used by the install dialog's cost
       // preview to charge proportional cost when only a fraction of the
-      // pack is installed.
-      include: {
+      // pack is installed. Explicit select keeps the photo_data blobs out
+      // of this query — this page only needs names + stock math.
+      select: {
+        id: true,
+        name: true,
+        unit: true,
+        subUnit: true,
+        subFactor: true,
         batches: {
           orderBy: [{ date: "asc" }, { createdAt: "asc" }],
           select: {

@@ -18,7 +18,18 @@ export default async function StocktakePage() {
   const [items, categories, doneAudits] = await Promise.all([
     prisma.item.findMany({
       orderBy: { name: "asc" },
-      include: {
+      // Explicit select — `include` would drag every item's photo_data
+      // blob into the wizard load (the walk-the-warehouse page needs to
+      // open FAST on a phone). Thumbnails stream lazily per row via
+      // /api/items/[id]/photo.
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        unit: true,
+        subUnit: true,
+        subFactor: true,
+        photoPath: true,
         batches: {
           select: {
             qty: true,

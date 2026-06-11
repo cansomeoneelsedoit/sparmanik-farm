@@ -35,12 +35,40 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
     // organizationId for org isolation, which findUnique rejects.
     prisma.item.findFirst({
       where: { id: itemId },
-      include: {
+      // Explicit select keeps the photo_data blob out of the page render —
+      // the photo streams separately via /api/items/[id]/photo.
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        description: true,
+        photoPath: true,
+        unit: true,
+        subUnit: true,
+        subFactor: true,
+        productFamily: true,
+        location: true,
+        reusable: true,
+        reorder: true,
+        shopeeUrl: true,
+        categoryId: true,
+        defaultSupplierId: true,
         category: true,
         defaultSupplier: true,
         batches: {
           orderBy: [{ date: "asc" }, { createdAt: "asc" }],
-          include: { supplier: true, consumptions: { select: { qty: true } } },
+          select: {
+            id: true,
+            date: true,
+            qty: true,
+            price: true,
+            maxUses: true,
+            useCount: true,
+            amortisedCostPerUse: true,
+            returned: true,
+            supplier: { select: { id: true, name: true } },
+            consumptions: { select: { qty: true } },
+          },
         },
       },
     }),

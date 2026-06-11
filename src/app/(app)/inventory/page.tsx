@@ -83,8 +83,21 @@ export default async function InventoryPage({
           cat ? { category: { name: cat } } : {},
         ],
       },
-      include: {
-        category: true,
+      // Explicit select — NOT include. Photos live on the row as bytea
+      // (photo_data) since migration 20260609010000; `include` would drag
+      // every item's blob (~2 MB total) into this query on every page
+      // load. Photos are served lazily per-item via /api/items/[id]/photo.
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        description: true,
+        photoPath: true,
+        unit: true,
+        subUnit: true,
+        subFactor: true,
+        reorder: true,
+        category: { select: { name: true } },
         batches: {
           select: {
             qty: true,

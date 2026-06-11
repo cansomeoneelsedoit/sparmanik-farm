@@ -137,8 +137,10 @@ async function checkItemsWithoutDescription(): Promise<HealthCheckResult> {
 
 /** Items with no photo and no description — hardest to identify visually. */
 async function checkItemsWithoutPhoto(): Promise<HealthCheckResult> {
+  // Photos can live in the DB (photo_data, post-blob-migration) OR on
+  // disk (legacy photo_path). "No photo" = neither is set.
   const rows = await prisma.item.findMany({
-    where: { photoPath: null, NOT: { name: "" } },
+    where: { photoPath: null, photoData: null, NOT: { name: "" } },
     orderBy: { code: "asc" },
     take: 50,
     select: {
@@ -150,7 +152,7 @@ async function checkItemsWithoutPhoto(): Promise<HealthCheckResult> {
     },
   });
   const count = await prisma.item.count({
-    where: { photoPath: null, NOT: { name: "" } },
+    where: { photoPath: null, photoData: null, NOT: { name: "" } },
   });
   return {
     id: "items-without-photo",

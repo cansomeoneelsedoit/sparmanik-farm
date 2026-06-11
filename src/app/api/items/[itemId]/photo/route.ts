@@ -61,9 +61,10 @@ export async function GET(
         "Content-Length": String(buf.length),
         // Photos in the DB are mutable (user can replace via Edit), so we
         // don't get the long-immutable cache the filesystem route uses.
-        // Short-lived private cache saves a re-fetch on the next nav but
-        // always refreshes after a few minutes.
-        "Cache-Control": "private, max-age=300, must-revalidate",
+        // 1 h private cache + SWR keeps list pages snappy (400 thumbnails
+        // would otherwise re-fetch every nav) while a replaced photo still
+        // shows up within the hour — acceptable for farm inventory shots.
+        "Cache-Control": "private, max-age=3600, stale-while-revalidate=86400",
       },
     });
   }

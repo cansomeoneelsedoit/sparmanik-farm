@@ -27,7 +27,15 @@ export async function buildFarmContext(): Promise<string> {
       select: { name: true, variety: true, startDate: true, greenhouse: { select: { name: true } } },
     }),
     prisma.item.findMany({
-      include: { batches: { select: { qty: true, consumptions: { select: { qty: true } } } } },
+      // Explicit select — `include` would pull every item's photo_data
+      // blob into EVERY Ask AI / Echo question. The context builder only
+      // needs names + stock math.
+      select: {
+        name: true,
+        unit: true,
+        reorder: true,
+        batches: { select: { qty: true, consumptions: { select: { qty: true } } } },
+      },
     }),
     prisma.task.findMany({
       where: { status: { not: "COMPLETED" } },

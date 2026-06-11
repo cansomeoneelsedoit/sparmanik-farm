@@ -1806,7 +1806,16 @@ export async function suggestItemIdentity(input: unknown): Promise<
 
   const item = await prisma.item.findFirst({
     where: { id: parsed.data.itemId },
-    include: {
+    // select (not include) — keeps the photo_data blob out of an AI call
+    // that only needs text context.
+    select: {
+      code: true,
+      name: true,
+      description: true,
+      unit: true,
+      subUnit: true,
+      subFactor: true,
+      reusable: true,
       category: { select: { name: true } },
       defaultSupplier: { select: { name: true } },
       batches: {
