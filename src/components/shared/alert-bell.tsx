@@ -36,7 +36,7 @@ export function AlertBell({ alerts }: { alerts: Alert[] }) {
           ) : null}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-80">
+      <DropdownMenuContent align="end" className="w-80 max-w-[calc(100vw-1rem)]">
         <DropdownMenuLabel>Alerts</DropdownMenuLabel>
         <DropdownMenuSeparator />
         {alerts.length === 0 ? (

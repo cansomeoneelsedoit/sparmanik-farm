@@ -73,12 +73,12 @@ export function SopFormDialog({
         <form onSubmit={form.handleSubmit(onSubmit)}>
           <DialogHeader><DialogTitle>{isEdit ? "Edit SOP" : "New SOP"}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-2"><Label>Title (EN)</Label><Input {...form.register("titleEn")} /></div>
               <div className="space-y-2"><Label>Title (ID)</Label><Input {...form.register("titleId")} /></div>
             </div>
             <div className="space-y-2"><Label>Category</Label><Input {...form.register("category")} /></div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-2"><Label>Description (EN)</Label><Textarea rows={2} {...form.register("descriptionEn")} /></div>
               <div className="space-y-2"><Label>Description (ID)</Label><Textarea rows={2} {...form.register("descriptionId")} /></div>
             </div>
@@ -93,7 +93,7 @@ export function SopFormDialog({
                     <span className="text-xs font-medium text-muted-foreground">Step {i + 1}</span>
                     <Button type="button" size="icon" variant="ghost" onClick={() => steps.remove(i)}>×</Button>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <Textarea rows={2} placeholder="EN" {...form.register(`steps.${i}.bodyEn`)} />
                     <Textarea rows={2} placeholder="ID" {...form.register(`steps.${i}.bodyId`)} />
                   </div>

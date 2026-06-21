@@ -37,7 +37,7 @@ export function SalesFilters({
 
   return (
     <div className="flex flex-wrap items-end gap-3">
-      <div className="relative min-w-[200px] flex-1">
+      <div className="relative w-full sm:w-auto sm:min-w-[200px] flex-1">
         <label className="mb-1 block text-xs text-muted-foreground">Search</label>
         <Search className="pointer-events-none absolute left-3 top-[calc(50%+8px)] h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
@@ -47,7 +47,7 @@ export function SalesFilters({
           className="pl-9"
         />
       </div>
-      <div className="min-w-[180px]">
+      <div className="sm:min-w-[180px]">
         <label className="mb-1 block text-xs text-muted-foreground">Greenhouse</label>
         <Select
           value={gh || "all"}
@@ -73,7 +73,7 @@ export function SalesFilters({
           </SelectContent>
         </Select>
       </div>
-      <div className="min-w-[200px]">
+      <div className="sm:min-w-[200px]">
         <label className="mb-1 block text-xs text-muted-foreground">Harvest</label>
         <Select
           value={hv || "all"}
@@ -98,7 +98,7 @@ export function SalesFilters({
           type="date"
           value={from}
           onChange={(e) => setFrom(e.target.value || null)}
-          className="w-[150px]"
+          className="sm:w-[150px]"
         />
       </div>
       <div>
@@ -107,7 +107,7 @@ export function SalesFilters({
           type="date"
           value={to}
           onChange={(e) => setTo(e.target.value || null)}
-          className="w-[150px]"
+          className="sm:w-[150px]"
         />
       </div>
       {q || gh || hv || from || to ? (

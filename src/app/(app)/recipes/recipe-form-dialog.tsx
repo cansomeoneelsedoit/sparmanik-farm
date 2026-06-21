@@ -76,11 +76,11 @@ export function RecipeFormDialog({
           <DialogHeader><DialogTitle>{isEdit ? "Edit recipe" : "New recipe"}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2"><Label>Name</Label><Input {...form.register("name")} autoFocus /></div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-2"><Label>Crop</Label><Input {...form.register("crop")} /></div>
               <div className="space-y-2"><Label>Stage</Label><Input {...form.register("stage")} placeholder="Vegetative / Generative" /></div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-2"><Label>EC target (mS/cm)</Label><Input type="number" step="any" {...form.register("ec")} /></div>
               <div className="space-y-2"><Label>pH target</Label><Input {...form.register("ph")} placeholder="5.8-6.5" /></div>
             </div>

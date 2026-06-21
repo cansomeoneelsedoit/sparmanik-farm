@@ -79,7 +79,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
 
   return (
     <div className="space-y-6">
-      <header className="flex items-center justify-between">
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-serif text-3xl">Calendar</h1>
         <div className="flex items-center gap-2">
           <Button asChild variant="ghost" size="sm"><Link href={`/calendar?y=${prev.y}&m=${prev.m}`}>‹ Prev</Link></Button>
@@ -90,8 +90,10 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
 
       <Card>
         <CardHeader><CardTitle>{monthName}</CardTitle></CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-7 gap-px rounded-md bg-border text-xs">
+        <CardContent className="overflow-x-auto">
+          {/* Keep the month grid intact on phones — scroll horizontally rather
+              than squashing 7 columns into ~50px each. */}
+          <div className="grid min-w-[640px] grid-cols-7 gap-px rounded-md bg-border text-xs">
             {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
               <div key={d} className="bg-muted/60 p-2 text-center font-medium">{d}</div>
             ))}

@@ -343,7 +343,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
             {harvest.status === "LIVE" ? "Live" : "Closed"}
           </Badge>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button asChild variant="outline">
             <a href={`/print/harvest/${harvest.id}?auto=1`} target="_blank" rel="noopener noreferrer">Download PDF</a>
           </Button>

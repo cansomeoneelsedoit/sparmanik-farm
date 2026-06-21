@@ -88,7 +88,7 @@ export function TaskCard({
           })
         }
       >
-        <SelectTrigger className="w-40">
+        <SelectTrigger className="w-32 sm:w-40">
           <SelectValue placeholder={t("unassigned")} />
         </SelectTrigger>
         <SelectContent>

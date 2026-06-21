@@ -68,7 +68,7 @@ export function EchoWidget() {
       </button>
 
       {open ? (
-        <div className="fixed bottom-20 right-5 z-40 flex h-[420px] w-[340px] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
+        <div className="fixed bottom-20 right-5 z-40 flex h-[420px] w-[min(340px,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
           <div className="flex items-center gap-2 border-b px-3 py-2.5">
             <div className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full bg-accent">
               {/* eslint-disable-next-line @next/next/no-img-element */}

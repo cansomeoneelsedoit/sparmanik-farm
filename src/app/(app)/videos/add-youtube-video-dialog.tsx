@@ -188,7 +188,7 @@ export function AddYoutubeVideoDialog({
             </p>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-2"><Label>Title (EN)</Label><Input {...form.register("titleEn")} /></div>
               <div className="space-y-2"><Label>Title (ID)</Label><Input {...form.register("titleId")} /></div>
             </div>
@@ -236,7 +236,7 @@ export function AddYoutubeVideoDialog({
                     {uploading ? "Uploading…" : "Upload image"}
                   </Button>
                   {ytId ? (
-                    <div className="grid grid-cols-3 gap-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-1">
                       <Button
                         type="button"
                         size="sm"

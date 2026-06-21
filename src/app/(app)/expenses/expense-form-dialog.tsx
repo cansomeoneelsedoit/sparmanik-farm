@@ -256,7 +256,7 @@ export function ExpenseFormDialog({
             </p>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>Date</Label>
                 <Input type="date" {...form.register("date")} />
@@ -277,7 +277,7 @@ export function ExpenseFormDialog({
                 <p className="text-xs text-destructive">{form.formState.errors.payee.message}</p>
               ) : null}
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>Category</Label>
                 <Combobox

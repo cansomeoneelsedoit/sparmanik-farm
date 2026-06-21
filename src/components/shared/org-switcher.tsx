@@ -79,7 +79,7 @@ export function OrgSwitcher({
         <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
       </button>
       {open ? (
-        <div className="absolute left-0 top-full z-[100] mt-1 w-64 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md">
+        <div className="absolute left-0 top-full z-[100] mt-1 w-64 max-w-[calc(100vw-1rem)] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md">
           <div className="border-b px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             Switch organisation
           </div>

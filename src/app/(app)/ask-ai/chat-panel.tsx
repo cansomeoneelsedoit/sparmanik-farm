@@ -349,7 +349,7 @@ function UserBubble({ content, attachments }: { content: string; attachments?: A
           <div
             className={cn(
               "grid gap-2",
-              attachments!.length === 1 ? "grid-cols-1" : "grid-cols-2",
+              attachments!.length === 1 ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2",
             )}
           >
             {attachments!.map((a) => (
