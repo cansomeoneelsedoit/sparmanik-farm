@@ -148,13 +148,16 @@ async function main() {
   // We pipe pg_dump output through the docker postgres container (which
   // ships pg_dump 16) and write it on the host so the file lands in the
   // project root regardless of platform.
+  // Railway runs Postgres 18; the local `db` container ships pg_dump 16, which
+  // refuses to dump a newer server. So all PROD-side ops go through a pinned
+  // postgres:18 client image (reaches Railway over the public internet). The
+  // local data dump (step 2) still uses the local container — same version.
   const dumpProd = spawnSync(
     "docker",
     [
-      "compose",
-      "exec",
-      "-T",
-      "db",
+      "run",
+      "--rm",
+      "postgres:18",
       "pg_dump",
       "--no-owner",
       "--no-privileges",
@@ -169,7 +172,7 @@ async function main() {
   );
   if (dumpProd.status !== 0) {
     console.error(
-      `\nFAILED to read from prod. Status=${dumpProd.status}. Check the URL works:\n  docker compose exec db psql "${maskUrl(PROD_URL)}" -c "SELECT version();"`,
+      `\nFAILED to read from prod. Status=${dumpProd.status}. Check the URL works:\n  docker run --rm postgres:18 psql "${maskUrl(PROD_URL)}" -c "SELECT version();"`,
     );
     process.exit(1);
   }
@@ -181,35 +184,29 @@ async function main() {
 
   // -------- 2. Dump local data ------------------------------------------
 
-  console.log(`\n[2/3] Dumping local data (data-only)...`);
-  // We dump --data-only because prod's schema is already correct (managed
-  // by prisma migrate). --disable-triggers lets us COPY into tables that
-  // have FK constraints; we'll re-enable them after restore.
+  console.log(`\n[2/3] Dumping local database (full clone: schema + data)...`);
+  // FULL dump (not data-only). prod's schema can drift from local, so we ship
+  // local's COMPLETE schema + data. --clean --if-exists makes the dump DROP
+  // each existing object on prod first, then recreate it from local — so prod
+  // ends up identical to local regardless of any prior drift, and there are
+  // no leftover-row / migration-state conflicts.
   run(
-    `docker compose exec -T db pg_dump -U sparmanik -d sparmanik --data-only --disable-triggers --no-owner --no-privileges > ${LOCAL_DUMP}`,
+    `docker compose exec -T db pg_dump -U sparmanik -d sparmanik --clean --if-exists --no-owner --no-privileges > ${LOCAL_DUMP}`,
     { shell: true },
   );
   console.log(`     OK — wrote ${LOCAL_DUMP}.`);
 
   // -------- 3. Apply to prod --------------------------------------------
 
-  console.log(`\n[3/3] Applying to prod...`);
-  console.log(
-    `\n  Truncating ${DELETE_ORDER.length} tables on prod (in FK order)...`,
-  );
-  const truncateSql = `BEGIN; SET CONSTRAINTS ALL DEFERRED; ${DELETE_ORDER.map((t) => `TRUNCATE TABLE "${t}" CASCADE;`).join(" ")} COMMIT;`;
+  console.log(`\n[3/3] Cloning local → prod (drop + recreate + load, one transaction)...`);
+  // Stream the full dump into prod's psql under a single transaction
+  // (-1) with ON_ERROR_STOP so the FIRST error aborts and rolls back the
+  // WHOLE thing — prod is then left exactly as it was (the backup above is
+  // the parachute either way). No half-applied window.
   run(
-    `docker compose exec -T db psql "${PROD_URL}" -c "${truncateSql.replace(/"/g, '\\"')}"`,
+    `docker run --rm -i postgres:18 psql "${PROD_URL}" -v ON_ERROR_STOP=1 -1 < "${LOCAL_DUMP}"`,
     { shell: true },
   );
-
-  console.log(`\n  Restoring local data to prod...`);
-  // Stream the local dump through docker into prod's psql. -1 wraps in a
-  // single transaction so a mid-dump failure rolls back cleanly.
-  run(
-    `docker compose exec -T db sh -c 'psql "${PROD_URL}" -1 < ${LOCAL_DUMP.replace(/\\/g, "/")}'`,
-    { shell: true },
-  ).catch?.(() => {}); // some platforms throw on non-zero; we check below
 
   console.log(`\n  Done.`);
 
@@ -220,7 +217,7 @@ async function main() {
   for (const t of tables) {
     try {
       const out = execSync(
-        `docker compose exec -T db psql "${PROD_URL}" -t -A -c "SELECT COUNT(*) FROM ${t};"`,
+        `docker run --rm postgres:18 psql "${PROD_URL}" -t -A -c "SELECT COUNT(*) FROM ${t};"`,
         { shell: true },
       )
         .toString()
@@ -242,7 +239,7 @@ async function main() {
   console.log(`\n=== DONE ===`);
   console.log(`\nBackup of prod-as-it-was kept at ${BACKUP_FILE}`);
   console.log(
-    `Rollback (if needed): docker compose exec -T db sh -c 'psql "$PROD_DATABASE_URL" < ${BACKUP_FILE}'`,
+    `Rollback (if needed): docker run --rm -i postgres:18 psql "<PASTE PROD URL>" < ${BACKUP_FILE}`,
   );
   console.log(
     `\nProd is now identical to local. From now on, edit data on prod (https://web-production-1e6de.up.railway.app) so the two stay in sync.`,
@@ -270,7 +267,7 @@ function maskUrl(u) {
 main().catch((e) => {
   console.error("\nSync FAILED:", e.message);
   console.error(
-    `\nProd may be in an inconsistent state. Restore from backup with:\n  docker compose exec -T db sh -c 'psql "$PROD_DATABASE_URL" < ${BACKUP_FILE}'`,
+    `\nProd may be in an inconsistent state. Restore from backup with:\n  docker run --rm -i postgres:18 psql "<PASTE PROD URL>" < ${BACKUP_FILE}`,
   );
   process.exit(1);
 });
