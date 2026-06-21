@@ -62,3 +62,8 @@ backups/
 # Local pre-merge data backup (contains data; never commit)
 local-premerge-backup.sql
 *-premerge-backup.sql
+
+# Never commit pasted prod DB credentials or DB backups
+use me to upload.txt
+prod-backup-*.sql
+tmp-sync/
