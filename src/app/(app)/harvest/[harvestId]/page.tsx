@@ -39,7 +39,7 @@ export const dynamic = "force-dynamic";
 
 export default async function HarvestDetailPage({ params }: { params: Promise<{ harvestId: string }> }) {
   const { harvestId } = await params;
-  const [harvest, items, produces, greenhouses, staffRows, harvestExpenses, labourTasks] = await Promise.all([
+  const [harvest, items, produces, greenhouses, staffRows, harvestExpenses, labourTasks, customers] = await Promise.all([
     // findFirst (not findUnique) so the prisma extension can safely append
     // an `organizationId` predicate for org isolation — findUnique rejects
     // non-unique fields in its where.
@@ -49,7 +49,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
         greenhouse: true,
         produce: true,
         produces: { include: { produce: true }, orderBy: { createdAt: "asc" } },
-        sales: { orderBy: { date: "desc" }, include: { produce: true } },
+        sales: { orderBy: { date: "desc" }, include: { produce: true, customer: true } },
         usages: { orderBy: { date: "desc" }, include: { item: true, consumptions: true } },
         assets: { orderBy: { date: "desc" }, include: { item: true, consumptions: true } },
       },
@@ -103,6 +103,10 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
       where: { active: true },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
       select: { id: true, name: true },
+    }),
+    prisma.customer.findMany({
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, type: true },
     }),
   ]);
 
@@ -208,6 +212,20 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
     }
     return `${Number(a.qty)} ${a.item.unit}`;
   }
+  /** Per-unit price of an asset line (charge ÷ quantity in real units), so
+   *  the table reads "300 metres · Rp X / metre". Null when there's no charge
+   *  or qty to divide. */
+  function assetPerUnit(a: AssetRow): { value: string; label: string } | null {
+    const charge = a.amortisedCharge ? new Decimal(a.amortisedCharge) : null;
+    if (!charge || charge.lte(0)) return null;
+    const subQty =
+      a.item.subFactor && a.item.subUnit
+        ? new Decimal(a.qty).times(a.item.subFactor)
+        : new Decimal(a.qty);
+    if (subQty.lte(0)) return null;
+    const label = a.item.subFactor && a.item.subUnit ? a.item.subUnit : a.item.unit;
+    return { value: charge.div(subQty).toFixed(4), label };
+  }
   const assetRows = (harvest.assets as AssetRow[]).map((a) => {
     const fifoCost = a.consumptions.reduce(
       (s: Decimal, c) => s.plus(new Decimal(c.qty).times(c.unitCost)),
@@ -280,6 +298,32 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
     })
     .filter((i) => i.available > 0);
 
+  // Packaging picker for Log-sale: every in-stock item + its FIFO-next unit
+  // cost (the price the next consumed unit costs). Batch.price is per-unit, so
+  // we take the oldest remaining batch's price directly (not price/qty).
+  const packagingItems = (items as ItemWithBatches[])
+    .map((i) => {
+      let remaining = new Decimal(0);
+      let nextCost: Decimal | null = null;
+      for (const b of i.batches) {
+        const consumed = b.consumptions.reduce((s: Decimal, c) => s.plus(c.qty), new Decimal(0));
+        const rem = new Decimal(b.qty).minus(consumed);
+        if (rem.gt(0)) {
+          remaining = remaining.plus(rem);
+          if (!nextCost) nextCost = new Decimal(b.price);
+        }
+      }
+      return {
+        id: i.id,
+        name: i.name,
+        unit: i.unit,
+        cost: (nextCost ?? new Decimal(0)).toFixed(2),
+        available: Number(remaining),
+      };
+    })
+    .filter((i) => i.available > 0)
+    .map(({ id, name, unit, cost }) => ({ id, name, unit, cost }));
+
   return (
     <div className="space-y-6">
       <header className="flex items-center justify-between">
@@ -314,6 +358,8 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
           <LogSaleDialog
             harvestId={harvest.id}
             produces={produces.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }))}
+            customers={(customers as { id: string; name: string; type: string }[]).map((c) => ({ id: c.id, name: c.name, type: c.type }))}
+            packagingItems={packagingItems}
           />
           {harvest.status === "LIVE" ? <EndHarvestButton id={harvest.id} /> : null}
           <StartHarvestDialog
@@ -373,6 +419,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                 <TableRow>
                   <TableHead>Date</TableHead>
                   <TableHead>Produce</TableHead>
+                  <TableHead>Customer</TableHead>
                   <TableHead>Grade</TableHead>
                   <TableHead className="text-right">Weight (kg)</TableHead>
                   <TableHead className="text-right">Price/kg</TableHead>
@@ -381,10 +428,20 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(harvest.sales as { id: string; date: Date; produce: { name: string }; grade: string; weight: Decimal; pricePerKg: Decimal; amount: Decimal }[]).map((s) => (
+                {(harvest.sales as { id: string; date: Date; produce: { name: string }; customer: { name: string; type: string } | null; grade: string; weight: Decimal; pricePerKg: Decimal; amount: Decimal }[]).map((s) => (
                   <TableRow key={s.id}>
                     <TableCell className="text-muted-foreground">{s.date.toISOString().slice(0, 10)}</TableCell>
                     <TableCell>{s.produce.name}</TableCell>
+                    <TableCell>
+                      {s.customer ? (
+                        <span className="flex flex-col">
+                          <span>{s.customer.name}</span>
+                          <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{s.customer.type.toLowerCase()}</span>
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <Badge variant="outline">{s.grade}</Badge>
                     </TableCell>
@@ -543,7 +600,17 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                     <TableRow key={a.id}>
                       <TableCell className="text-muted-foreground">{a.date.toISOString().slice(0, 10)}</TableCell>
                       <TableCell>{a.item.name}</TableCell>
-                      <TableCell className="text-right">{fmtAssetQty(a)}</TableCell>
+                      <TableCell className="text-right">
+                        {fmtAssetQty(a)}
+                        {(() => {
+                          const pu = assetPerUnit(a);
+                          return pu ? (
+                            <div className="text-[10px] text-muted-foreground">
+                              <Money value={pu.value} /> / {pu.label}
+                            </div>
+                          ) : null;
+                        })()}
+                      </TableCell>
                       <TableCell className="text-muted-foreground">
                         <strong className="text-foreground">{usesRemaining}</strong> of {a.maxUses}
                       </TableCell>
@@ -569,6 +636,8 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                             itemName={a.item.name}
                             qty={Number(a.qty)}
                             unit={a.item.unit}
+                            subUnit={a.item.subUnit}
+                            subFactor={a.item.subFactor ? Number(a.item.subFactor) : null}
                             usesRemaining={usesRemaining}
                             trigger={
                               <Button size="sm" variant="outline">Check in</Button>

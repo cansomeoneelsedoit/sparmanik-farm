@@ -66,6 +66,43 @@ export function registerAllUndoHandlers() {
     await tx.supplier.delete({ where: { id: action.entityId } });
   });
 
+  // Customer create — delete the customer.
+  registerUndoHandler("customer.create", async (tx, action) => {
+    await tx.customer.delete({ where: { id: action.entityId } });
+  });
+
+  // Customer update — restore prior values.
+  registerUndoHandler("customer.update", async (tx, action) => {
+    const before = action.payload.before as Record<string, unknown> | undefined;
+    if (!before?.id) return;
+    await tx.customer.update({
+      where: { id: before.id as string },
+      data: {
+        name: before.name as string,
+        type: before.type as "RETAILER" | "WHOLESALER" | "CONSUMER",
+        phone: (before.phone as string | null) ?? null,
+        email: (before.email as string | null) ?? null,
+        notes: (before.notes as string | null) ?? null,
+      },
+    });
+  });
+
+  // Customer delete — recreate.
+  registerUndoHandler("customer.delete", async (tx, action) => {
+    const c = action.payload as Record<string, unknown>;
+    if (!c?.id) return;
+    await tx.customer.create({
+      data: {
+        id: c.id as string,
+        name: c.name as string,
+        type: c.type as "RETAILER" | "WHOLESALER" | "CONSUMER",
+        phone: (c.phone as string | null) ?? null,
+        email: (c.email as string | null) ?? null,
+        notes: (c.notes as string | null) ?? null,
+      },
+    });
+  });
+
   // Supplier update — restore prior values.
   registerUndoHandler("supplier.update", async (tx, action) => {
     const before = action.payload.before as Record<string, unknown> | undefined;

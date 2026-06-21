@@ -200,6 +200,32 @@ export async function deleteStaffRate(id: string): Promise<ActionResult> {
   return { ok: true };
 }
 
+/**
+ * Simple pay edit — correct the CURRENT rate in place without recording a
+ * pay-rise (no history, no audit). For "I typed the wrong number" or "his pay
+ * was always this". If the staffer has no rate yet, one is created dated today.
+ * Use `addStaffRate` when you actually want a tracked pay change over time.
+ */
+const setPaySchema = z.object({ rate: z.string().regex(/^[0-9.]+$/, "Enter a number") });
+
+export async function setStaffPay(staffId: string, input: unknown): Promise<ActionResult> {
+  const parsed = setPaySchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Enter a valid hourly rate" };
+  const rate = new Decimal(parsed.data.rate);
+  const latest = await prisma.staffRate.findFirst({
+    where: { staffId },
+    orderBy: { effectiveFrom: "desc" },
+    select: { id: true },
+  });
+  if (latest) {
+    await prisma.staffRate.update({ where: { id: latest.id }, data: { rate } });
+  } else {
+    await prisma.staffRate.create({ data: { staffId, rate, effectiveFrom: new Date() } });
+  }
+  revalidatePath("/staff");
+  return { ok: true };
+}
+
 export async function deleteWageEntry(id: string): Promise<ActionResult> {
   await prisma.wageEntry.delete({ where: { id } });
   revalidatePath("/staff");

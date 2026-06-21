@@ -25,50 +25,84 @@ type Condition = "good" | "damaged" | "lost";
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
 /**
- * Per-asset check-in dialog. Lets staff release a reusable asset back to
- * inventory mid-harvest, or flag it as damaged/lost so the business absorbs
- * the loss instead of the harvest's P&L.
+ * Per-asset check-in dialog. Staff record HOW MUCH was actually used — in the
+ * item's real unit (metres / pcs / grams / kg) — and that quantity is charged
+ * to the greenhouse. Condition (good / damaged / lost) tags the line for the
+ * audit log.
+ *
+ * Lightweight build (Boyd's "option 3"): the used quantity is charged; leftover
+ * is NOT returned to inventory yet. A proper partial-return version comes later.
  */
 export function CheckInAssetDialog({
   harvestAssetId,
   itemName,
   qty,
   unit,
+  subUnit,
+  subFactor,
   usesRemaining,
   trigger,
 }: {
   harvestAssetId: string;
   itemName: string;
+  /** Installed quantity in PACK units. */
   qty: number;
   unit: string;
+  /** Pack sub-unit ("metres" / "pcs" / "grams") — drives the used-qty input. */
+  subUnit?: string | null;
+  subFactor?: number | null;
   /** maxUses - useCount on the source batch (per unit), for the residual-value preview. */
   usesRemaining: number | null;
   trigger: React.ReactNode;
 }) {
+  const isPack = !!(subUnit && subFactor && subFactor > 0);
+  const unitLabel = isPack ? (subUnit as string) : unit;
+  // Installed amount expressed in the real unit staff think in.
+  const installedInUnits = isPack ? qty * (subFactor as number) : qty;
+
   const [open, setOpen] = useState(false);
   const [condition, setCondition] = useState<Condition>("good");
+  const [used, setUsed] = useState(String(installedInUnits));
   const [date, setDate] = useState(todayStr());
   const [note, setNote] = useState("");
   const [pending, startT] = useTransition();
   const router = useRouter();
 
+  const usedNum = /^[0-9.]+$/.test(used) ? Number(used) : NaN;
+  const usedValid = !Number.isNaN(usedNum) && usedNum >= 0;
+  const overInstalled = usedValid && usedNum > installedInUnits + 1e-9;
+
+  function reset() {
+    setUsed(String(installedInUnits));
+    setNote("");
+    setCondition("good");
+    setDate(todayStr());
+  }
+
   function submit() {
+    if (!usedValid) {
+      toast.error(`Enter how many ${unitLabel} were used.`);
+      return;
+    }
+    // Convert the real-unit figure back to pack units for the ledger.
+    const usedPacks = isPack ? usedNum / (subFactor as number) : usedNum;
     startT(async () => {
       const r = await checkInHarvestAsset({
         harvestAssetId,
         condition,
+        usedQty: String(usedPacks),
+        usedDisplay: `${usedNum} ${unitLabel}`,
         date,
         note,
       });
       if (r.ok) {
         toast.success(
           condition === "good"
-            ? "Checked in — returned to inventory"
-            : `Marked as ${condition} — business write-off`,
+            ? `Checked in — ${usedNum} ${unitLabel} used`
+            : `Marked as ${condition} — ${usedNum} ${unitLabel} used`,
         );
         setOpen(false);
-        setNote("");
-        setCondition("good");
+        reset();
         router.refresh();
       } else {
         toast.error(r.error);
@@ -77,7 +111,13 @@ export function CheckInAssetDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (!o) reset();
+      }}
+    >
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -85,10 +125,46 @@ export function CheckInAssetDialog({
         </DialogHeader>
         <div className="space-y-4 py-4 text-sm">
           <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-            {qty} {unit}
+            Took out{" "}
+            <strong className="text-foreground">
+              {installedInUnits} {unitLabel}
+            </strong>
             {usesRemaining !== null
               ? ` · ${usesRemaining} use${usesRemaining === 1 ? "" : "s"} remaining per unit`
               : ""}
+          </div>
+
+          <div className="space-y-2">
+            <Label>
+              How many {unitLabel} were used?{" "}
+              <span className="text-xs font-normal text-muted-foreground">
+                (took out {installedInUnits})
+              </span>
+            </Label>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                step="any"
+                min="0"
+                autoFocus
+                value={used}
+                onChange={(e) => setUsed(e.target.value)}
+                placeholder={`0 to ${installedInUnits}`}
+              />
+              <span className="whitespace-nowrap text-sm text-muted-foreground">
+                {unitLabel}
+              </span>
+            </div>
+            {overInstalled ? (
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                More than you took out — allowed, but double-check.
+              </p>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">
+                Only this much is charged to the greenhouse. Leftover isn&apos;t
+                returned to stock yet (coming later).
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -100,7 +176,7 @@ export function CheckInAssetDialog({
                 onSelect={setCondition}
                 icon={<CheckCircle2 className="h-4 w-4" />}
                 title="Good"
-                subtitle="Returns to inventory; uses preserved"
+                subtitle="Used as normal"
                 tint="emerald"
               />
               <ConditionOption
@@ -109,7 +185,7 @@ export function CheckInAssetDialog({
                 onSelect={setCondition}
                 icon={<ShieldOff className="h-4 w-4" />}
                 title="Damaged"
-                subtitle="Business absorbs the loss"
+                subtitle="Note it for the log"
                 tint="amber"
               />
               <ConditionOption
@@ -118,7 +194,7 @@ export function CheckInAssetDialog({
                 onSelect={setCondition}
                 icon={<PackageX className="h-4 w-4" />}
                 title="Lost"
-                subtitle="Business absorbs the loss"
+                subtitle="Note it for the log"
                 tint="rose"
               />
             </div>
@@ -144,20 +220,12 @@ export function CheckInAssetDialog({
               rows={2}
             />
           </div>
-
-          {condition !== "good" ? (
-            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
-              The residual depreciable value stays with the business, not this
-              harvest&apos;s P&amp;L. It will appear on the Financials &ldquo;Damage
-              losses&rdquo; line, linked back to this harvest.
-            </div>
-          ) : null}
         </div>
         <DialogFooter>
           <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
             Cancel
           </Button>
-          <Button type="button" onClick={submit} disabled={pending}>
+          <Button type="button" onClick={submit} disabled={pending || !usedValid}>
             {pending ? "Saving…" : "Check in"}
           </Button>
         </DialogFooter>

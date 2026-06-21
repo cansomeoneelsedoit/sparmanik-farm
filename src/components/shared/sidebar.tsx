@@ -24,6 +24,7 @@ import {
   Sparkles,
   Truck,
   UserCircle2,
+  Users,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -154,6 +155,7 @@ export function SidebarContent({
         { key: "sales", href: "/sales", icon: DollarSign },
         { key: "expenses", href: "/expenses", icon: DollarSign },
         { key: "suppliers", href: "/suppliers", icon: Truck },
+        { key: "customers", href: "/customers", fallback: "Customers", icon: Users },
         // The original "Financials" page is rebranded as the consolidated
         // business view so the user has a clear "where's the bottom line"
         // entry point in the menu.

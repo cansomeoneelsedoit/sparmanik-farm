@@ -51,7 +51,9 @@ export function Combobox({
   const wrapperRef = React.useRef<HTMLDivElement>(null);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
-  const showSearch = options.length >= searchThreshold;
+  // Always show the search box when ad-hoc create is enabled, even with few/no
+  // options — otherwise you can't type the name of the first item to create it.
+  const showSearch = options.length >= searchThreshold || !!onCreate;
   const selected = options.find((o) => o.value === value);
 
   const filtered = React.useMemo(() => {
@@ -104,7 +106,7 @@ export function Combobox({
           !selected && "text-muted-foreground",
         )}
       >
-        <span className="truncate text-left">{selected ? selected.label : placeholder}</span>
+        <span className="min-w-0 flex-1 truncate text-left">{selected ? selected.label : placeholder}</span>
         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
       </button>
       {open ? (

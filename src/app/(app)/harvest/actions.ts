@@ -259,6 +259,12 @@ async function returnAssetSlicesToInventory(
 const checkInSchema = z.object({
   harvestAssetId: z.string().min(1),
   condition: z.enum(["good", "damaged", "lost"]),
+  /** Quantity actually USED, in PACK units (the dialog converts from the
+   *  item's real unit — metres/pcs/grams/kg). When present, the lightweight
+   *  path runs: charge only the used amount to the harvest, no stock return. */
+  usedQty: z.string().optional(),
+  /** Human "30 metres" string for the audit log / note. */
+  usedDisplay: z.string().optional().default(""),
   date: z.string().min(1),
   note: z.string().optional().default(""),
 });
@@ -301,10 +307,67 @@ export async function checkInHarvestAsset(input: unknown): Promise<ActionResult>
             },
           },
         },
-      })) as (AssetRowForReturn & { harvestId: string; returnCondition: string | null }) | null;
+      })) as
+        | (AssetRowForReturn & {
+            harvestId: string;
+            returnCondition: string | null;
+            qty: Decimal;
+            amortisedCharge: Decimal | null;
+          })
+        | null;
       if (!asset) throw new Error("Asset not found");
       if (asset.returnCondition) {
         throw new Error(`Asset already checked in (${asset.returnCondition})`);
+      }
+
+      // --- Lightweight path (Boyd's "option 3") -------------------------
+      // Staff entered how much was actually USED (in real units → packs).
+      // Charge only that to the harvest by scaling amortisedCharge down
+      // proportionally; record the used qty. No stock return, no batch
+      // changes. (A proper partial-return version comes later.)
+      if (parsed.data.usedQty !== undefined) {
+        const usedPacks = new Decimal(parsed.data.usedQty);
+        const installedPacks = new Decimal(asset.qty);
+        const origCharge = asset.amortisedCharge
+          ? new Decimal(asset.amortisedCharge)
+          : new Decimal(0);
+        const perPack = installedPacks.gt(0)
+          ? origCharge.div(installedPacks)
+          : new Decimal(0);
+        const newCharge = usedPacks.times(perPack);
+
+        await tx.harvestAsset.update({
+          where: { id: asset.id },
+          data: {
+            qty: usedPacks,
+            depreciable: true, // keep the (now used-only) cost in the harvest P&L
+            amortisedCharge: newCharge,
+            returnCondition: parsed.data.condition,
+            returnedAt: when,
+            returnNote:
+              [parsed.data.note, `used ${parsed.data.usedDisplay}`]
+                .filter(Boolean)
+                .join(" — ") || null,
+          },
+        });
+
+        await recordAction(tx, {
+          type: "harvest.checkin_asset",
+          entityType: "HarvestAsset",
+          entityId: asset.id,
+          description: `Checked in ${parsed.data.usedDisplay || "asset"} used (${parsed.data.condition})`,
+          userId,
+          payload: {
+            harvestAssetId: asset.id,
+            harvestId: asset.harvestId,
+            condition: parsed.data.condition,
+            usedQty: parsed.data.usedQty,
+            usedDisplay: parsed.data.usedDisplay,
+            note: parsed.data.note,
+          },
+        });
+
+        return asset.harvestId;
       }
 
       if (parsed.data.condition === "good") {
@@ -576,36 +639,149 @@ const saleSchema = z.object({
   grade: z.enum(["A", "B", "C", "D"]),
   weight: z.string(),
   pricePerKg: z.string(),
+  /** Optional buyer. Null = walk-up / untracked sale. */
+  customerId: z.string().optional(),
+  /** Optional packaging (a box/bag/container item). When set, the item is
+   *  consumed from stock onto the cycle's usage at FIFO cost. */
+  packagingItemId: z.string().optional(),
+  packagingQty: z.string().optional(),
+  /** "included" → packaging is a cost only (sale total unchanged).
+   *  "ontop"    → packagingChargePerUnit × qty is added to the sale total. */
+  packagingMode: z.enum(["included", "ontop"]).optional(),
+  /** What the customer pays per packaging unit when mode = "ontop"
+   *  (defaults to cost on the client, but editable). */
+  packagingChargePerUnit: z.string().optional(),
 });
 
 export async function logSale(input: unknown): Promise<ActionResult> {
   const parsed = saleSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
   const userId = await uid();
-  await prisma.$transaction(async (tx: TransactionClient) => {
-    const weight = new Decimal(parsed.data.weight);
-    const price = new Decimal(parsed.data.pricePerKg);
-    const sale = await tx.sale.create({
-      data: {
-        harvestId: parsed.data.harvestId,
-        produceId: parsed.data.produceId,
-        date: new Date(parsed.data.date),
-        grade: parsed.data.grade,
-        weight,
-        pricePerKg: price,
-        amount: weight.times(price),
-      },
+  const d = parsed.data;
+  const hasPackaging = !!(d.packagingItemId && d.packagingQty && Number(d.packagingQty) > 0);
+  try {
+    await prisma.$transaction(async (tx: TransactionClient) => {
+      const weight = new Decimal(d.weight);
+      const price = new Decimal(d.pricePerKg);
+      let amount = weight.times(price);
+
+      // Packaging charged "on top" adds to the sale total (revenue).
+      if (hasPackaging && d.packagingMode === "ontop") {
+        const charge = new Decimal(d.packagingChargePerUnit || "0").times(d.packagingQty as string);
+        amount = amount.plus(charge);
+      }
+
+      const sale = await tx.sale.create({
+        data: {
+          harvestId: d.harvestId,
+          produceId: d.produceId,
+          date: new Date(d.date),
+          grade: d.grade,
+          weight,
+          pricePerKg: price,
+          amount,
+          customerId: d.customerId || null,
+        },
+      });
+      await recordAction(tx, {
+        type: "harvest.log_sale",
+        entityType: "Sale",
+        entityId: sale.id,
+        description: `Logged sale`,
+        userId,
+        payload: { harvestId: d.harvestId, saleId: sale.id, customerId: d.customerId ?? null },
+      });
+
+      // Consume the packaging from inventory onto this cycle's usage (FIFO
+      // cost). This is the real cost; the on-top charge above is the revenue.
+      if (hasPackaging) {
+        const { consumed } = await consumeFifo(tx, d.packagingItemId as string, d.packagingQty as string);
+        const usage = await tx.harvestUsage.create({
+          data: {
+            harvestId: d.harvestId,
+            itemId: d.packagingItemId as string,
+            qty: new Decimal(d.packagingQty as string),
+            displayQty: `${d.packagingQty} for sale packaging`,
+            date: new Date(d.date),
+          },
+        });
+        for (const c of consumed) {
+          await tx.batchConsumption.create({
+            data: {
+              batchId: c.batchId,
+              qty: new Decimal(c.qty),
+              unitCost: new Decimal(c.unitCost),
+              harvestUsageId: usage.id,
+            },
+          });
+        }
+        await recordAction(tx, {
+          type: "harvest.use_stock",
+          entityType: "HarvestUsage",
+          entityId: usage.id,
+          description: `Packaging used for sale`,
+          userId,
+          payload: { harvestId: d.harvestId, usageId: usage.id, viaSale: sale.id },
+        });
+      }
     });
-    await recordAction(tx, {
-      type: "harvest.log_sale",
-      entityType: "Sale",
-      entityId: sale.id,
-      description: `Logged sale`,
-      userId,
-      payload: { harvestId: parsed.data.harvestId, saleId: sale.id },
-    });
-  });
-  revalidatePath(`/harvest/${parsed.data.harvestId}`);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to log sale" };
+  }
+  revalidatePath(`/harvest/${d.harvestId}`);
   revalidatePath("/sales");
   return { ok: true };
+}
+
+// ============================================================================
+// Customers (who we sell to) — mirror of supplier quick-create. Search-first,
+// create ad-hoc from the Log-sale dialog. Type drives later reporting.
+// ============================================================================
+
+const CUSTOMER_TYPES = ["RETAILER", "WHOLESALER", "CONSUMER"] as const;
+
+const createCustomerSchema = z.object({
+  name: z.string().min(1),
+  type: z.enum(CUSTOMER_TYPES).default("CONSUMER"),
+});
+
+export async function createCustomerQuick(
+  input: unknown,
+): Promise<ActionResult<{ id: string; name: string; type: string }>> {
+  const parsed = createCustomerSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Name is required" };
+  const trimmed = parsed.data.name.trim();
+  if (!trimmed) return { ok: false, error: "Name is required" };
+  const userId = await uid();
+  try {
+    const customer = await prisma.$transaction(async (tx: TransactionClient) => {
+      const created = await tx.customer.create({
+        data: { name: trimmed, type: parsed.data.type },
+      });
+      await recordAction(tx, {
+        type: "customer.create",
+        entityType: "Customer",
+        entityId: created.id,
+        description: `Added customer (quick): ${trimmed} (${parsed.data.type.toLowerCase()})`,
+        userId,
+        payload: { name: trimmed, type: parsed.data.type, source: "quick" },
+      });
+      return created;
+    });
+    revalidatePath("/sales");
+    return { ok: true, data: { id: customer.id, name: customer.name, type: customer.type } };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to create customer" };
+  }
+}
+
+/** All customers for the active org — drives the Log-sale picker. */
+export async function listCustomers(): Promise<
+  { id: string; name: string; type: string }[]
+> {
+  const rows = (await prisma.customer.findMany({
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, type: true },
+  })) as { id: string; name: string; type: string }[];
+  return rows;
 }

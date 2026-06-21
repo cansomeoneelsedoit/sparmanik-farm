@@ -8,6 +8,7 @@ import { Money } from "@/components/shared/money";
 import { AddStaffDialog } from "@/app/(app)/staff/add-staff-dialog";
 import { NewWageEntryDialog } from "@/app/(app)/staff/new-wage-entry-dialog";
 import { AddPayRiseButton } from "@/app/(app)/staff/add-pay-rise-button";
+import { EditPayButton } from "@/app/(app)/staff/edit-pay-button";
 import { StaffCardActions } from "@/app/(app)/staff/staff-card-actions";
 
 export const dynamic = "force-dynamic";
@@ -101,7 +102,10 @@ export default async function StaffPage() {
                     <span className="text-muted-foreground">Total earned: </span>
                     <span className="font-medium"><Money value={totalEarned.toFixed(4)} /></span>
                   </div>
-                  <AddPayRiseButton staffId={s.id} />
+                  <div className="grid grid-cols-2 gap-2">
+                    <EditPayButton staffId={s.id} currentRate={s.rates[0] ? s.rates[0].rate.toFixed(0) : ""} />
+                    <AddPayRiseButton staffId={s.id} />
+                  </div>
                 </CardContent>
               </Card>
             );

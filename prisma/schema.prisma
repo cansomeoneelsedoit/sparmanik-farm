@@ -91,6 +91,12 @@ enum SaleGrade {
   D
 }
 
+enum CustomerType {
+  RETAILER
+  WHOLESALER
+  CONSUMER
+}
+
 enum TaskPriority {
   LOW
   MEDIUM
@@ -150,6 +156,7 @@ model Organization {
   produces        Produce[]
   greenhouses    Greenhouse[]
   suppliers       Supplier[]
+  customers       Customer[]
   items           Item[]
   batches         Batch[]
   staff           Staff[]
@@ -297,6 +304,27 @@ model Supplier {
 
   @@index([organizationId])
   @@map("suppliers")
+}
+
+/// Who we SELL to. Mirrors Supplier (who we buy from). Type drives reporting
+/// later (resale vs distribution vs end consumer). Created ad-hoc from the
+/// Log-sale dialog (search-first, create if missing).
+model Customer {
+  id             String       @id @default(cuid())
+  organizationId String?      @map("organization_id")
+  name           String
+  type           CustomerType @default(CONSUMER)
+  phone          String?
+  email          String?
+  notes          String?
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sales        Sale[]
+
+  @@index([organizationId])
+  @@map("customers")
 }
 
 // ---------- Inventory ----------
@@ -537,14 +565,17 @@ model Sale {
   weight         Decimal   @db.Decimal(18, 4)
   pricePerKg     Decimal   @db.Decimal(18, 4) @map("price_per_kg")
   amount         Decimal   @db.Decimal(18, 4)
+  customerId     String?   @map("customer_id")
   createdAt      DateTime  @default(now()) @map("created_at")
 
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   harvest      Harvest      @relation(fields: [harvestId], references: [id], onDelete: Cascade)
   produce      Produce      @relation(fields: [produceId], references: [id])
+  customer     Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
   @@index([harvestId, date])
+  @@index([customerId])
   @@map("sales")
 }
 
