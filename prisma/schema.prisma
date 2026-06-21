@@ -317,6 +317,11 @@ model Customer {
   phone          String?
   email          String?
   notes          String?
+  /** Brand logo stored INLINE on the row (same pattern as Item.photoData) so
+   *  it travels with the customer during sync / backup / restore. Small WebP
+   *  written by the customer edit dialog. */
+  logoData       Bytes?       @map("logo_data")
+  logoMime       String?      @map("logo_mime")
   createdAt      DateTime     @default(now()) @map("created_at")
   updatedAt      DateTime     @updatedAt @map("updated_at")
 

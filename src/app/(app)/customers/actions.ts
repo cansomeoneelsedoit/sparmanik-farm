@@ -14,7 +14,21 @@ const customerSchema = z.object({
   phone: z.string().optional().default(""),
   email: z.string().email().optional().or(z.literal("")).default(""),
   notes: z.string().optional().default(""),
+  // Brand logo: base64 WebP from the edit dialog (client-resized to ≤256px).
+  // `logoRemove` clears an existing logo; both omitted = leave it untouched.
+  logoBase64: z.string().optional().nullable(),
+  logoMime: z.string().optional().nullable(),
+  logoRemove: z.boolean().optional().default(false),
 });
+
+/** Resolve the logo columns from a payload. Returns {} to LEAVE the logo
+ *  unchanged (so a plain edit never stomps it), an explicit null pair to clear
+ *  it, or the decoded bytes to set a new one. */
+function logoColumns(input: z.infer<typeof customerSchema>): { logoData?: Buffer | null; logoMime?: string | null } {
+  if (input.logoRemove) return { logoData: null, logoMime: null };
+  if (input.logoBase64) return { logoData: Buffer.from(input.logoBase64, "base64"), logoMime: input.logoMime || "image/webp" };
+  return {};
+}
 
 export type ActionResult<T = void> =
   | { ok: true; data?: T }
@@ -42,7 +56,7 @@ export async function createCustomer(input: unknown): Promise<ActionResult<{ id:
   }
   const userId = await currentUserId();
   const customer = await prisma.$transaction(async (tx: TransactionClient) => {
-    const c = await tx.customer.create({ data: clean(parsed.data) });
+    const c = await tx.customer.create({ data: { ...clean(parsed.data), ...logoColumns(parsed.data) } });
     await recordAction(tx, {
       type: "customer.create",
       entityType: "Customer",
@@ -65,9 +79,13 @@ export async function updateCustomer(id: string, input: unknown): Promise<Action
   }
   const userId = await currentUserId();
   await prisma.$transaction(async (tx: TransactionClient) => {
-    const before = await tx.customer.findUnique({ where: { id } });
+    // Scalar select — keep the logo bytes out of the audit payload.
+    const before = await tx.customer.findUnique({
+      where: { id },
+      select: { name: true, type: true, phone: true, email: true, notes: true },
+    });
     if (!before) throw new Error("Customer not found");
-    await tx.customer.update({ where: { id }, data: clean(parsed.data) });
+    await tx.customer.update({ where: { id }, data: { ...clean(parsed.data), ...logoColumns(parsed.data) } });
     await recordAction(tx, {
       type: "customer.update",
       entityType: "Customer",
@@ -85,7 +103,11 @@ export async function updateCustomer(id: string, input: unknown): Promise<Action
 export async function deleteCustomer(id: string): Promise<ActionResult> {
   const userId = await currentUserId();
   await prisma.$transaction(async (tx: TransactionClient) => {
-    const customer = await tx.customer.findUnique({ where: { id } });
+    // Scalar select — keep logo bytes out of the audit payload.
+    const customer = await tx.customer.findUnique({
+      where: { id },
+      select: { id: true, name: true, type: true, phone: true, email: true, notes: true },
+    });
     if (!customer) throw new Error("Customer not found");
     // Sales keep their history; the FK is SET NULL on delete, so a removed
     // customer just leaves those sales unattributed.

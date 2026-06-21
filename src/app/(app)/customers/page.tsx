@@ -20,7 +20,18 @@ export const dynamic = "force-dynamic";
 export default async function CustomersPage() {
   const customers = await prisma.customer.findMany({
     orderBy: { name: "asc" },
-    include: { sales: { select: { amount: true, date: true } } },
+    // select (not include) so the logo BYTES never load into the list query —
+    // we only need logoMime to know whether a logo exists.
+    select: {
+      id: true,
+      name: true,
+      type: true,
+      phone: true,
+      email: true,
+      notes: true,
+      logoMime: true,
+      sales: { select: { amount: true, date: true } },
+    },
   });
 
   type CustomerWithSales = {
@@ -30,6 +41,7 @@ export default async function CustomersPage() {
     phone: string | null;
     email: string | null;
     notes: string | null;
+    logoMime: string | null;
     sales: { amount: Decimal; date: Date }[];
   };
 
@@ -45,6 +57,7 @@ export default async function CustomersPage() {
       phone: c.phone,
       email: c.email,
       notes: c.notes,
+      hasLogo: !!c.logoMime,
       salesCount: c.sales.length,
       totalDisplay: <Money value={total.toFixed(4)} />,
       lastSale,

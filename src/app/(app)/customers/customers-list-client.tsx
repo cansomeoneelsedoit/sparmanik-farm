@@ -6,6 +6,7 @@ import { Pencil, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
+import { SmartImage } from "@/components/shared/smart-image";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +20,7 @@ export type CustomerRow = {
   phone: string | null;
   email: string | null;
   notes: string | null;
+  hasLogo: boolean;
   salesCount: number;
   /** Pre-formatted total (server-rendered <Money> string). */
   totalDisplay: React.ReactNode;
@@ -96,7 +98,18 @@ export function CustomersListClient({ customers }: { customers: CustomerRow[] })
             <tbody className="divide-y">
               {filtered.map((c) => (
                 <tr key={c.id} className="hover:bg-muted/30">
-                  <td className="px-4 py-2.5 font-medium">{c.name}</td>
+                  <td className="px-4 py-2.5 font-medium">
+                    <div className="flex items-center gap-2.5">
+                      {c.hasLogo ? (
+                        <SmartImage
+                          src={`/api/customers/${c.id}/logo`}
+                          alt={c.name}
+                          className="h-7 w-7 shrink-0 rounded border object-contain"
+                        />
+                      ) : null}
+                      <span>{c.name}</span>
+                    </div>
+                  </td>
                   <td className="px-4 py-2.5">
                     <span className={cn("rounded-full px-2 py-0.5 text-[11px]", TYPE_STYLE[c.type] ?? TYPE_STYLE.CONSUMER)}>
                       {typeLabel(c.type)}
@@ -120,7 +133,7 @@ export function CustomersListClient({ customers }: { customers: CustomerRow[] })
                   <td className="px-4 py-2.5">
                     <div className="flex justify-end gap-1">
                       <CustomerFormDialog
-                        existing={{ id: c.id, name: c.name, type: c.type, phone: c.phone, email: c.email, notes: c.notes }}
+                        existing={{ id: c.id, name: c.name, type: c.type, phone: c.phone, email: c.email, notes: c.notes, hasLogo: c.hasLogo }}
                         trigger={
                           <Button size="icon" variant="ghost" title="Edit">
                             <Pencil className="h-4 w-4" />

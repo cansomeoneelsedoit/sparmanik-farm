@@ -236,6 +236,13 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
   const depreciableAssets = assetRows.filter((a) => a.depreciable);
   const fixedAssets = assetRows.filter((a) => !a.depreciable);
 
+  // Per-section column totals shown in each table's footer row. Money totals
+  // reuse the P&L figures so the footer always matches the stat cards above.
+  const salesWeightTotal = Math.round((harvest.sales as { weight: Decimal }[]).reduce((s, x) => s + Number(x.weight), 0) * 1000) / 1000;
+  const labourHoursTotal = labourRows.reduce((s, l) => s + Number(l.hours), 0);
+  const deprFullTotal = depreciableAssets.reduce((s, a) => s.plus(a.fifoCost), new Decimal(0));
+  const fixedFifoTotal = fixedAssets.reduce((s, a) => s.plus(a.fifoCost), new Decimal(0));
+
   // --- Build the item list passed to InstallAssetDialog ---
   // For each item we compute total available stock and surface the FIFO-top
   // batch's depreciation snapshot so the dialog can render the per-use charge
@@ -451,6 +458,13 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                     <TableCell className="p-0"><DeleteSaleButton id={s.id} /></TableCell>
                   </TableRow>
                 ))}
+                <TableRow className="border-t-2 bg-muted/20 font-semibold hover:bg-muted/20">
+                  <TableCell colSpan={4}>Total</TableCell>
+                  <TableCell className="text-right">{salesWeightTotal} kg</TableCell>
+                  <TableCell />
+                  <TableCell className="text-right text-green-600"><Money value={pl.revenue} /></TableCell>
+                  <TableCell />
+                </TableRow>
               </TableBody>
             </Table>
           )}
@@ -486,6 +500,11 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                     </TableRow>
                   );
                 })}
+                <TableRow className="border-t-2 bg-muted/20 font-semibold hover:bg-muted/20">
+                  <TableCell colSpan={3} className="text-right">Total</TableCell>
+                  <TableCell className="text-right text-red-600"><Money value={pl.usageCost} /></TableCell>
+                  <TableCell />
+                </TableRow>
               </TableBody>
             </Table>
           )}
@@ -526,6 +545,10 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                     <TableCell className="text-right font-medium"><Money value={e.amount.toFixed(4)} /></TableCell>
                   </TableRow>
                 ))}
+                <TableRow className="border-t-2 bg-muted/20 font-semibold hover:bg-muted/20">
+                  <TableCell colSpan={4} className="text-right">Total</TableCell>
+                  <TableCell className="text-right text-red-600"><Money value={pl.expenseCost} /></TableCell>
+                </TableRow>
               </TableBody>
             </Table>
           )}
@@ -567,6 +590,13 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                     </TableCell>
                   </TableRow>
                 ))}
+                <TableRow className="border-t-2 bg-muted/20 font-semibold hover:bg-muted/20">
+                  <TableCell colSpan={2}>Total</TableCell>
+                  <TableCell className="text-right">{labourHoursTotal.toFixed(2)}h</TableCell>
+                  <TableCell colSpan={2} />
+                  <TableCell className="text-right text-red-600"><Money value={pl.labourCost} /></TableCell>
+                  <TableCell />
+                </TableRow>
               </TableBody>
             </Table>
           )}
@@ -648,6 +678,12 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                     </TableRow>
                   );
                 })}
+                <TableRow className="border-t-2 bg-muted/20 font-semibold hover:bg-muted/20">
+                  <TableCell colSpan={4}>Total</TableCell>
+                  <TableCell className="text-right text-red-600"><Money value={pl.depreciationCost} /></TableCell>
+                  <TableCell className="text-right text-muted-foreground"><Money value={deprFullTotal.toFixed(4)} /></TableCell>
+                  <TableCell colSpan={2} />
+                </TableRow>
               </TableBody>
             </Table>
           )}
@@ -685,6 +721,10 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                     <TableCell className="text-right text-muted-foreground"><Money value={a.fifoCost.toFixed(4)} /></TableCell>
                   </TableRow>
                 ))}
+                <TableRow className="border-t-2 bg-muted/20 font-semibold hover:bg-muted/20">
+                  <TableCell colSpan={5}>Total</TableCell>
+                  <TableCell className="text-right text-muted-foreground"><Money value={fixedFifoTotal.toFixed(4)} /></TableCell>
+                </TableRow>
               </TableBody>
             </Table>
           )}
