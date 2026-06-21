@@ -11,8 +11,15 @@ REM   - Anything where local behaves differently from Railway
 REM
 REM Cause: Docker bind mounts on Windows don't propagate file
 REM watch events into the container, so Turbopack silently
-REM serves a stale compiled bundle. This restart forces a
-REM fresh compile from current source. ~20-30 seconds.
+REM serves a stale compiled bundle — and over many restarts its
+REM route manifest in .next/dev drifts out of sync, which makes
+REM API routes (like item/customer photos) 404 even though the
+REM data is perfectly fine. A plain `docker compose restart`
+REM KEEPS that stale .next/dev volume, so it never fixed the
+REM recurring "pictures gone" problem.
+REM
+REM This script now wipes .next/dev first, forcing a clean route
+REM manifest + fresh compile from current source. ~30-40 seconds.
 REM
 REM If THIS doesn't fix it (e.g. you added an npm dep, or
 REM changed prisma/schema.prisma), use restart-dev-full.cmd
@@ -21,6 +28,8 @@ REM ============================================================
 
 cd /d "%~dp0"
 echo.
+echo Clearing stale Turbopack route cache (.next/dev)...
+docker compose exec -T web sh -c "rm -rf .next/dev" 2>nul
 echo Restarting Sparmanik Farm dev container...
 docker compose restart web
 echo.

@@ -344,6 +344,9 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
           </Badge>
         </div>
         <div className="flex gap-2">
+          <Button asChild variant="outline">
+            <a href={`/print/harvest/${harvest.id}?auto=1`} target="_blank" rel="noopener noreferrer">Download PDF</a>
+          </Button>
           <RecordUsageDialog
             harvestId={harvest.id}
             items={items.map((i: { id: string; name: string; unit: string }) => ({ id: i.id, name: i.name, unit: i.unit }))}

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/server/prisma";
 import type { TransactionClient } from "@/server/decimal";
@@ -24,9 +25,9 @@ const customerSchema = z.object({
 /** Resolve the logo columns from a payload. Returns {} to LEAVE the logo
  *  unchanged (so a plain edit never stomps it), an explicit null pair to clear
  *  it, or the decoded bytes to set a new one. */
-function logoColumns(input: z.infer<typeof customerSchema>): { logoData?: Buffer | null; logoMime?: string | null } {
+function logoColumns(input: z.infer<typeof customerSchema>): { logoData?: Uint8Array | null; logoMime?: string | null } {
   if (input.logoRemove) return { logoData: null, logoMime: null };
-  if (input.logoBase64) return { logoData: Buffer.from(input.logoBase64, "base64"), logoMime: input.logoMime || "image/webp" };
+  if (input.logoBase64) return { logoData: new Uint8Array(Buffer.from(input.logoBase64, "base64")), logoMime: input.logoMime || "image/webp" };
   return {};
 }
 
@@ -56,7 +57,7 @@ export async function createCustomer(input: unknown): Promise<ActionResult<{ id:
   }
   const userId = await currentUserId();
   const customer = await prisma.$transaction(async (tx: TransactionClient) => {
-    const c = await tx.customer.create({ data: { ...clean(parsed.data), ...logoColumns(parsed.data) } });
+    const c = await tx.customer.create({ data: { ...clean(parsed.data), ...logoColumns(parsed.data) } as Prisma.CustomerUncheckedCreateInput });
     await recordAction(tx, {
       type: "customer.create",
       entityType: "Customer",
@@ -85,7 +86,7 @@ export async function updateCustomer(id: string, input: unknown): Promise<Action
       select: { name: true, type: true, phone: true, email: true, notes: true },
     });
     if (!before) throw new Error("Customer not found");
-    await tx.customer.update({ where: { id }, data: { ...clean(parsed.data), ...logoColumns(parsed.data) } });
+    await tx.customer.update({ where: { id }, data: { ...clean(parsed.data), ...logoColumns(parsed.data) } as Prisma.CustomerUncheckedUpdateInput });
     await recordAction(tx, {
       type: "customer.update",
       entityType: "Customer",
