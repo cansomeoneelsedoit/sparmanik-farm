@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -20,10 +20,23 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Combobox } from "@/components/ui/combobox";
-import { logSale, createCustomerQuick } from "@/app/(app)/harvest/actions";
+import { logSale, updateSale, createCustomerQuick } from "@/app/(app)/harvest/actions";
 
 type Customer = { id: string; name: string; type: string };
 type PackagingItem = { id: string; name: string; unit: string; cost: string };
+type Grade = "A" | "B" | "C" | "D";
+
+/** An existing sale being edited (pre-fills the dialog). */
+export type EditableSale = {
+  id: string;
+  produceId: string;
+  date: string; // YYYY-MM-DD
+  grade: Grade;
+  weight: string;
+  pricePerKg: string;
+  amount: string; // the recorded charged total
+  customerId: string | null;
+};
 
 const CUSTOMER_TYPES = [
   { value: "RETAILER", label: "Retailer", hint: "resells to the final consumer" },
@@ -49,29 +62,50 @@ export function LogSaleDialog({
   produces,
   customers: initialCustomers = [],
   packagingItems = [],
+  existing,
+  trigger,
 }: {
   harvestId: string;
   produces: { id: string; name: string }[];
   customers?: Customer[];
   /** In-stock items usable as packaging (boxes, bags, containers…) + cost. */
   packagingItems?: PackagingItem[];
+  /** When set, the dialog edits this sale instead of creating a new one. */
+  existing?: EditableSale;
+  /** Custom trigger (e.g. an edit pencil). Defaults to a "Log sale" button. */
+  trigger?: ReactNode;
 }) {
+  const isEdit = !!existing;
   const [open, setOpen] = useState(false);
   const [pending, startT] = useTransition();
   const router = useRouter();
   const [customers, setCustomers] = useState<Customer[]>(initialCustomers);
-  const [customerId, setCustomerId] = useState<string | null>(null);
+  const [customerId, setCustomerId] = useState<string | null>(existing?.customerId ?? null);
   // Type to use when creating a NEW customer ad-hoc.
   const [newType, setNewType] = useState<string>("CONSUMER");
-  // Packaging: which item, how many, and how it's priced.
+  // Packaging (create-only): which item, how many, and how it's priced.
   const [pkgItemId, setPkgItemId] = useState<string | null>(null);
   const [pkgQty, setPkgQty] = useState("1");
   const [pkgMode, setPkgMode] = useState<"included" | "ontop">("included");
   const [pkgCharge, setPkgCharge] = useState(""); // per-unit charge for "ontop"
-  const form = useForm<Form>({ resolver: zodResolver(schema), defaultValues: { grade: "A", weight: "0", pricePerKg: "0", date: today() } });
+
+  const defaults: Form = existing
+    ? { produceId: existing.produceId, date: existing.date, grade: existing.grade, weight: existing.weight, pricePerKg: existing.pricePerKg }
+    : { produceId: "", grade: "A", weight: "0", pricePerKg: "0", date: today() };
+  const form = useForm<Form>({ resolver: zodResolver(schema), defaultValues: defaults });
+
+  // Custom-total override (discount / markup). Pre-enabled on edit when the
+  // stored amount doesn't equal weight × price/kg (i.e. it was overridden,
+  // or carried an on-top packaging charge).
+  const overrideWasUsed = (() => {
+    if (!existing) return false;
+    const base = Number(existing.weight) * Number(existing.pricePerKg);
+    return Math.abs(Number(existing.amount) - base) > 0.005;
+  })();
+  const [overrideOn, setOverrideOn] = useState(overrideWasUsed);
+  const [overrideAmount, setOverrideAmount] = useState(existing ? existing.amount : "");
 
   const pkgItem = packagingItems.find((p) => p.id === pkgItemId) ?? null;
-  // When you pick a packaging item, default the on-top charge to its cost.
   function pickPackaging(id: string | null) {
     setPkgItemId(id);
     const it = packagingItems.find((p) => p.id === id);
@@ -80,8 +114,16 @@ export function LogSaleDialog({
   const weightNum = Number(form.watch("weight")) || 0;
   const priceNum = Number(form.watch("pricePerKg")) || 0;
   const pkgQtyNum = Number(pkgQty) || 0;
-  const onTopExtra = pkgItem && pkgMode === "ontop" ? (Number(pkgCharge) || 0) * pkgQtyNum : 0;
-  const saleTotal = weightNum * priceNum + onTopExtra;
+  const onTopExtra = !isEdit && pkgItem && pkgMode === "ontop" ? (Number(pkgCharge) || 0) * pkgQtyNum : 0;
+  const autoTotal = weightNum * priceNum + onTopExtra;
+  const finalAmount = overrideOn ? Number(overrideAmount) || 0 : autoTotal;
+
+  function toggleOverride(on: boolean) {
+    setOverrideOn(on);
+    // Seed the field with the current computed total so the user edits from
+    // the "list" price down to the discounted figure.
+    if (on && overrideAmount.trim() === "") setOverrideAmount(String(Math.round(autoTotal)));
+  }
 
   async function handleCreateCustomer(typed: string) {
     const r = await createCustomerQuick({ name: typed, type: newType });
@@ -96,28 +138,42 @@ export function LogSaleDialog({
   }
 
   function reset() {
-    form.reset({ grade: "A", weight: "0", pricePerKg: "0", date: today() });
-    setCustomerId(null);
+    form.reset(defaults);
+    setCustomerId(existing?.customerId ?? null);
     setNewType("CONSUMER");
     setPkgItemId(null);
     setPkgQty("1");
     setPkgMode("included");
     setPkgCharge("");
+    setOverrideOn(overrideWasUsed);
+    setOverrideAmount(existing ? existing.amount : "");
   }
 
   function onSubmit(v: Form) {
+    const amountOverride = overrideOn ? overrideAmount : undefined;
     startT(async () => {
-      const r = await logSale({
-        harvestId,
-        ...v,
-        customerId: customerId || undefined,
-        packagingItemId: pkgItemId || undefined,
-        packagingQty: pkgItemId ? pkgQty : undefined,
-        packagingMode: pkgItemId ? pkgMode : undefined,
-        packagingChargePerUnit: pkgItemId && pkgMode === "ontop" ? pkgCharge : undefined,
-      });
+      const r = isEdit
+        ? await updateSale(existing.id, {
+            produceId: v.produceId,
+            date: v.date,
+            grade: v.grade,
+            weight: v.weight,
+            pricePerKg: v.pricePerKg,
+            customerId: customerId || undefined,
+            amountOverride,
+          })
+        : await logSale({
+            harvestId,
+            ...v,
+            customerId: customerId || undefined,
+            packagingItemId: pkgItemId || undefined,
+            packagingQty: pkgItemId ? pkgQty : undefined,
+            packagingMode: pkgItemId ? pkgMode : undefined,
+            packagingChargePerUnit: pkgItemId && pkgMode === "ontop" ? pkgCharge : undefined,
+            amountOverride,
+          });
       if (r.ok) {
-        toast.success("Sale logged");
+        toast.success(isEdit ? "Sale updated" : "Sale logged");
         setOpen(false);
         reset();
         router.refresh();
@@ -135,12 +191,10 @@ export function LogSaleDialog({
         if (!o) reset();
       }}
     >
-      <DialogTrigger asChild>
-        <Button>Log sale</Button>
-      </DialogTrigger>
+      <DialogTrigger asChild>{trigger ?? <Button>Log sale</Button>}</DialogTrigger>
       <DialogContent>
         <form onSubmit={form.handleSubmit(onSubmit)} className="min-w-0">
-          <DialogHeader><DialogTitle>Log sale</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{isEdit ? "Edit sale" : "Log sale"}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-4">
             <div className="grid grid-cols-2 gap-3 [&>*]:min-w-0">
               <div className="space-y-2">
@@ -154,7 +208,7 @@ export function LogSaleDialog({
               </div>
               <div className="space-y-2">
                 <Label>Grade</Label>
-                <Select value={form.watch("grade")} onValueChange={(v) => form.setValue("grade", v as "A" | "B" | "C" | "D")}>
+                <Select value={form.watch("grade")} onValueChange={(v) => form.setValue("grade", v as Grade)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {["A", "B", "C", "D"].map((g) => <SelectItem key={g} value={g}>{g}</SelectItem>)}
@@ -211,8 +265,9 @@ export function LogSaleDialog({
               </div>
             </div>
 
-            {/* Packaging (optional) — consume a box/bag onto the cycle's usage. */}
-            {packagingItems.length > 0 ? (
+            {/* Packaging (optional, create-only) — consume a box/bag onto the
+                cycle's usage. Not editable after the fact. */}
+            {!isEdit && packagingItems.length > 0 ? (
               <div className="space-y-3 rounded-md border bg-muted/20 p-3">
                 <div className="space-y-2">
                   <Label className="text-sm">Packaging (optional)</Label>
@@ -260,21 +315,56 @@ export function LogSaleDialog({
               </div>
             ) : null}
 
-            <div className="rounded-md bg-muted/30 px-3 py-2 text-sm">
-              Sale total:{" "}
-              <strong className="text-foreground">
-                Rp {saleTotal.toLocaleString("id-ID", { maximumFractionDigits: 2 })}
-              </strong>
-              {onTopExtra > 0 ? (
-                <span className="text-xs text-muted-foreground">
-                  {" "}(incl. Rp {onTopExtra.toLocaleString("id-ID")} packaging)
-                </span>
+            {/* Total + optional custom-total override (discount / markup). The
+                weight + price/kg above are always recorded as the "list"
+                figures so yield and reporting stay accurate. */}
+            <div className="space-y-2 rounded-md bg-muted/30 px-3 py-2 text-sm">
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 accent-foreground"
+                  checked={overrideOn}
+                  onChange={(e) => toggleOverride(e.target.checked)}
+                />
+                Custom total (discount / markup) — keeps the kg + price/kg as recorded
+              </label>
+              {overrideOn ? (
+                <div className="flex items-center gap-2">
+                  <Label className="whitespace-nowrap text-xs">Total charged (Rp)</Label>
+                  <Input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={overrideAmount}
+                    onChange={(e) => setOverrideAmount(e.target.value)}
+                    className="h-8"
+                  />
+                </div>
               ) : null}
+              <div>
+                Sale total:{" "}
+                <strong className="text-foreground">
+                  Rp {finalAmount.toLocaleString("id-ID", { maximumFractionDigits: 2 })}
+                </strong>
+                {overrideOn && Math.abs(finalAmount - autoTotal) > 0.005 ? (
+                  <span className="text-xs text-muted-foreground">
+                    {" "}(list Rp {autoTotal.toLocaleString("id-ID", { maximumFractionDigits: 2 })}
+                    {finalAmount < autoTotal
+                      ? ` · discount Rp ${(autoTotal - finalAmount).toLocaleString("id-ID", { maximumFractionDigits: 2 })}`
+                      : ` · +Rp ${(finalAmount - autoTotal).toLocaleString("id-ID", { maximumFractionDigits: 2 })}`}
+                    )
+                  </span>
+                ) : onTopExtra > 0 ? (
+                  <span className="text-xs text-muted-foreground">
+                    {" "}(incl. Rp {onTopExtra.toLocaleString("id-ID")} packaging)
+                  </span>
+                ) : null}
+              </div>
             </div>
           </div>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={pending}>Cancel</Button>
-            <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Log"}</Button>
+            <Button type="submit" disabled={pending}>{pending ? "Saving…" : isEdit ? "Save" : "Log"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

@@ -132,13 +132,26 @@ const updateSaleSchema = z.object({
   grade: z.enum(["A", "B", "C", "D"]),
   weight: z.string(),
   pricePerKg: z.string(),
+  customerId: z.string().optional(),
+  /** Optional override of the charged total (a discount/markup). When set it
+   *  becomes the recorded amount; weight + price/kg stay as the "list" figures
+   *  so yield and reporting stay accurate. */
+  amountOverride: z.string().optional(),
 });
+
+/** True when the override string is a usable number we should apply. */
+function hasOverride(v: string | undefined): v is string {
+  return v !== undefined && v.trim() !== "" && /^[0-9]+(\.[0-9]+)?$/.test(v.trim());
+}
 
 export async function updateSale(id: string, input: unknown): Promise<ActionResult> {
   const parsed = updateSaleSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
   const weight = new Decimal(parsed.data.weight);
   const price = new Decimal(parsed.data.pricePerKg);
+  const amount = hasOverride(parsed.data.amountOverride)
+    ? new Decimal(parsed.data.amountOverride)
+    : weight.times(price);
   const sale = await prisma.sale.update({
     where: { id },
     data: {
@@ -147,7 +160,8 @@ export async function updateSale(id: string, input: unknown): Promise<ActionResu
       grade: parsed.data.grade,
       weight,
       pricePerKg: price,
-      amount: weight.times(price),
+      amount,
+      customerId: parsed.data.customerId || null,
     },
   });
   revalidatePath(`/harvest/${sale.harvestId}`);
@@ -651,6 +665,10 @@ const saleSchema = z.object({
   /** What the customer pays per packaging unit when mode = "ontop"
    *  (defaults to cost on the client, but editable). */
   packagingChargePerUnit: z.string().optional(),
+  /** Optional override of the charged total (discount/markup). Wins over the
+   *  computed weight×price (+ on-top packaging); weight + price/kg stay
+   *  recorded so yield/COGS reporting stays accurate. */
+  amountOverride: z.string().optional(),
 });
 
 export async function logSale(input: unknown): Promise<ActionResult> {
@@ -669,6 +687,12 @@ export async function logSale(input: unknown): Promise<ActionResult> {
       if (hasPackaging && d.packagingMode === "ontop") {
         const charge = new Decimal(d.packagingChargePerUnit || "0").times(d.packagingQty as string);
         amount = amount.plus(charge);
+      }
+
+      // Manual total override (discount/markup) wins over the computed total.
+      // weight + price are still stored above so yield/reporting stay honest.
+      if (hasOverride(d.amountOverride)) {
+        amount = new Decimal(d.amountOverride);
       }
 
       const sale = await tx.sale.create({

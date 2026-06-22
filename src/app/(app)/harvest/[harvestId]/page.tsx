@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Pencil } from "lucide-react";
 
 import { prisma } from "@/server/prisma";
 import { getHarvestPL } from "@/server/pl";
@@ -438,7 +438,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(harvest.sales as { id: string; date: Date; produce: { name: string }; customer: { name: string; type: string } | null; grade: string; weight: Decimal; pricePerKg: Decimal; amount: Decimal }[]).map((s) => (
+                {(harvest.sales as { id: string; date: Date; produceId: string; produce: { name: string }; customerId: string | null; customer: { name: string; type: string } | null; grade: string; weight: Decimal; pricePerKg: Decimal; amount: Decimal }[]).map((s) => (
                   <TableRow key={s.id}>
                     <TableCell className="text-muted-foreground">{s.date.toISOString().slice(0, 10)}</TableCell>
                     <TableCell>{s.produce.name}</TableCell>
@@ -458,7 +458,27 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                     <TableCell className="text-right">{Number(s.weight)}</TableCell>
                     <TableCell className="text-right"><Money value={s.pricePerKg.toFixed(4)} /></TableCell>
                     <TableCell className="text-right font-medium"><Money value={s.amount.toFixed(4)} /></TableCell>
-                    <TableCell className="p-0"><DeleteSaleButton id={s.id} /></TableCell>
+                    <TableCell className="p-0">
+                      <div className="flex justify-end">
+                        <LogSaleDialog
+                          harvestId={harvest.id}
+                          produces={produces.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }))}
+                          customers={(customers as { id: string; name: string; type: string }[]).map((c) => ({ id: c.id, name: c.name, type: c.type }))}
+                          existing={{
+                            id: s.id,
+                            produceId: s.produceId,
+                            date: s.date.toISOString().slice(0, 10),
+                            grade: s.grade as "A" | "B" | "C" | "D",
+                            weight: Number(s.weight).toString(),
+                            pricePerKg: s.pricePerKg.toFixed(4),
+                            amount: s.amount.toFixed(4),
+                            customerId: s.customerId,
+                          }}
+                          trigger={<Button size="icon" variant="ghost" title="Edit sale"><Pencil className="h-4 w-4" /></Button>}
+                        />
+                        <DeleteSaleButton id={s.id} />
+                      </div>
+                    </TableCell>
                   </TableRow>
                 ))}
                 <TableRow className="border-t-2 bg-muted/20 font-semibold hover:bg-muted/20">
