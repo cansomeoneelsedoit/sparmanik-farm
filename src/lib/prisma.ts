@@ -24,6 +24,7 @@ const ORG_SCOPED_MODELS = new Set([
   "HarvestAsset",
   "HarvestUsage",
   "Sale",
+  "HarvestDisposition",
   "Task",
   "NutrientRecipe",
   "Sop",

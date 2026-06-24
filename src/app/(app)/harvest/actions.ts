@@ -758,6 +758,106 @@ export async function logSale(input: unknown): Promise<ActionResult> {
 }
 
 // ============================================================================
+// Dispositions — non-sale fates of harvested produce (breakage/spillage, staff
+// consumption, giveaways/samples). Recorded just like a sale but carry NO cash:
+// `pricePerKg` is an optional memo only. They make total yield reconcile.
+// ============================================================================
+
+const dispositionSchema = z.object({
+  harvestId: z.string(),
+  produceId: z.string().min(1, "Pick a produce"),
+  type: z.enum(["BREAKAGE", "STAFF", "GIVEAWAY"]),
+  weight: z
+    .string()
+    .refine((v) => /^[0-9]*\.?[0-9]+$/.test(v.trim()) && Number(v) > 0, "Enter a weight in kg"),
+  date: z.string().min(1),
+  /** Optional memo value (Rp/kg) at list price. Display only — no cash impact. */
+  pricePerKg: z.string().optional(),
+  /** Optional: which staff member consumed it (STAFF type). */
+  staffId: z.string().optional(),
+  /** Optional: who received the sample (GIVEAWAY type). */
+  customerId: z.string().optional(),
+  note: z.string().optional(),
+});
+
+export async function logDisposition(input: unknown): Promise<ActionResult> {
+  const parsed = dispositionSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Validation failed" };
+  }
+  const userId = await uid();
+  const d = parsed.data;
+  try {
+    await prisma.$transaction(async (tx: TransactionClient) => {
+      const disp = await tx.harvestDisposition.create({
+        data: {
+          harvestId: d.harvestId,
+          produceId: d.produceId,
+          type: d.type,
+          weight: new Decimal(d.weight),
+          // Only keep the picked party for the relevant type, so a stale value
+          // from a switched type doesn't leak in.
+          pricePerKg: hasOverride(d.pricePerKg) ? new Decimal(d.pricePerKg) : null,
+          staffId: d.type === "STAFF" ? d.staffId || null : null,
+          customerId: d.type === "GIVEAWAY" ? d.customerId || null : null,
+          note: d.note?.trim() || null,
+          date: new Date(d.date),
+        },
+      });
+      await recordAction(tx, {
+        type: "harvest.log_disposition",
+        entityType: "HarvestDisposition",
+        entityId: disp.id,
+        description: `Logged ${d.type.toLowerCase()} disposition`,
+        userId,
+        payload: { harvestId: d.harvestId, dispositionId: disp.id, type: d.type },
+      });
+    });
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to log" };
+  }
+  revalidatePath(`/harvest/${d.harvestId}`);
+  return { ok: true };
+}
+
+/** Edit an existing disposition in place (note, weight, produce, who, value).
+ *  The `type` stays put (the row keeps its section); it's passed only so the
+ *  staff/customer fields are gated to the right kind. */
+const updateDispositionSchema = dispositionSchema.omit({ harvestId: true });
+
+export async function updateDisposition(id: string, input: unknown): Promise<ActionResult> {
+  const parsed = updateDispositionSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Validation failed" };
+  }
+  const d = parsed.data;
+  const disp = await prisma.harvestDisposition.update({
+    where: { id },
+    data: {
+      produceId: d.produceId,
+      weight: new Decimal(d.weight),
+      pricePerKg: hasOverride(d.pricePerKg) ? new Decimal(d.pricePerKg) : null,
+      staffId: d.type === "STAFF" ? d.staffId || null : null,
+      customerId: d.type === "GIVEAWAY" ? d.customerId || null : null,
+      note: d.note?.trim() || null,
+      date: new Date(d.date),
+    },
+  });
+  revalidatePath(`/harvest/${disp.harvestId}`);
+  return { ok: true };
+}
+
+export async function deleteDisposition(id: string): Promise<ActionResult> {
+  const disp = await prisma.harvestDisposition.findUnique({
+    where: { id },
+    select: { harvestId: true },
+  });
+  await prisma.harvestDisposition.delete({ where: { id } });
+  if (disp?.harvestId) revalidatePath(`/harvest/${disp.harvestId}`);
+  return { ok: true };
+}
+
+// ============================================================================
 // Customers (who we sell to) — mirror of supplier quick-create. Search-first,
 // create ad-hoc from the Log-sale dialog. Type drives later reporting.
 // ============================================================================

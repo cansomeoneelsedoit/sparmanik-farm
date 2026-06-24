@@ -45,6 +45,7 @@ export default async function HarvestReportPage({
       produce: true,
       produces: { include: { produce: true }, orderBy: { createdAt: "asc" } },
       sales: { orderBy: { date: "desc" }, include: { produce: true, customer: true } },
+      dispositions: { orderBy: { date: "desc" }, include: { produce: true, staff: true, customer: true } },
       usages: { orderBy: { date: "desc" }, include: { item: true, consumptions: true } },
       assets: { orderBy: { date: "desc" }, include: { item: true, consumptions: true } },
     },
@@ -121,6 +122,33 @@ export default async function HarvestReportPage({
   const deprFull = depreciable.reduce((s, a) => s.plus(a.fifoCost), new Decimal(0));
   const fixedFifo = fixed.reduce((s, a) => s.plus(a.fifoCost), new Decimal(0));
 
+  // ---- Dispositions (non-sale fates of produce — weight-only) ----
+  type DispoRow = {
+    id: string;
+    date: Date;
+    type: "BREAKAGE" | "STAFF" | "GIVEAWAY";
+    produce: { name: string };
+    staff: { name: string } | null;
+    customer: { name: string } | null;
+    weight: Decimal;
+    pricePerKg: Decimal | null;
+    note: string | null;
+  };
+  const dispoRows = (harvest.dispositions as DispoRow[]) ?? [];
+  const breakage = dispoRows.filter((x) => x.type === "BREAKAGE");
+  const staffEat = dispoRows.filter((x) => x.type === "STAFF");
+  const giveaway = dispoRows.filter((x) => x.type === "GIVEAWAY");
+  const dKg = (rows: DispoRow[]) => Math.round(rows.reduce((s, x) => s + Number(x.weight), 0) * 1000) / 1000;
+  const breakageKg = dKg(breakage);
+  const staffKg = dKg(staffEat);
+  const giveawayKg = dKg(giveaway);
+  const totalGrownKg = Math.round((salesWeight + breakageKg + staffKg + giveawayKg) * 1000) / 1000;
+  const yPct = (kg: number) => (totalGrownKg > 0 ? Math.round((kg / totalGrownKg) * 1000) / 10 : 0);
+  const dMemo = (x: DispoRow) => (x.pricePerKg ? Number(x.weight) * Number(x.pricePerKg) : 0);
+  const dMemoSum = (rows: DispoRow[]) => rows.reduce((s, x) => s + dMemo(x), 0);
+  const memoCell = (total: number) =>
+    total > 0 ? <Money value={total.toFixed(4)} /> : <>—</>;
+
   const produceList: string[] =
     harvest.produces && harvest.produces.length > 0
       ? (harvest.produces as { produce: { name: string } }[]).map((p) => p.produce.name)
@@ -189,6 +217,28 @@ export default async function HarvestReportPage({
           <Stat label="Net profit" value={<Money value={pl.netProfit} />} tone={Number(pl.netProfit) >= 0 ? "pos" : "neg"} strong />
         </div>
 
+        {/* Yield reconciliation — how much the greenhouse grew */}
+        <Section title="Yield — how much this greenhouse grew">
+          <div className="grid grid-cols-5 gap-2">
+            {[
+              { label: "Sold", kg: salesWeight, pct: yPct(salesWeight) },
+              { label: "Breakage", kg: breakageKg, pct: yPct(breakageKg) },
+              { label: "Staff", kg: staffKg, pct: yPct(staffKg) },
+              { label: "Giveaways", kg: giveawayKg, pct: yPct(giveawayKg) },
+              { label: "Total grown", kg: totalGrownKg, pct: 100, strong: true },
+            ].map((r) => (
+              <div
+                key={r.label}
+                className={`rounded-md border px-2 py-1.5 ${r.strong ? "border-zinc-400 bg-zinc-50" : "border-zinc-200"}`}
+              >
+                <div className="text-[10px] uppercase tracking-wide text-zinc-500">{r.label}</div>
+                <div className="text-sm font-semibold">{r.kg} kg</div>
+                <div className="text-[10px] text-zinc-500">{r.pct}%</div>
+              </div>
+            ))}
+          </div>
+        </Section>
+
         {/* Sales */}
         <Section title="Sales">
           {sales.length === 0 ? <Empty>No sales recorded.</Empty> : (
@@ -208,6 +258,62 @@ export default async function HarvestReportPage({
             </Tbl>
           )}
         </Section>
+
+        {/* Breakage / spillage */}
+        {breakage.length > 0 ? (
+          <Section title="Breakage / spillage">
+            <Tbl head={["Date", "Produce", "Note", "Weight (kg)", "Value (memo)"]} align={[0, 0, 0, 1, 1]}>
+              {breakage.map((x) => (
+                <tr key={x.id} className="border-t border-zinc-200">
+                  <Td>{d(x.date)}</Td>
+                  <Td>{x.produce.name}</Td>
+                  <Td>{x.note ?? "—"}</Td>
+                  <Td r>{Number(x.weight)}</Td>
+                  <Td r>{dMemo(x) > 0 ? <Money value={dMemo(x).toFixed(4)} /> : "—"}</Td>
+                </tr>
+              ))}
+              <Total cols={[{ span: 3, text: "Total", r: true }, { text: `${breakageKg} kg`, r: true }, { node: memoCell(dMemoSum(breakage)), r: true }]} />
+            </Tbl>
+          </Section>
+        ) : null}
+
+        {/* Staff consumption */}
+        {staffEat.length > 0 ? (
+          <Section title="Staff consumption">
+            <Tbl head={["Date", "Produce", "Staff", "Note", "Weight (kg)", "Value (memo)"]} align={[0, 0, 0, 0, 1, 1]}>
+              {staffEat.map((x) => (
+                <tr key={x.id} className="border-t border-zinc-200">
+                  <Td>{d(x.date)}</Td>
+                  <Td>{x.produce.name}</Td>
+                  <Td>{x.staff?.name ?? "—"}</Td>
+                  <Td>{x.note ?? "—"}</Td>
+                  <Td r>{Number(x.weight)}</Td>
+                  <Td r>{dMemo(x) > 0 ? <Money value={dMemo(x).toFixed(4)} /> : "—"}</Td>
+                </tr>
+              ))}
+              <Total cols={[{ span: 4, text: "Total", r: true }, { text: `${staffKg} kg`, r: true }, { node: memoCell(dMemoSum(staffEat)), r: true }]} />
+            </Tbl>
+          </Section>
+        ) : null}
+
+        {/* Giveaways / samples */}
+        {giveaway.length > 0 ? (
+          <Section title="Giveaways / samples">
+            <Tbl head={["Date", "Produce", "Given to", "Note", "Weight (kg)", "Value (memo)"]} align={[0, 0, 0, 0, 1, 1]}>
+              {giveaway.map((x) => (
+                <tr key={x.id} className="border-t border-zinc-200">
+                  <Td>{d(x.date)}</Td>
+                  <Td>{x.produce.name}</Td>
+                  <Td>{x.customer?.name ?? "—"}</Td>
+                  <Td>{x.note ?? "—"}</Td>
+                  <Td r>{Number(x.weight)}</Td>
+                  <Td r>{dMemo(x) > 0 ? <Money value={dMemo(x).toFixed(4)} /> : "—"}</Td>
+                </tr>
+              ))}
+              <Total cols={[{ span: 4, text: "Total", r: true }, { text: `${giveawayKg} kg`, r: true }, { node: memoCell(dMemoSum(giveaway)), r: true }]} />
+            </Tbl>
+          </Section>
+        ) : null}
 
         {/* Usage */}
         <Section title="Usage (consumables)">

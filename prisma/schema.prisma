@@ -91,6 +91,14 @@ enum SaleGrade {
   D
 }
 
+// Non-sale fates of harvested produce. Tracked so total yield reconciles:
+// total grown = sold + breakage + staff consumption + giveaways. No cash impact.
+enum DispositionType {
+  BREAKAGE // cracked / broken / spillage
+  STAFF    // eaten or taken by staff
+  GIVEAWAY // free samples / giveaways
+}
+
 enum CustomerType {
   RETAILER
   WHOLESALER
@@ -164,6 +172,7 @@ model Organization {
   harvestUsages   HarvestUsage[]
   harvestAssets   HarvestAsset[]
   sales           Sale[]
+  dispositions    HarvestDisposition[]
   tasks           Task[]
   nutrientRecipes NutrientRecipe[]
   sops            Sop[]
@@ -246,6 +255,7 @@ model Produce {
   barcode        String?          @unique
   harvests       Harvest[]
   sales          Sale[]
+  dispositions   HarvestDisposition[]
   inCrops        HarvestProduce[]
 
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -327,6 +337,7 @@ model Customer {
 
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   sales        Sale[]
+  dispositions HarvestDisposition[]
 
   @@index([organizationId])
   @@map("customers")
@@ -497,6 +508,7 @@ model Harvest {
   assets           HarvestAsset[]
   usages           HarvestUsage[]
   sales            Sale[]
+  dispositions     HarvestDisposition[]
   wageLines        WageEntryLine[]
   tasks            Task[]
   damagedBatches   Batch[]           @relation("BatchDamagedFromHarvest")
@@ -584,6 +596,39 @@ model Sale {
   @@map("sales")
 }
 
+// Non-sale disposition of harvested produce (breakage, staff consumption,
+// giveaways/samples). Mirrors the shape of Sale/HarvestUsage but carries NO
+// cash — `pricePerKg` is an optional memo value only and never enters the P&L.
+// Exists so total yield can be reconciled: harvested = sold + these.
+model HarvestDisposition {
+  id             String          @id @default(cuid())
+  organizationId String?         @map("organization_id")
+  harvestId      String          @map("harvest_id")
+  produceId      String          @map("produce_id")
+  type           DispositionType
+  weight         Decimal         @db.Decimal(18, 4)
+  /** Optional memo value at list price (Rp/kg). Display only — never summed
+   *  into revenue or net profit. */
+  pricePerKg     Decimal?        @db.Decimal(18, 4) @map("price_per_kg")
+  /** Optional: which staff member consumed it (STAFF type). */
+  staffId        String?         @map("staff_id")
+  /** Optional: who received the sample (GIVEAWAY type). */
+  customerId     String?         @map("customer_id")
+  note           String?
+  date           DateTime        @db.Date
+  createdAt      DateTime        @default(now()) @map("created_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  harvest      Harvest       @relation(fields: [harvestId], references: [id], onDelete: Cascade)
+  produce      Produce       @relation(fields: [produceId], references: [id])
+  staff        Staff?        @relation(fields: [staffId], references: [id], onDelete: SetNull)
+  customer     Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([harvestId, date])
+  @@map("harvest_dispositions")
+}
+
 // ---------- Staff & Wages ----------
 
 model Staff {
@@ -604,6 +649,7 @@ model Staff {
   rates        StaffRate[]
   wageEntries  WageEntry[]
   tasks        Task[]       @relation("AssignedTasks")
+  dispositions HarvestDisposition[]
 
   @@index([organizationId])
   @@map("staff")

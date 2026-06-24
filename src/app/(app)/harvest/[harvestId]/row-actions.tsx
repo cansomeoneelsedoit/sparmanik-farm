@@ -12,10 +12,15 @@ import {
   deleteHarvestUsage,
   deleteHarvestAsset,
   deleteLabourLine,
+  deleteDisposition,
 } from "@/app/(app)/harvest/actions";
 
 export function DeleteSaleButton({ id }: { id: string }) {
   return <DeleteIcon id={id} action={deleteSale} label="Delete sale" />;
+}
+
+export function DeleteDispositionButton({ id }: { id: string }) {
+  return <DeleteIcon id={id} action={deleteDisposition} label="Delete entry" />;
 }
 
 export function DeleteUsageButton({ id }: { id: string }) {

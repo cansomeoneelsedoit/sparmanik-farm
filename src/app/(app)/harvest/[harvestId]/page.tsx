@@ -23,6 +23,7 @@ import {
   type InstallAssetItem,
 } from "@/app/(app)/harvest/[harvestId]/install-asset-dialog";
 import { LogSaleDialog } from "@/app/(app)/harvest/[harvestId]/log-sale-dialog";
+import { LogDispositionDialog } from "@/app/(app)/harvest/[harvestId]/log-disposition-dialog";
 import { LogLabourDialog } from "@/app/(app)/harvest/[harvestId]/log-labour-dialog";
 import { CheckInAssetDialog } from "@/app/(app)/harvest/[harvestId]/check-in-asset-dialog";
 import { ExpenseFormDialog } from "@/app/(app)/expenses/expense-form-dialog";
@@ -33,6 +34,7 @@ import {
   DeleteSaleButton,
   DeleteUsageButton,
   DeleteLabourButton,
+  DeleteDispositionButton,
 } from "@/app/(app)/harvest/[harvestId]/row-actions";
 
 export const dynamic = "force-dynamic";
@@ -50,6 +52,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
         produce: true,
         produces: { include: { produce: true }, orderBy: { createdAt: "asc" } },
         sales: { orderBy: { date: "desc" }, include: { produce: true, customer: true } },
+        dispositions: { orderBy: { date: "desc" }, include: { produce: true, staff: true, customer: true } },
         usages: { orderBy: { date: "desc" }, include: { item: true, consumptions: true } },
         assets: { orderBy: { date: "desc" }, include: { item: true, consumptions: true } },
       },
@@ -243,6 +246,41 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
   const deprFullTotal = depreciableAssets.reduce((s, a) => s.plus(a.fifoCost), new Decimal(0));
   const fixedFifoTotal = fixedAssets.reduce((s, a) => s.plus(a.fifoCost), new Decimal(0));
 
+  // --- Dispositions: non-sale fates of the produce (breakage / spillage,
+  // staff consumption, giveaways / samples). Weight-only by design; the
+  // optional pricePerKg is a memo value that never enters the P&L. These let
+  // total yield reconcile: grown = sold + breakage + staff + giveaways.
+  type DispositionRow = {
+    id: string;
+    date: Date;
+    type: "BREAKAGE" | "STAFF" | "GIVEAWAY";
+    produceId: string;
+    produce: { name: string };
+    staffId: string | null;
+    staff: { name: string } | null;
+    customerId: string | null;
+    customer: { name: string } | null;
+    weight: Decimal;
+    pricePerKg: Decimal | null;
+    note: string | null;
+  };
+  const dispositionRows = (harvest.dispositions as DispositionRow[]) ?? [];
+  const breakageRows = dispositionRows.filter((d) => d.type === "BREAKAGE");
+  const staffEatRows = dispositionRows.filter((d) => d.type === "STAFF");
+  const giveawayRows = dispositionRows.filter((d) => d.type === "GIVEAWAY");
+  const kgSum = (rows: DispositionRow[]) =>
+    Math.round(rows.reduce((s, d) => s + Number(d.weight), 0) * 1000) / 1000;
+  const memoSum = (rows: DispositionRow[]) =>
+    rows.reduce((s, d) => s + (d.pricePerKg ? Number(d.weight) * Number(d.pricePerKg) : 0), 0);
+  const breakageKg = kgSum(breakageRows);
+  const staffKg = kgSum(staffEatRows);
+  const giveawayKg = kgSum(giveawayRows);
+  // How much this greenhouse actually grew.
+  const totalGrownKg =
+    Math.round((salesWeightTotal + breakageKg + staffKg + giveawayKg) * 1000) / 1000;
+  const yieldPct = (kg: number) =>
+    totalGrownKg > 0 ? Math.round((kg / totalGrownKg) * 1000) / 10 : 0;
+
   // --- Build the item list passed to InstallAssetDialog ---
   // For each item we compute total available stock and surface the FIFO-top
   // batch's depreciation snapshot so the dialog can render the per-use charge
@@ -330,6 +368,104 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
     })
     .filter((i) => i.available > 0)
     .map(({ id, name, unit, cost }) => ({ id, name, unit, cost }));
+
+  // One renderer for all three disposition sections — same shape, with an
+  // optional "party" column (which staff ate it / who got the sample).
+  const dispoProduces = produces.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }));
+  const dispoCustomers = (customers as { id: string; name: string; type: string }[]).map((c) => ({
+    id: c.id,
+    name: c.name,
+    type: c.type,
+  }));
+  const dispoCard = (
+    title: string,
+    type: "BREAKAGE" | "STAFF" | "GIVEAWAY",
+    rows: DispositionRow[],
+    kg: number,
+    party?: { header: string; of: (d: DispositionRow) => string | null },
+  ) => (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between gap-2">
+        <CardTitle>{title}</CardTitle>
+        <LogDispositionDialog
+          harvestId={harvest.id}
+          type={type}
+          produces={dispoProduces}
+          staff={staffForDialog}
+          customers={dispoCustomers}
+        />
+      </CardHeader>
+      <CardContent className="p-0">
+        {rows.length === 0 ? (
+          <div className="p-10 text-center text-sm text-muted-foreground">Nothing recorded yet.</div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Date</TableHead>
+                <TableHead>Produce</TableHead>
+                {party ? <TableHead>{party.header}</TableHead> : null}
+                <TableHead>Note</TableHead>
+                <TableHead className="text-right">Weight (kg)</TableHead>
+                <TableHead className="text-right">Value (memo)</TableHead>
+                <TableHead className="w-10" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((d) => {
+                const memo = d.pricePerKg ? Number(d.weight) * Number(d.pricePerKg) : 0;
+                return (
+                  <TableRow key={d.id}>
+                    <TableCell className="text-muted-foreground">{d.date.toISOString().slice(0, 10)}</TableCell>
+                    <TableCell>{d.produce.name}</TableCell>
+                    {party ? (
+                      <TableCell>{party.of(d) ?? <span className="text-muted-foreground">—</span>}</TableCell>
+                    ) : null}
+                    <TableCell className="max-w-[16rem] truncate text-muted-foreground">{d.note || "—"}</TableCell>
+                    <TableCell className="text-right">{Number(d.weight)}</TableCell>
+                    <TableCell className="text-right text-muted-foreground">
+                      {memo > 0 ? <Money value={memo.toFixed(4)} /> : "—"}
+                    </TableCell>
+                    <TableCell className="p-0">
+                      <div className="flex justify-end">
+                        <LogDispositionDialog
+                          harvestId={harvest.id}
+                          type={type}
+                          produces={dispoProduces}
+                          staff={staffForDialog}
+                          customers={dispoCustomers}
+                          existing={{
+                            id: d.id,
+                            produceId: d.produceId,
+                            weight: Number(d.weight).toString(),
+                            date: d.date.toISOString().slice(0, 10),
+                            pricePerKg: d.pricePerKg ? d.pricePerKg.toFixed(4) : "",
+                            staffId: d.staffId,
+                            customerId: d.customerId,
+                            note: d.note ?? "",
+                          }}
+                          trigger={<Button size="icon" variant="ghost" title="Edit entry"><Pencil className="h-4 w-4" /></Button>}
+                        />
+                        <DeleteDispositionButton id={d.id} />
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+              <TableRow className="border-t-2 bg-muted/20 font-semibold hover:bg-muted/20">
+                <TableCell colSpan={party ? 4 : 3} className="text-right">Total</TableCell>
+                <TableCell className="text-right">{kg} kg</TableCell>
+                <TableCell className="text-right text-muted-foreground">
+                  {memoSum(rows) > 0 ? <Money value={memoSum(rows).toFixed(4)} /> : "—"}
+                </TableCell>
+                <TableCell />
+              </TableRow>
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
 
   return (
     <div className="space-y-6">
@@ -419,6 +555,38 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
       </div>
 
       <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-2">
+          <CardTitle>Yield — how much this greenhouse grew</CardTitle>
+          <div className="text-right">
+            <div className="text-2xl font-semibold leading-none">{totalGrownKg} kg</div>
+            <div className="text-xs text-muted-foreground">total grown</div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3 sm:grid-cols-4">
+            {[
+              { label: "Sold", kg: salesWeightTotal, tone: "text-green-600" },
+              { label: "Breakage / spillage", kg: breakageKg, tone: "text-red-600" },
+              { label: "Staff consumption", kg: staffKg, tone: "text-foreground" },
+              { label: "Giveaways / samples", kg: giveawayKg, tone: "text-foreground" },
+            ].map((r) => (
+              <div key={r.label} className="rounded-lg border p-3">
+                <div className="text-xs text-muted-foreground">{r.label}</div>
+                <div className={`text-lg font-semibold ${r.tone}`}>{r.kg} kg</div>
+                <div className="text-xs text-muted-foreground">{yieldPct(r.kg)}% of yield</div>
+              </div>
+            ))}
+          </div>
+          {totalGrownKg === 0 ? (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Nothing recorded yet. Log sales, and use the sections below to record breakage,
+              staff consumption, or giveaways — they all add up here.
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader><CardTitle>Sales</CardTitle></CardHeader>
         <CardContent className="p-0">
           {harvest.sales.length === 0 ? (
@@ -493,6 +661,16 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
           )}
         </CardContent>
       </Card>
+
+      {dispoCard("Breakage / spillage", "BREAKAGE", breakageRows, breakageKg)}
+      {dispoCard("Staff consumption", "STAFF", staffEatRows, staffKg, {
+        header: "Staff",
+        of: (d) => d.staff?.name ?? null,
+      })}
+      {dispoCard("Giveaways / samples", "GIVEAWAY", giveawayRows, giveawayKg, {
+        header: "Given to",
+        of: (d) => d.customer?.name ?? null,
+      })}
 
       <Card>
         <CardHeader><CardTitle>Usage</CardTitle></CardHeader>
