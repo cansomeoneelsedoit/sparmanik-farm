@@ -10,6 +10,19 @@ Live: <https://web-production-1e6de.up.railway.app>
 Repo: <https://github.com/cansomeoneelsedoit/sparmanik-farm>
 Sign in (dev): `dev@sparmanikfarm.local` / `devpassword`
 
+## Design priority — TABLET-FIRST (non-negotiable)
+
+**Always design and lay out every screen, dialog, table, chart and component for
+tablets first.** The farm is operated on tablets in the greenhouse — that is the
+primary device. Treat **tablet (portrait + landscape, ~768–1024px wide)** as the
+default design target. Phone and desktop must still work and must not regress, but
+when a layout trade-off is unavoidable, **the tablet experience wins.**
+
+In practice: generous tap targets, type readable at arm's length, tables and forms
+that fit a tablet viewport with **no horizontal bleed**, dialogs sized for tablet,
+and grids that reflow sensibly at the tablet breakpoint. **Verify new UI at a
+tablet width before calling it done.**
+
 ## Stack
 
 - **Framework**: Next.js 16 (App Router, Turbopack). Read
