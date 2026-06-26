@@ -239,7 +239,7 @@ export default async function FinancialsPage() {
     <div className="space-y-6">
       <h1 className="font-serif text-3xl">Financials</h1>
 
-      <div className="grid gap-4 md:grid-cols-5">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         <Stat label="Revenue" value={revenue.toFixed(4)} colour="green" />
         <Stat label="COGS consumed" value={cogsConsumed.toFixed(4)} colour="red" />
         <Stat label="Wages" value={totalWages.toFixed(4)} colour="red" />

@@ -69,7 +69,7 @@ export function LabourTaskManager({ tasks }: { tasks: Task[] }) {
           tasks.map((t) => (
             <li
               key={t.id}
-              className={`flex items-center justify-between gap-3 p-3 text-sm ${
+              className={`flex flex-wrap items-center justify-between gap-3 p-3 text-sm ${
                 t.active ? "" : "opacity-50"
               }`}
             >
@@ -110,7 +110,7 @@ export function LabourTaskManager({ tasks }: { tasks: Task[] }) {
                 </>
               ) : (
                 <>
-                  <span className="font-medium">{t.name}</span>
+                  <span className="min-w-0 flex-1 truncate font-medium">{t.name}</span>
                   <div className="flex items-center gap-3">
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <span>{t.active ? "Active" : "Archived"}</span>

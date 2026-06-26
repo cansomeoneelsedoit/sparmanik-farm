@@ -61,7 +61,7 @@ export function AskAiShell({
 
   return (
     <div className="flex h-full w-full overflow-hidden">
-      <aside className="hidden w-64 shrink-0 flex-col border-r bg-card/40 md:flex">
+      <aside className="hidden w-64 shrink-0 flex-col border-r bg-card/40 lg:flex">
         <div className="flex items-center justify-between border-b px-3 py-3">
           <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             Conversations

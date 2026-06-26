@@ -135,7 +135,7 @@ export default async function SalesPage({
 
       <SalesFilters greenhouses={greenhouses} harvests={harvests} />
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">Records</div><div className="text-2xl font-semibold">{rows.length}</div>{hasFilters ? <div className="text-[10px] text-muted-foreground">filtered</div> : null}</CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">Total weight</div><div className="text-2xl font-semibold">{totalWeight.toFixed(2)} kg</div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">Total revenue</div><div className="text-2xl font-semibold"><Money value={totalRevenue.toFixed(4)} /></div></CardContent></Card>
@@ -157,7 +157,7 @@ export default async function SalesPage({
       />
 
       {greenhouseRollup.length > 0 ? (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 lg:grid-cols-2">
           <Card>
             <CardHeader><CardTitle>By greenhouse</CardTitle></CardHeader>
             <CardContent className="p-0">

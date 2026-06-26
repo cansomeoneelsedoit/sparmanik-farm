@@ -83,7 +83,7 @@ export function AiKeyManager({
       {/* Add new key */}
       {adding ? (
         <div className="space-y-3 rounded-md border bg-muted/20 p-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Provider</label>
               <Combobox
@@ -191,7 +191,7 @@ export function AiKeyManager({
               <li
                 key={r.id}
                 className={cn(
-                  "flex flex-col gap-3 p-4 text-sm sm:flex-row sm:items-center sm:justify-between",
+                  "flex flex-col gap-3 p-4 text-sm lg:flex-row lg:items-center lg:justify-between",
                   !r.enabled && "opacity-50",
                 )}
               >

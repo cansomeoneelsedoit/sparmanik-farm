@@ -25,7 +25,7 @@ export function GreenhouseManager({ greenhouses }: { greenhouses: GH[] }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
+      <div className="grid grid-cols-1 gap-2 lg:grid-cols-4">
         <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" />
         <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Location" />
         <Input value={type} onChange={(e) => setType(e.target.value)} placeholder="Type" />
@@ -51,7 +51,7 @@ export function GreenhouseManager({ greenhouses }: { greenhouses: GH[] }) {
           <li key={g.id} className="flex items-center justify-between gap-3 p-3 text-sm">
             {editId === g.id ? (
               <>
-                <div className="grid flex-1 grid-cols-1 sm:grid-cols-3 gap-2">
+                <div className="grid flex-1 grid-cols-1 lg:grid-cols-3 gap-2">
                   <Input value={eName} onChange={(e) => setEName(e.target.value)} placeholder="Name" className="h-8" />
                   <Input value={eLoc} onChange={(e) => setELoc(e.target.value)} placeholder="Location" className="h-8" />
                   <Input value={eType} onChange={(e) => setEType(e.target.value)} placeholder="Type" className="h-8" />

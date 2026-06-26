@@ -16,7 +16,7 @@ export default function Loading() {
         <div className="h-8 w-56 rounded-md bg-muted" />
         <div className="h-4 w-80 max-w-full rounded-md bg-muted/70" />
       </div>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
           <div key={i} className="h-20 rounded-xl border bg-card p-4">
             <div className="h-3 w-20 rounded bg-muted" />

@@ -274,7 +274,7 @@ function MatchSection({
       <h3 className={cn("text-sm font-semibold uppercase tracking-wider", headingTones[tone])}>
         {title}
       </h3>
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         {matches.map((m) => (
           <Link key={m.id} href={`/inventory/${m.id}`}>
             <Card className={cn("transition hover:shadow-md", tones[tone])}>

@@ -863,13 +863,13 @@ export function SimulatorClient({
                 : "border-rose-500/40 bg-rose-50/80 dark:border-rose-500/30 dark:bg-rose-950/40",
             )}
           >
-            <CardContent className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-6">
+            <CardContent className="grid grid-cols-2 gap-3 p-4 lg:grid-cols-6">
               <Stat label="Revenue" value={fmtMoney(revenue)} tint="green" />
               <Stat label="Item cost" value={fmtMoney(itemCost)} />
               <Stat label="Labour cost" value={fmtMoney(labourCost)} />
               <Stat label="Asset cost" value={fmtMoney(assetCost)} />
               <Stat label="Other cost" value={fmtMoney(otherCost)} />
-              <div className="col-span-2 flex flex-col items-end justify-center rounded-md border bg-background p-2 sm:col-span-1">
+              <div className="col-span-2 flex flex-col items-end justify-center rounded-md border bg-background p-2 lg:col-span-1">
                 <div className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground">
                   {net >= 0 ? (
                     <TrendingUp className="h-3 w-3 text-emerald-600" />

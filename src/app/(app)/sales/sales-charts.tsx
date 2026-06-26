@@ -31,8 +31,8 @@ export function SalesCharts({
   byProduce: Bar[];
 }) {
   return (
-    <div className="grid gap-4 md:grid-cols-3">
-      <Card className="md:col-span-3">
+    <div className="grid gap-4 lg:grid-cols-3">
+      <Card className="lg:col-span-3">
         <CardHeader>
           <CardTitle className="text-base">Revenue · last 30 days</CardTitle>
         </CardHeader>
@@ -50,7 +50,7 @@ export function SalesCharts({
         </CardContent>
       </Card>
 
-      <Card className="md:col-span-2">
+      <Card className="lg:col-span-2">
         <CardHeader>
           <CardTitle className="text-base">Top produces</CardTitle>
         </CardHeader>

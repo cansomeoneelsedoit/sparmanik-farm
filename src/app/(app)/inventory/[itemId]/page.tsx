@@ -407,7 +407,7 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
         </Card>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
         <Stat label="On hand" value={`${totalStock.toFixed(0)} ${item.unit}`} />
         <StatMoney label="Total value" value={totalValue.toFixed(4)} />
         <StatMoney label="Avg cost" value={avgCost.toFixed(4)} />

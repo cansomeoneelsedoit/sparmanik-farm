@@ -201,7 +201,7 @@ export default async function InventoryPage({
         </div>
       </header>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
           icon={<Boxes className="h-5 w-5" />}
           label="Items tracked"

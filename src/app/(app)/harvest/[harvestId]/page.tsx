@@ -545,7 +545,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
         {harvest.endDate ? <><span>→</span><span>{harvest.endDate.toISOString().slice(0, 10)}</span></> : null}
       </div>
 
-      <div className="grid gap-4 md:grid-cols-5">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
         <StatCard label="Revenue" value={<Money value={pl.revenue} />} accent="green" />
         <StatCard label="Usage cost" value={<Money value={pl.usageCost} />} accent="red" />
         <StatCard label="Depreciation" value={<Money value={pl.depreciationCost} />} accent="red" />
@@ -563,7 +563,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
           </div>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             {[
               { label: "Sold", kg: salesWeightTotal, tone: "text-green-600" },
               { label: "Breakage / spillage", kg: breakageKg, tone: "text-red-600" },

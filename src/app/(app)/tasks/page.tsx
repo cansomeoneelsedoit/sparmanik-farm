@@ -64,7 +64,7 @@ export default async function TasksPage() {
         />
       </header>
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat label={t("overdue")} count={overdue.length} accent="red" />
         <Stat label={t("dueToday")} count={dueToday.length} accent="yellow" />
         <Stat label={t("upcoming")} count={upcoming.length} accent="blue" />

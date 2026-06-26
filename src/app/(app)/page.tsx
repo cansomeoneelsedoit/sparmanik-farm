@@ -215,7 +215,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* Headline strip — 2 cols on phone, 4 on tablet+ */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat
           icon={<Leaf className="h-5 w-5" />}
           label="Active harvests"
@@ -247,7 +247,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* Secondary strip — totals + people */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat
           icon={<Package className="h-5 w-5" />}
           label="Inventory items"

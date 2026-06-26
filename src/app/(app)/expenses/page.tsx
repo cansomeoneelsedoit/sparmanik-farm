@@ -74,7 +74,7 @@ export default async function ExpensesPage() {
         />
       </header>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
         <Card>
           <CardContent className="p-4">
             <div className="text-xs text-muted-foreground">Total</div>

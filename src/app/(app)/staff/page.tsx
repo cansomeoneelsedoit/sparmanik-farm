@@ -54,7 +54,7 @@ export default async function StaffPage() {
       {staff.length === 0 ? (
         <Card><CardContent className="p-12 text-center text-muted-foreground">No staff yet.</CardContent></Card>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
           {(staff as StaffRow[]).map((s) => {
             const currentRate = s.rates[0]?.rate.toFixed(0) ?? "—";
             const totalHours = s.wageEntries.reduce((sum: Decimal, w) => sum.plus(w.totalHours), new Decimal(0));
