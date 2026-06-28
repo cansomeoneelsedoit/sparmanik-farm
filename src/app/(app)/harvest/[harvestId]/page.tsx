@@ -27,6 +27,7 @@ import { LogDispositionDialog } from "@/app/(app)/harvest/[harvestId]/log-dispos
 import { LogLabourDialog } from "@/app/(app)/harvest/[harvestId]/log-labour-dialog";
 import { CheckInAssetDialog } from "@/app/(app)/harvest/[harvestId]/check-in-asset-dialog";
 import { ExpenseFormDialog } from "@/app/(app)/expenses/expense-form-dialog";
+import { ImportExpenseSheetDialog } from "@/app/(app)/expenses/import-expense-sheet-dialog";
 import { EndHarvestButton } from "@/app/(app)/harvest/[harvestId]/end-harvest-button";
 import { StartHarvestDialog } from "@/app/(app)/harvest/start-harvest-dialog";
 import { DeleteHarvestButton } from "@/app/(app)/harvest/[harvestId]/harvest-actions";
@@ -508,6 +509,11 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
             harvests={[{ id: harvest.id, name: harvest.name }]}
             defaultHarvestId={harvest.id}
             trigger={<Button variant="outline">Add expense</Button>}
+          />
+          <ImportExpenseSheetDialog
+            harvests={[{ id: harvest.id, name: harvest.name }]}
+            defaultHarvestId={harvest.id}
+            trigger={<Button variant="outline">Scan sheet</Button>}
           />
           <LogSaleDialog
             harvestId={harvest.id}

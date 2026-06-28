@@ -213,32 +213,30 @@ export type ExpenseSheetResult = {
   rawText: string | null;
 };
 
-const SHEET_PROMPT = `You read a HANDWRITTEN expense sheet from a hydroponic melon farm in Indonesia and extract every individual line item.
+const SHEET_PROMPT = `You are reading a HANDWRITTEN expense list from a hydroponic melon farm in Indonesia. Transcribe EVERY purchase/payment line into structured data. The handwriting may be messy — make your best reading rather than giving up.
 
-Staff buy materials, tools, chemicals, food ("makan") and pay wages ("Gaji") at different places and write them down, each with a rupiah amount on the right. The sheet usually also has running SUBTOTALS and a GRAND TOTAL — those are sums, NOT purchases.
+The page lists things staff bought or paid for at different places (materials, tools, chemicals, food "makan", wages "Gaji"), each with a rupiah amount on the right. It also has running SUBTOTALS and a GRAND TOTAL — those are sums, NOT purchases.
 
-Reply with ONE JSON object, nothing else. Exact shape:
+Reply with ONE JSON object only — no markdown, no commentary, no transcription of anything else:
 {
   "lines": [
-    {
-      "description": string,      // what was bought / paid for, short. Keep the original word if unsure ("Beli Plastik" -> "Plastik").
-      "amount": string,           // this line's rupiah amount as a plain number. Dots are thousand separators: "45.000" -> "45000".
-      "category": string | null,  // closest one of: ${EXPENSE_CATEGORIES.join(", ")}
-      "isWage": boolean           // true if it's a wage / salary line ("Gaji", "upah", "kernet" helper pay)
-    }
+    { "description": string, "amount": string, "category": string | null, "isWage": boolean }
   ],
-  "sheetTotal": string | null,    // the grand total written at the bottom, as a plain number
-  "rawText": string | null        // full transcription, line-broken with \\n
+  "sheetTotal": string | null
 }
 
+For each line:
+- "description": what was bought / paid for, short. Keep the original Indonesian word if unsure ("Beli Plastik" -> "Plastik", "Racun Rumput" -> "Racun Rumput", "makan" -> "Makan").
+- "amount": the line's rupiah amount as a plain integer. Dots are thousand separators: "45.000" -> "45000", "1.110.000" -> "1110000". For "3 x 15.000 = 45.000" use the result, 45000.
+- "category": the closest of: ${EXPENSE_CATEGORIES.join(", ")} ("Wages" for Gaji, "Food" for makan, "Chemicals" for racun/herbicide, else "Materials"/"Tools"/"Transport"/"Other").
+- "isWage": true for any wage/salary line ("Gaji", "upah", "kernet" helper pay).
+
 Rules:
-- Extract EVERY purchase/payment line that has its own amount. For "3 x 15.000 = 45.000" use the result, 45000.
-- DO NOT output subtotals or the grand total as line items — they are sums of the lines above (often boxed or underlined). Put only the final grand total in "sheetTotal".
-- Amounts: dots are thousand separators ("Rp 150.000" -> "150000"). Never include "Rp", symbols, or invented cents.
-- isWage = true for any wage/salary line.
-- category: "Wages" for wages, "Food" for "makan", "Chemicals" for "racun"/herbicide, "Materials" for general purchases, "Transport"/"Fuel"/"Tools" where they fit; else "Other".
-- If a line's amount is unreadable, skip that line rather than guessing.
-- Output ONLY the JSON object. No markdown, no commentary.`;
+- ONLY transcribe lines you can actually read in THIS image. If the image is blank, too blurry/dark to read, or is not an expense list, return {"lines": [], "sheetTotal": null}. NEVER invent, guess, or fill in plausible-looking expenses that are not clearly written on the page — a wrong number is worse than a missing one.
+- Otherwise include EVERY line that has its own amount. Do not stop early.
+- DO NOT output subtotals or the grand total as lines (they are sums of the lines above, often boxed or underlined). Put only the final grand total in "sheetTotal".
+- Never include "Rp", symbols, or invented cents.
+- Be concise. Output ONLY the JSON object.`;
 
 /**
  * OCR a whole expense sheet into a list of line items. Same source kinds as
@@ -251,15 +249,18 @@ export async function ocrExpenseSheet(src: ReceiptSource): Promise<ExpenseSheetR
   if (src.kind === "image") {
     const normalised = await sharp(src.buffer)
       .rotate()
-      .resize({ width: 1600, height: 1600, fit: "inside", withoutEnlargement: true })
-      .jpeg({ quality: 88 })
+      // A full handwritten page needs more detail than a small receipt, so
+      // allow 2200px on the longest side before the model reads it.
+      .resize({ width: 2200, height: 2200, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 90 })
       .toBuffer();
     text = await askVision({
       prompt: SHEET_PROMPT,
       imageBase64: normalised.toString("base64"),
       imageMediaType: "image/jpeg",
       json: true,
-      maxTokens: 2500,
+      maxTokens: 4000,
+      disableThinking: true,
       timeoutMs: 120_000,
     });
   } else if (src.kind === "pdf") {
@@ -268,7 +269,8 @@ export async function ocrExpenseSheet(src: ReceiptSource): Promise<ExpenseSheetR
       imageBase64: src.buffer.toString("base64"),
       imageMediaType: "application/pdf" as VisionMediaType,
       json: true,
-      maxTokens: 2500,
+      maxTokens: 4000,
+      disableThinking: true,
       timeoutMs: 120_000,
     });
   } else if (src.kind === "docx") {
@@ -284,7 +286,7 @@ export async function ocrExpenseSheet(src: ReceiptSource): Promise<ExpenseSheetR
     text = await ask({
       prompt: `${SHEET_PROMPT}\n\nHere is the document text:\n\n${docText}`,
       json: true,
-      maxTokens: 2500,
+      maxTokens: 4000,
       disableThinking: true,
       timeoutMs: 90_000,
     });
@@ -303,7 +305,7 @@ export async function ocrExpenseSheet(src: ReceiptSource): Promise<ExpenseSheetR
     text = await ask({
       prompt: `${SHEET_PROMPT}\n\nHere is the spreadsheet as CSV (first sheet):\n\n${sheetText}`,
       json: true,
-      maxTokens: 2500,
+      maxTokens: 4000,
       disableThinking: true,
       timeoutMs: 90_000,
     });
@@ -336,10 +338,13 @@ export async function ocrExpenseSheet(src: ReceiptSource): Promise<ExpenseSheetR
     return {
       lines,
       sheetTotal: normaliseAmount(parsed.sheetTotal),
-      rawText: typeof parsed.rawText === "string" ? parsed.rawText : null,
+      // With rows parsed we don't need the raw text. With ZERO rows, hand back
+      // the model's reply so the UI can show what it actually saw (blank page,
+      // refusal, truncation) instead of a silent empty table.
+      rawText: lines.length === 0 ? (text ? text.slice(0, 1500) : null) : null,
     };
   } catch {
-    return { ...EMPTY_SHEET, rawText: text || null };
+    return { ...EMPTY_SHEET, rawText: text ? text.slice(0, 1500) : null };
   }
 }
 
