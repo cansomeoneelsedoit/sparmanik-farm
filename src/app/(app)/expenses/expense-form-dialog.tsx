@@ -33,6 +33,7 @@ import {
   updateExpense,
   extractReceipt,
 } from "@/app/(app)/expenses/actions";
+import { EXPENSE_CATEGORIES } from "@/lib/expense-categories";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const schema = z.object({
@@ -45,16 +46,7 @@ const schema = z.object({
 });
 type Form = z.infer<typeof schema>;
 
-const CATEGORY_OPTIONS = [
-  "Contractor",
-  "Utilities",
-  "Rent",
-  "Transport",
-  "Repairs",
-  "Permits / fees",
-  "Marketing",
-  "Other",
-];
+const CATEGORY_OPTIONS = [...EXPENSE_CATEGORIES];
 
 const PAYMENT_OPTIONS = ["Cash", "Bank transfer", "Card", "E-wallet"];
 

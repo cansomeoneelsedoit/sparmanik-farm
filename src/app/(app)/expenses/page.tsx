@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/table";
 import { Money } from "@/components/shared/money";
 import { ExpenseFormDialog } from "@/app/(app)/expenses/expense-form-dialog";
+import { ImportExpenseSheetDialog } from "@/app/(app)/expenses/import-expense-sheet-dialog";
 import { ExpenseRowActions } from "@/app/(app)/expenses/expense-row-actions";
 
 export const dynamic = "force-dynamic";
@@ -64,14 +65,17 @@ export default async function ExpensesPage() {
             P&amp;L, or leave blank for business overhead.
           </p>
         </div>
-        <ExpenseFormDialog
-          harvests={harvests}
-          trigger={
-            <Button>
-              <Plus className="h-4 w-4" /> New expense
-            </Button>
-          }
-        />
+        <div className="flex flex-wrap gap-2">
+          <ImportExpenseSheetDialog harvests={harvests} />
+          <ExpenseFormDialog
+            harvests={harvests}
+            trigger={
+              <Button>
+                <Plus className="h-4 w-4" /> New expense
+              </Button>
+            }
+          />
+        </div>
       </header>
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">

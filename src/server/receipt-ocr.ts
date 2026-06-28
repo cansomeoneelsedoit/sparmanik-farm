@@ -2,6 +2,7 @@ import sharp from "sharp";
 
 import { ask, askVision, type VisionMediaType } from "@/server/ai-chain";
 import { extractJson } from "@/server/json-extract";
+import { EXPENSE_CATEGORIES } from "@/lib/expense-categories";
 
 /**
  * Structured result returned to the expense dialog after a receipt is
@@ -38,7 +39,7 @@ Reply with ONE JSON object, nothing else. Use this exact shape:
   "payee": string | null,        // The vendor / shop / contractor — who got paid
   "amount": string | null,       // Total paid as a plain decimal, no currency symbol, no thousands separator. e.g. "150000.00"
   "date": string | null,         // ISO YYYY-MM-DD
-  "category": string | null,     // One of: "Contractor", "Utilities", "Rent", "Transport", "Repairs", "Permits / fees", "Marketing", "Other"
+  "category": string | null,     // closest one of: ${EXPENSE_CATEGORIES.join(", ")}
   "paymentMethod": string | null,// One of: "Cash", "Bank transfer", "Card", "E-wallet"
   "description": string | null,  // Brief one-liner describing what was bought / paid for
   "rawText": string | null       // Full visible text from the receipt, line-broken with \\n
@@ -189,6 +190,156 @@ export async function ocrReceipt(src: ReceiptSource): Promise<ReceiptFields> {
     };
   } catch {
     return { ...EMPTY, rawText: text || null };
+  }
+}
+
+// ============================================================================
+// Multi-line expense SHEET OCR — a handwritten page listing many purchases at
+// once (Indonesian field-purchase sheets). Extracts a LIST of line items, not
+// one total. Reuses the same image prep + vision chain + JSON parsing.
+// ============================================================================
+
+export type ExpenseSheetLine = {
+  description: string;
+  amount: string; // plain decimal, normalised
+  category: string | null;
+  isWage: boolean;
+};
+
+export type ExpenseSheetResult = {
+  lines: ExpenseSheetLine[];
+  /** The grand total written on the sheet (if any) — for reconciliation only. */
+  sheetTotal: string | null;
+  rawText: string | null;
+};
+
+const SHEET_PROMPT = `You read a HANDWRITTEN expense sheet from a hydroponic melon farm in Indonesia and extract every individual line item.
+
+Staff buy materials, tools, chemicals, food ("makan") and pay wages ("Gaji") at different places and write them down, each with a rupiah amount on the right. The sheet usually also has running SUBTOTALS and a GRAND TOTAL — those are sums, NOT purchases.
+
+Reply with ONE JSON object, nothing else. Exact shape:
+{
+  "lines": [
+    {
+      "description": string,      // what was bought / paid for, short. Keep the original word if unsure ("Beli Plastik" -> "Plastik").
+      "amount": string,           // this line's rupiah amount as a plain number. Dots are thousand separators: "45.000" -> "45000".
+      "category": string | null,  // closest one of: ${EXPENSE_CATEGORIES.join(", ")}
+      "isWage": boolean           // true if it's a wage / salary line ("Gaji", "upah", "kernet" helper pay)
+    }
+  ],
+  "sheetTotal": string | null,    // the grand total written at the bottom, as a plain number
+  "rawText": string | null        // full transcription, line-broken with \\n
+}
+
+Rules:
+- Extract EVERY purchase/payment line that has its own amount. For "3 x 15.000 = 45.000" use the result, 45000.
+- DO NOT output subtotals or the grand total as line items — they are sums of the lines above (often boxed or underlined). Put only the final grand total in "sheetTotal".
+- Amounts: dots are thousand separators ("Rp 150.000" -> "150000"). Never include "Rp", symbols, or invented cents.
+- isWage = true for any wage/salary line.
+- category: "Wages" for wages, "Food" for "makan", "Chemicals" for "racun"/herbicide, "Materials" for general purchases, "Transport"/"Fuel"/"Tools" where they fit; else "Other".
+- If a line's amount is unreadable, skip that line rather than guessing.
+- Output ONLY the JSON object. No markdown, no commentary.`;
+
+/**
+ * OCR a whole expense sheet into a list of line items. Same source kinds as
+ * ocrReceipt (image / pdf via vision; docx / xlsx via text). Returns blank
+ * lines[] on any failure rather than throwing, so the dialog never hangs.
+ */
+export async function ocrExpenseSheet(src: ReceiptSource): Promise<ExpenseSheetResult> {
+  const EMPTY_SHEET: ExpenseSheetResult = { lines: [], sheetTotal: null, rawText: null };
+  let text: string;
+  if (src.kind === "image") {
+    const normalised = await sharp(src.buffer)
+      .rotate()
+      .resize({ width: 1600, height: 1600, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 88 })
+      .toBuffer();
+    text = await askVision({
+      prompt: SHEET_PROMPT,
+      imageBase64: normalised.toString("base64"),
+      imageMediaType: "image/jpeg",
+      json: true,
+      maxTokens: 2500,
+      timeoutMs: 120_000,
+    });
+  } else if (src.kind === "pdf") {
+    text = await askVision({
+      prompt: SHEET_PROMPT,
+      imageBase64: src.buffer.toString("base64"),
+      imageMediaType: "application/pdf" as VisionMediaType,
+      json: true,
+      maxTokens: 2500,
+      timeoutMs: 120_000,
+    });
+  } else if (src.kind === "docx") {
+    let docText = "";
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const mammoth = require("mammoth");
+      const { value } = await mammoth.extractRawText({ buffer: src.buffer });
+      docText = value;
+    } catch (e) {
+      return { ...EMPTY_SHEET, rawText: e instanceof Error ? e.message : "docx extract failed" };
+    }
+    text = await ask({
+      prompt: `${SHEET_PROMPT}\n\nHere is the document text:\n\n${docText}`,
+      json: true,
+      maxTokens: 2500,
+      disableThinking: true,
+      timeoutMs: 90_000,
+    });
+  } else if (src.kind === "xlsx") {
+    let sheetText = "";
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const XLSX = require("xlsx");
+      const wb = XLSX.read(src.buffer, { type: "buffer" });
+      const firstSheet = wb.SheetNames[0];
+      if (!firstSheet) return { ...EMPTY_SHEET, rawText: "empty spreadsheet" };
+      sheetText = XLSX.utils.sheet_to_csv(wb.Sheets[firstSheet]);
+    } catch (e) {
+      return { ...EMPTY_SHEET, rawText: e instanceof Error ? e.message : "xlsx extract failed" };
+    }
+    text = await ask({
+      prompt: `${SHEET_PROMPT}\n\nHere is the spreadsheet as CSV (first sheet):\n\n${sheetText}`,
+      json: true,
+      maxTokens: 2500,
+      disableThinking: true,
+      timeoutMs: 90_000,
+    });
+  } else {
+    return { ...EMPTY_SHEET, rawText: "unsupported file type" };
+  }
+
+  try {
+    const parsed = extractJson<{
+      lines?: { description?: unknown; amount?: unknown; category?: unknown; isWage?: unknown }[];
+      sheetTotal?: unknown;
+      rawText?: unknown;
+    }>(text);
+    const rawLines = Array.isArray(parsed.lines) ? parsed.lines : [];
+    const lines: ExpenseSheetLine[] = [];
+    for (const l of rawLines) {
+      const amount = normaliseAmount(l.amount);
+      if (!amount) continue; // drop lines with no usable amount
+      const description =
+        typeof l.description === "string" && l.description.trim()
+          ? l.description.trim()
+          : "(unlabelled)";
+      lines.push({
+        description,
+        amount,
+        category: typeof l.category === "string" && l.category.trim() ? l.category.trim() : null,
+        isWage: l.isWage === true,
+      });
+    }
+    return {
+      lines,
+      sheetTotal: normaliseAmount(parsed.sheetTotal),
+      rawText: typeof parsed.rawText === "string" ? parsed.rawText : null,
+    };
+  } catch {
+    return { ...EMPTY_SHEET, rawText: text || null };
   }
 }
 
