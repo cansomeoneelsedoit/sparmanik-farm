@@ -242,6 +242,14 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
   // Per-section column totals shown in each table's footer row. Money totals
   // reuse the P&L figures so the footer always matches the stat cards above.
   const salesWeightTotal = Math.round((harvest.sales as { weight: Decimal }[]).reduce((s, x) => s + Number(x.weight), 0) * 1000) / 1000;
+  // Total discount given = Σ max(0, list − charged) across this harvest's sales.
+  const salesDiscountTotal = (harvest.sales as { weight: Decimal; pricePerKg: Decimal; amount: Decimal }[]).reduce(
+    (s, x) => {
+      const d = Number(x.weight) * Number(x.pricePerKg) - Number(x.amount);
+      return s + (d > 0 ? d : 0);
+    },
+    0,
+  );
   const labourHoursTotal = labourRows.reduce((s, l) => s + Number(l.hours), 0);
   const deprFullTotal = depreciableAssets.reduce((s, a) => s.plus(a.fifoCost), new Decimal(0));
   const fixedFifoTotal = fixedAssets.reduce((s, a) => s.plus(a.fifoCost), new Decimal(0));
@@ -625,7 +633,14 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                     </TableCell>
                     <TableCell className="text-right">{Number(s.weight)}</TableCell>
                     <TableCell className="text-right"><Money value={s.pricePerKg.toFixed(4)} /></TableCell>
-                    <TableCell className="text-right font-medium"><Money value={s.amount.toFixed(4)} /></TableCell>
+                    <TableCell className="text-right font-medium">
+                      <Money value={s.amount.toFixed(4)} />
+                      {Number(s.weight) * Number(s.pricePerKg) - Number(s.amount) > 0.005 ? (
+                        <div className="text-[10px] font-normal text-amber-600">
+                          −<Money value={(Number(s.weight) * Number(s.pricePerKg) - Number(s.amount)).toFixed(4)} /> off
+                        </div>
+                      ) : null}
+                    </TableCell>
                     <TableCell className="p-0">
                       <div className="flex justify-end">
                         <LogSaleDialog
@@ -653,7 +668,14 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                   <TableCell colSpan={4}>Total</TableCell>
                   <TableCell className="text-right">{salesWeightTotal} kg</TableCell>
                   <TableCell />
-                  <TableCell className="text-right text-green-600"><Money value={pl.revenue} /></TableCell>
+                  <TableCell className="text-right text-green-600">
+                    <Money value={pl.revenue} />
+                    {salesDiscountTotal > 0.005 ? (
+                      <div className="text-[10px] font-normal text-amber-600">
+                        −<Money value={salesDiscountTotal.toFixed(4)} /> total off
+                      </div>
+                    ) : null}
+                  </TableCell>
                   <TableCell />
                 </TableRow>
               </TableBody>

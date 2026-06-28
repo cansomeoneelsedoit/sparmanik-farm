@@ -78,17 +78,22 @@ export default async function SalesPage({
   const totalRevenue = rows.reduce((s: Decimal, x) => s.plus(x.amount), new Decimal(0));
   const totalWeight = rows.reduce((s: Decimal, x) => s.plus(x.weight), new Decimal(0));
   const avgPrice = totalWeight.gt(0) ? totalRevenue.div(totalWeight) : new Decimal(0);
+  // Discount = list value (weight × price/kg) minus what we actually charged
+  // (amount). Positive = we charged below list. Net of any markups.
+  const totalList = rows.reduce((s: Decimal, x) => s.plus(x.weight.times(x.pricePerKg)), new Decimal(0));
+  const totalDiscount = totalList.minus(totalRevenue);
 
-  type RollupRow = { name: string; revenue: Decimal; weight: Decimal };
+  type RollupRow = { name: string; revenue: Decimal; weight: Decimal; list: Decimal };
   const byGreenhouse = new Map<string, RollupRow>();
   const byProduce = new Map<string, RollupRow>();
   for (const r of rows) {
     const gname = r.harvest.greenhouse.name;
     const pname = r.produce.name;
-    const g = byGreenhouse.get(gname) ?? { name: gname, revenue: new Decimal(0), weight: new Decimal(0) };
-    byGreenhouse.set(gname, { ...g, revenue: g.revenue.plus(r.amount), weight: g.weight.plus(r.weight) });
-    const p = byProduce.get(pname) ?? { name: pname, revenue: new Decimal(0), weight: new Decimal(0) };
-    byProduce.set(pname, { ...p, revenue: p.revenue.plus(r.amount), weight: p.weight.plus(r.weight) });
+    const listVal = r.weight.times(r.pricePerKg);
+    const g = byGreenhouse.get(gname) ?? { name: gname, revenue: new Decimal(0), weight: new Decimal(0), list: new Decimal(0) };
+    byGreenhouse.set(gname, { ...g, revenue: g.revenue.plus(r.amount), weight: g.weight.plus(r.weight), list: g.list.plus(listVal) });
+    const p = byProduce.get(pname) ?? { name: pname, revenue: new Decimal(0), weight: new Decimal(0), list: new Decimal(0) };
+    byProduce.set(pname, { ...p, revenue: p.revenue.plus(r.amount), weight: p.weight.plus(r.weight), list: p.list.plus(listVal) });
   }
   const greenhouseRollup = Array.from(byGreenhouse.values()).sort((a, b) => b.revenue.cmp(a.revenue));
   const produceRollup = Array.from(byProduce.values()).sort((a, b) => b.revenue.cmp(a.revenue));
@@ -124,6 +129,15 @@ export default async function SalesPage({
 
   const hasFilters = !!(q || gh || hv || from || to);
 
+  // Render a discount figure (list − charged). Amber when a real discount was
+  // given, an em-dash when full price, "+" when it was a markup.
+  const discountCell = (list: Decimal, revenue: Decimal) => {
+    const d = list.minus(revenue);
+    if (d.gt(0.005)) return <span className="text-amber-600">−<Money value={d.toFixed(4)} /></span>;
+    if (d.lt(-0.005)) return <span className="text-emerald-600">+<Money value={d.abs().toFixed(4)} /></span>;
+    return <span className="text-muted-foreground">—</span>;
+  };
+
   return (
     <div className="space-y-6">
       <header>
@@ -135,11 +149,12 @@ export default async function SalesPage({
 
       <SalesFilters greenhouses={greenhouses} harvests={harvests} />
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">Records</div><div className="text-2xl font-semibold">{rows.length}</div>{hasFilters ? <div className="text-[10px] text-muted-foreground">filtered</div> : null}</CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">Total weight</div><div className="text-2xl font-semibold">{totalWeight.toFixed(2)} kg</div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">Total revenue</div><div className="text-2xl font-semibold"><Money value={totalRevenue.toFixed(4)} /></div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">Avg price / kg</div><div className="text-2xl font-semibold"><Money value={avgPrice.toFixed(4)} /></div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">Discount given</div><div className="text-2xl font-semibold text-amber-600">{totalDiscount.gt(0.005) ? <Money value={totalDiscount.toFixed(4)} /> : <span className="text-muted-foreground">—</span>}</div>{totalList.gt(0) ? <div className="text-[10px] text-muted-foreground">{totalDiscount.div(totalList).times(100).toFixed(1)}% off list</div> : null}</CardContent></Card>
       </div>
 
       <SalesCharts
@@ -162,13 +177,14 @@ export default async function SalesPage({
             <CardHeader><CardTitle>By greenhouse</CardTitle></CardHeader>
             <CardContent className="p-0">
               <Table>
-                <TableHeader><TableRow><TableHead>Greenhouse</TableHead><TableHead className="text-right">Weight (kg)</TableHead><TableHead className="text-right">Revenue</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow><TableHead>Greenhouse</TableHead><TableHead className="text-right">Weight (kg)</TableHead><TableHead className="text-right">Revenue</TableHead><TableHead className="text-right">Discount</TableHead></TableRow></TableHeader>
                 <TableBody>
                   {greenhouseRollup.map((g) => (
                     <TableRow key={g.name}>
                       <TableCell className="font-medium">{g.name}</TableCell>
                       <TableCell className="text-right">{g.weight.toFixed(2)}</TableCell>
                       <TableCell className="text-right font-medium"><Money value={g.revenue.toFixed(4)} /></TableCell>
+                      <TableCell className="text-right">{discountCell(g.list, g.revenue)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -179,13 +195,14 @@ export default async function SalesPage({
             <CardHeader><CardTitle>By produce</CardTitle></CardHeader>
             <CardContent className="p-0">
               <Table>
-                <TableHeader><TableRow><TableHead>Produce</TableHead><TableHead className="text-right">Weight (kg)</TableHead><TableHead className="text-right">Revenue</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow><TableHead>Produce</TableHead><TableHead className="text-right">Weight (kg)</TableHead><TableHead className="text-right">Revenue</TableHead><TableHead className="text-right">Discount</TableHead></TableRow></TableHeader>
                 <TableBody>
                   {produceRollup.map((p) => (
                     <TableRow key={p.name}>
                       <TableCell className="font-medium">{p.name}</TableCell>
                       <TableCell className="text-right">{p.weight.toFixed(2)}</TableCell>
                       <TableCell className="text-right font-medium"><Money value={p.revenue.toFixed(4)} /></TableCell>
+                      <TableCell className="text-right">{discountCell(p.list, p.revenue)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -214,6 +231,7 @@ export default async function SalesPage({
                   <TableHead className="text-right">Weight</TableHead>
                   <TableHead className="text-right">Price/kg</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
+                  <TableHead className="text-right">Discount</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -229,6 +247,7 @@ export default async function SalesPage({
                     <TableCell className="text-right">{Number(s.weight)} kg</TableCell>
                     <TableCell className="text-right"><Money value={s.pricePerKg.toFixed(4)} /></TableCell>
                     <TableCell className="text-right font-medium"><Money value={s.amount.toFixed(4)} /></TableCell>
+                    <TableCell className="text-right">{discountCell(s.weight.times(s.pricePerKg), s.amount)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
