@@ -17,7 +17,7 @@ export default async function RecipesPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex items-center justify-between">
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-serif text-3xl">Nutrient recipes</h1>
         <RecipeFormDialog trigger={<Button><Plus className="h-4 w-4" /> New recipe</Button>} />
       </header>

@@ -178,7 +178,7 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
 
   return (
     <div className="space-y-6">
-      <header className="flex items-center justify-between">
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <Button asChild variant="ghost" size="sm">
             <Link href="/inventory"><ArrowLeft className="h-4 w-4" /> Inventory</Link>

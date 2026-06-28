@@ -66,7 +66,7 @@ export default async function CustomersPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex items-center justify-between">
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-serif text-3xl">Customers</h1>
           <p className="text-sm text-muted-foreground">

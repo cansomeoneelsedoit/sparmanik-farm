@@ -477,12 +477,12 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
 
   return (
     <div className="space-y-6">
-      <header className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
           <Button asChild variant="ghost" size="sm">
             <Link href="/harvest"><ArrowLeft className="h-4 w-4" /> Greenhouses</Link>
           </Button>
-          <h1 className="font-serif text-3xl">{harvest.name}</h1>
+          <h1 className="min-w-0 break-words font-serif text-2xl sm:text-3xl">{harvest.name}</h1>
           <Badge variant={harvest.status === "LIVE" ? "accent" : "secondary"}>
             {harvest.status === "LIVE" ? "Live" : "Closed"}
           </Badge>

@@ -56,7 +56,7 @@ export default async function ExpensesPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex items-end justify-between">
+      <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="font-serif text-3xl">Expenses</h1>
           <p className="text-sm text-muted-foreground">
