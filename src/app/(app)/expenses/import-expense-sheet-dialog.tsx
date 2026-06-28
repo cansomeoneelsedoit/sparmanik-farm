@@ -2,6 +2,7 @@
 
 import { useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Camera, ImagePlus, Sparkles, Trash2, X } from "lucide-react";
 
@@ -40,23 +41,23 @@ export function ImportExpenseSheetDialog({
   trigger,
 }: {
   harvests: { id: string; name: string }[];
-  /** When opened from a greenhouse, pre-allocate every line to it. */
   defaultHarvestId?: string | null;
   trigger?: ReactNode;
 }) {
+  const t = useTranslations("importSheet");
   const [open, setOpen] = useState(false);
   const [extracting, startExtract] = useTransition();
   const [saving, startSave] = useTransition();
   const router = useRouter();
 
   const [candidate, setCandidate] = useState<{ file: File; preview: string } | null>(null);
-  const [rows, setRows] = useState<Row[] | null>(null); // null = not extracted yet
+  const [rows, setRows] = useState<Row[] | null>(null);
   const [sheetTotal, setSheetTotal] = useState<string | null>(null);
   const [receiptPath, setReceiptPath] = useState<string | null>(null);
-  const [aiNote, setAiNote] = useState<string | null>(null); // what the AI returned when nothing parsed
+  const [aiNote, setAiNote] = useState<string | null>(null);
 
   const [date, setDate] = useState(today());
-  const [payee, setPayee] = useState("Field purchase");
+  const [payee, setPayee] = useState(() => t("defaultPayee"));
   const [paymentMethod, setPaymentMethod] = useState("Cash");
   const [allocateAll, setAllocateAll] = useState<string | null>(defaultHarvestId);
 
@@ -75,7 +76,7 @@ export function ImportExpenseSheetDialog({
     setReceiptPath(null);
     setAiNote(null);
     setDate(today());
-    setPayee("Field purchase");
+    setPayee(t("defaultPayee"));
     setPaymentMethod("Cash");
     setAllocateAll(defaultHarvestId);
   }
@@ -109,19 +110,15 @@ export function ImportExpenseSheetDialog({
       }
       const data = r.data;
       if (!data || data.lines.length === 0) {
-        // Stay on the capture step and show what the AI actually saw.
         setReceiptPath(data?.path ?? null);
-        setAiNote(
-          data?.rawText?.trim() ||
-            "The AI didn't find any line items on this photo.",
-        );
-        toast.error("Couldn't read any lines — see the note below and try again.");
+        setAiNote(data?.rawText?.trim() || t("failTitle"));
+        toast.error(t("toastFail"));
         return;
       }
       setRows(
         data.lines.map((l, i) => ({
           key: `r${i}`,
-          include: !l.isWage, // wages OFF by default
+          include: !l.isWage,
           description: l.description,
           amount: l.amount,
           category: l.isWage ? "Wages" : l.category,
@@ -132,7 +129,7 @@ export function ImportExpenseSheetDialog({
       setSheetTotal(data.sheetTotal);
       setReceiptPath(data.path);
       setAiNote(null);
-      toast.success(`Found ${data.lines.length} line${data.lines.length === 1 ? "" : "s"}`);
+      toast.success(t("toastFound", { count: data.lines.length }));
     });
   }
 
@@ -160,11 +157,11 @@ export function ImportExpenseSheetDialog({
         harvestId: r.harvestId || null,
       }));
     if (lines.length === 0) {
-      toast.error("Tick at least one line with an amount.");
+      toast.error(t("errPickOne"));
       return;
     }
     if (!payee.trim()) {
-      toast.error("Enter who paid (payee).");
+      toast.error(t("errPayee"));
       return;
     }
     startSave(async () => {
@@ -176,7 +173,7 @@ export function ImportExpenseSheetDialog({
         lines,
       });
       if (r.ok) {
-        toast.success(`Saved ${r.data?.count ?? lines.length} expenses`);
+        toast.success(t("toastSaved", { count: r.data?.count ?? lines.length }));
         setOpen(false);
         reset();
         router.refresh();
@@ -197,13 +194,13 @@ export function ImportExpenseSheetDialog({
       <DialogTrigger asChild>
         {trigger ?? (
           <Button variant="outline">
-            <Camera className="h-4 w-4" /> Scan a sheet
+            <Camera className="h-4 w-4" /> {t("trigger")}
           </Button>
         )}
       </DialogTrigger>
       <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>{rows ? "Review the expenses" : "Scan an expense sheet"}</DialogTitle>
+          <DialogTitle>{rows ? t("titleReview") : t("titleScan")}</DialogTitle>
         </DialogHeader>
 
         <input
@@ -231,17 +228,15 @@ export function ImportExpenseSheetDialog({
         />
 
         {!rows ? (
-          // ---------- Step 1: capture ----------
           <div className="space-y-4 py-2">
             <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-              Photograph a handwritten list of things bought/paid for. The AI reads every
-              line, then you check it and save them all at once.
+              {t("blurb")}
               {defaultHarvestId ? (
-                <> Lines will go to <strong>{harvestName(defaultHarvestId)}</strong>.</>
+                <> {t("blurbGreenhouse", { name: harvestName(defaultHarvestId) ?? "" })}</>
               ) : null}
               <ul className="mt-1.5 list-disc pl-4">
-                <li>Lay the page flat, fill the frame, good light.</li>
-                <li>Wage (Gaji) lines come in unticked — tick them on if you want them.</li>
+                <li>{t("tipFlat")}</li>
+                <li>{t("tipWages")}</li>
               </ul>
             </div>
 
@@ -256,33 +251,30 @@ export function ImportExpenseSheetDialog({
                 <div className="flex flex-wrap gap-2">
                   <Button onClick={runExtract} disabled={extracting}>
                     <Sparkles className="h-4 w-4" />
-                    {extracting ? "Reading the sheet…" : "Read the sheet"}
+                    {extracting ? t("reading") : t("read")}
                   </Button>
                   <Button variant="ghost" onClick={clearCandidate} disabled={extracting}>
-                    <X className="h-4 w-4" /> Choose another
+                    <X className="h-4 w-4" /> {t("chooseAnother")}
                   </Button>
                 </div>
               </div>
             ) : (
               <div className="flex flex-wrap gap-2">
                 <Button variant="outline" onClick={() => cameraInputRef.current?.click()}>
-                  <Camera className="h-4 w-4" /> Take photo
+                  <Camera className="h-4 w-4" /> {t("takePhoto")}
                 </Button>
                 <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
-                  <ImagePlus className="h-4 w-4" /> Choose file
+                  <ImagePlus className="h-4 w-4" /> {t("chooseFile")}
                 </Button>
               </div>
             )}
 
             {aiNote ? (
               <div className="space-y-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
-                <div className="font-medium">Couldn’t pull out line items.</div>
-                <div>
-                  Try a clearer, flatter, brighter photo that fills the frame. If it keeps
-                  failing, you can still add expenses with <strong>New expense</strong>.
-                </div>
+                <div className="font-medium">{t("failTitle")}</div>
+                <div>{t("failBody")}</div>
                 <details className="mt-1">
-                  <summary className="cursor-pointer text-amber-700/80">What the AI saw</summary>
+                  <summary className="cursor-pointer text-amber-700/80">{t("aiSaw")}</summary>
                   <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words text-[10px] text-amber-900/80 dark:text-amber-100/70">
                     {aiNote}
                   </pre>
@@ -291,19 +283,18 @@ export function ImportExpenseSheetDialog({
             ) : null}
           </div>
         ) : (
-          // ---------- Step 2: review ----------
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label className="text-xs">Date</Label>
+                <Label className="text-xs">{t("date")}</Label>
                 <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">Paid by (payee)</Label>
+                <Label className="text-xs">{t("payee")}</Label>
                 <Input value={payee} onChange={(e) => setPayee(e.target.value)} />
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">Payment method</Label>
+                <Label className="text-xs">{t("paymentMethod")}</Label>
                 <Combobox
                   value={paymentMethod}
                   onChange={(v) => setPaymentMethod(v ?? "")}
@@ -313,17 +304,16 @@ export function ImportExpenseSheetDialog({
                 />
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">Put all on greenhouse</Label>
+                <Label className="text-xs">{t("allocateAll")}</Label>
                 <Combobox
                   value={allocateAll}
                   onChange={(v) => applyAllocateAll(v)}
-                  placeholder="Business overhead"
+                  placeholder={t("overhead")}
                   options={harvestOptions}
                 />
               </div>
             </div>
 
-            {/* Card per line — stacks cleanly on a phone, no horizontal scroll. */}
             <div className="space-y-2">
               {rows.map((r) => (
                 <div
@@ -340,13 +330,13 @@ export function ImportExpenseSheetDialog({
                     <Input
                       value={r.description}
                       onChange={(e) => patchRow(r.key, { description: e.target.value })}
-                      placeholder="What was it?"
+                      placeholder={t("descPlaceholder")}
                       className="h-8 min-w-0 flex-1"
                     />
                     <Button
                       size="icon"
                       variant="ghost"
-                      title="Remove line"
+                      title={t("removeLine")}
                       className="shrink-0"
                       onClick={() =>
                         setRows((prev) => (prev ? prev.filter((x) => x.key !== r.key) : prev))
@@ -357,7 +347,7 @@ export function ImportExpenseSheetDialog({
                   </div>
                   <div className="mt-2 grid grid-cols-1 gap-2 pl-6 sm:grid-cols-3">
                     <div className="space-y-1">
-                      <Label className="text-[10px] text-muted-foreground">Amount (Rp)</Label>
+                      <Label className="text-[10px] text-muted-foreground">{t("amount")}</Label>
                       <Input
                         type="number"
                         step="any"
@@ -368,7 +358,7 @@ export function ImportExpenseSheetDialog({
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-[10px] text-muted-foreground">Category</Label>
+                      <Label className="text-[10px] text-muted-foreground">{t("category")}</Label>
                       <Combobox
                         value={r.category}
                         onChange={(v) => patchRow(r.key, { category: v })}
@@ -378,18 +368,18 @@ export function ImportExpenseSheetDialog({
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-[10px] text-muted-foreground">Greenhouse</Label>
+                      <Label className="text-[10px] text-muted-foreground">{t("greenhouse")}</Label>
                       <Combobox
                         value={r.harvestId}
                         onChange={(v) => patchRow(r.key, { harvestId: v })}
-                        placeholder="Overhead"
+                        placeholder={t("overheadShort")}
                         options={harvestOptions}
                       />
                     </div>
                   </div>
                   {r.isWage ? (
                     <div className="mt-1 pl-6 text-[10px] uppercase tracking-wide text-amber-600">
-                      wage — off by default
+                      {t("wageHint")}
                     </div>
                   ) : null}
                 </div>
@@ -397,15 +387,13 @@ export function ImportExpenseSheetDialog({
             </div>
 
             <div className="rounded-md bg-muted/30 px-3 py-2 text-sm">
-              <strong>{included.length}</strong> selected · total{" "}
-              <strong className="text-foreground">{fmt(includedTotal)}</strong>
+              {t("selectedSummary", { count: included.length, total: fmt(includedTotal) })}
               {sheetTotalNum ? (
                 <span className="text-xs text-muted-foreground">
-                  {" "}· sheet says {fmt(sheetTotalNum)}
+                  {" · "}
+                  {t("sheetSays", { total: fmt(sheetTotalNum) })}
                   {Math.abs(sheetTotalNum - includedTotal) > 1 ? (
-                    <span className="text-amber-600">
-                      {" "}(differs — unticked/wage lines may account for it)
-                    </span>
+                    <span className="text-amber-600"> {t("differs")}</span>
                   ) : null}
                 </span>
               ) : null}
@@ -417,17 +405,15 @@ export function ImportExpenseSheetDialog({
           {rows ? (
             <>
               <Button variant="ghost" onClick={clearCandidate} disabled={saving}>
-                Start over
+                {t("startOver")}
               </Button>
               <Button onClick={save} disabled={saving || included.length === 0}>
-                {saving
-                  ? "Saving…"
-                  : `Save ${included.length} expense${included.length === 1 ? "" : "s"}`}
+                {saving ? `${t("save", { count: included.length })}…` : t("save", { count: included.length })}
               </Button>
             </>
           ) : (
             <Button variant="ghost" onClick={() => setOpen(false)}>
-              Cancel
+              {t("cancel")}
             </Button>
           )}
         </DialogFooter>
