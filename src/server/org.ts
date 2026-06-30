@@ -19,6 +19,21 @@ export type OrgSummary = {
 export async function listMyOrgs(): Promise<OrgSummary[]> {
   const session = await auth();
   if (!session?.user?.id) return [];
+  // A superuser (owner) manages every farm — list them all so the switcher can
+  // move between any of them. Regular staff see only their memberships.
+  if ((session.user as { role?: string }).role === "SUPERUSER") {
+    const orgs = await prisma.organization.findMany({
+      orderBy: { createdAt: "asc" },
+      select: { id: true, name: true, slug: true },
+    });
+    type O = (typeof orgs)[number];
+    return (orgs as O[]).map((o) => ({
+      id: o.id,
+      name: o.name,
+      slug: o.slug,
+      role: "OWNER" as const,
+    }));
+  }
   const memberships = await prisma.organizationMembership.findMany({
     where: { userId: session.user.id },
     orderBy: { joinedAt: "asc" },
@@ -45,20 +60,45 @@ export async function listMyOrgs(): Promise<OrgSummary[]> {
 export async function getActiveOrgId(): Promise<string | null> {
   const session = await auth();
   if (!session?.user?.id) return null;
+  const isSuper = (session.user as { role?: string }).role === "SUPERUSER";
   const cookie = (await cookies()).get(ACTIVE_ORG_COOKIE)?.value;
   if (cookie) {
-    const membership = await prisma.organizationMembership.findUnique({
-      where: { userId_organizationId: { userId: session.user.id, organizationId: cookie } },
-      select: { organizationId: true },
-    });
-    if (membership) return membership.organizationId;
+    if (isSuper) {
+      const org = await prisma.organization.findUnique({ where: { id: cookie }, select: { id: true } });
+      if (org) return org.id;
+    } else {
+      const membership = await prisma.organizationMembership.findUnique({
+        where: { userId_organizationId: { userId: session.user.id, organizationId: cookie } },
+        select: { organizationId: true },
+      });
+      if (membership) return membership.organizationId;
+    }
   }
   const first = await prisma.organizationMembership.findFirst({
     where: { userId: session.user.id },
     orderBy: { joinedAt: "asc" },
     select: { organizationId: true },
   });
-  return first?.organizationId ?? null;
+  if (first?.organizationId) return first.organizationId;
+  // A superuser with no membership still manages the farms — default to the
+  // primary org (they switch via the cookie above).
+  if (isSuper) return primaryOrgId();
+  return null;
+}
+
+/** The "main" org — the one with the most members (ties broken by oldest). */
+async function primaryOrgId(): Promise<string | null> {
+  type OrgRow = { id: string; createdAt: Date; _count: { memberships: number } };
+  const orgs = (await prisma.organization.findMany({
+    select: { id: true, createdAt: true, _count: { select: { memberships: true } } },
+  })) as OrgRow[];
+  if (orgs.length === 0) return null;
+  orgs.sort((a, b) => {
+    const byMembers = (b._count?.memberships ?? 0) - (a._count?.memberships ?? 0);
+    if (byMembers !== 0) return byMembers;
+    return a.createdAt.getTime() - b.createdAt.getTime();
+  });
+  return orgs[0].id;
 }
 
 export async function requireActiveOrgId(): Promise<string> {

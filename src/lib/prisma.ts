@@ -84,28 +84,31 @@ const resolveActiveOrgId = cache(
       const { auth } = await import("@/auth");
       const session = await auth();
       if (!session?.user?.id) return null;
+      // A SUPERUSER (owner) may act in ANY farm; a regular user only in farms
+      // they're a member of.
+      const isSuper = (session.user as { role?: string }).role === "SUPERUSER";
       if (raw) {
-        // CRITICAL: a cookie's org must be one the current user is
-        // actually a member of. Otherwise (e.g. dev@ logged in with
-        // cookie=org_andre, signed out, then a different user signed in)
-        // we'd scope every query to a foreign org and findUnique calls
-        // would all return null and pages 404. Fall through to the
-        // membership fallback below.
-        const membership = await basePrisma.organizationMembership.findUnique(
-          {
+        if (isSuper) {
+          // Owner: honour the cookie whenever it names a real org.
+          const org = await basePrisma.organization.findUnique({
+            where: { id: raw },
+            select: { id: true },
+          });
+          if (org) return org.id;
+        } else {
+          // Regular user: the cookie's org must be one they belong to, else a
+          // stale cookie would scope every query to a foreign org and pages
+          // would 404. Fall through to their first membership otherwise.
+          const membership = await basePrisma.organizationMembership.findUnique({
             where: {
-              userId_organizationId: {
-                userId: session.user.id,
-                organizationId: raw,
-              },
+              userId_organizationId: { userId: session.user.id, organizationId: raw },
             },
             select: { organizationId: true },
-          },
-        );
-        if (membership) return membership.organizationId;
+          });
+          if (membership) return membership.organizationId;
+        }
       }
-      // Cookie missing, invalid, or pointed at an org the user isn't in
-      // — fall back to the user's first membership.
+      // No usable cookie — fall back to the user's first membership.
       const m = await basePrisma.organizationMembership.findFirst({
         where: { userId: session.user.id },
         orderBy: { joinedAt: "asc" },
@@ -113,27 +116,12 @@ const resolveActiveOrgId = cache(
       });
       if (m?.organizationId) return m.organizationId;
 
-      // Self-heal: a signed-in account with NO membership at all is
-      // un-provisioned (a fresh Google / credentials sign-in, or a DB that lost
-      // the membership row). With no org, every write fails the NOT NULL
-      // organization_id constraint. Bootstrap them into the farm they're
-      // actively using — the activeOrgId cookie when it names a real org, else
-      // the only org if there's just one — and backfill the membership so it's
-      // correct from here on. Reached ONLY when the user has zero memberships,
-      // so it can never move an existing member between farms.
-      let bootstrapOrgId: string | null = null;
-      if (raw) {
-        const org = await basePrisma.organization.findUnique({
-          where: { id: raw },
-          select: { id: true },
-        });
-        if (org) bootstrapOrgId = org.id;
-      }
-      if (!bootstrapOrgId) {
-        // No usable cookie. Adopt the PRIMARY org — the one with the most
-        // members (ties broken by oldest). On this deployment that's the real
-        // farm; any others are empty shells. So a signed-in user with no
-        // membership always lands in the main farm instead of being locked out.
+      // Still nothing. A SUPERUSER manages every farm, so default them to the
+      // PRIMARY org (most members, ties broken by oldest) — they switch farms
+      // via the cookie above. A regular user with no membership returns null,
+      // and the create-guard surfaces a clear "no active organisation" message
+      // instead of orphaning a row / crashing on the NOT NULL column.
+      if (isSuper) {
         type OrgRow = { id: string; createdAt: Date; _count: { memberships: number } };
         const orgs = (await basePrisma.organization.findMany({
           select: { id: true, createdAt: true, _count: { select: { memberships: true } } },
@@ -144,18 +132,8 @@ const resolveActiveOrgId = cache(
             if (byMembers !== 0) return byMembers;
             return a.createdAt.getTime() - b.createdAt.getTime();
           });
-          bootstrapOrgId = orgs[0].id;
+          return orgs[0].id;
         }
-      }
-      if (bootstrapOrgId) {
-        try {
-          await basePrisma.organizationMembership.create({
-            data: { userId: session.user.id, organizationId: bootstrapOrgId, role: "MEMBER" },
-          });
-        } catch {
-          // race / already created concurrently — fine, we still have the org
-        }
-        return bootstrapOrgId;
       }
       return null;
     } catch {

@@ -18,11 +18,21 @@ export async function setActiveOrg(organizationId: string): Promise<ActionResult
   const session = await auth();
   if (!session?.user?.id) return { ok: false, error: "Not authenticated" };
 
-  const membership = await prisma.organizationMembership.findUnique({
-    where: { userId_organizationId: { userId: session.user.id, organizationId } },
-    select: { organizationId: true },
-  });
-  if (!membership) return { ok: false, error: "You aren't a member of that organisation" };
+  // A superuser (owner) can switch into any farm; a regular user only into one
+  // they belong to.
+  if ((session.user as { role?: string }).role === "SUPERUSER") {
+    const org = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { id: true },
+    });
+    if (!org) return { ok: false, error: "That organisation doesn't exist" };
+  } else {
+    const membership = await prisma.organizationMembership.findUnique({
+      where: { userId_organizationId: { userId: session.user.id, organizationId } },
+      select: { organizationId: true },
+    });
+    if (!membership) return { ok: false, error: "You aren't a member of that organisation" };
+  }
 
   const c = await cookies();
   c.set(ACTIVE_ORG_COOKIE, organizationId, {

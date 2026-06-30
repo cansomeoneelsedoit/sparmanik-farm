@@ -18,6 +18,18 @@ export default {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const r = (user as any).role as "USER" | "SUPERUSER" | undefined;
         token.role = r ?? "USER";
+        // Owner allow-list: any email in OWNER_EMAILS (comma-separated env var)
+        // is always treated as a superuser, regardless of how the account was
+        // created — e.g. a fresh Google sign-in that would otherwise default to
+        // USER. Lets the owner manage every farm without manual DB provisioning.
+        const owners = (process.env.OWNER_EMAILS ?? "")
+          .toLowerCase()
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (user.email && owners.includes(user.email.toLowerCase())) {
+          token.role = "SUPERUSER";
+        }
       }
       return token;
     },
