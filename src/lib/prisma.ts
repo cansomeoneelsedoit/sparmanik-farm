@@ -111,7 +111,39 @@ const resolveActiveOrgId = cache(
         orderBy: { joinedAt: "asc" },
         select: { organizationId: true },
       });
-      return m?.organizationId ?? null;
+      if (m?.organizationId) return m.organizationId;
+
+      // Self-heal: a signed-in account with NO membership at all is
+      // un-provisioned (a fresh Google / credentials sign-in, or a DB that lost
+      // the membership row). With no org, every write fails the NOT NULL
+      // organization_id constraint. Bootstrap them into the farm they're
+      // actively using — the activeOrgId cookie when it names a real org, else
+      // the only org if there's just one — and backfill the membership so it's
+      // correct from here on. Reached ONLY when the user has zero memberships,
+      // so it can never move an existing member between farms.
+      let bootstrapOrgId: string | null = null;
+      if (raw) {
+        const org = await basePrisma.organization.findUnique({
+          where: { id: raw },
+          select: { id: true },
+        });
+        if (org) bootstrapOrgId = org.id;
+      }
+      if (!bootstrapOrgId) {
+        const orgs = await basePrisma.organization.findMany({ select: { id: true }, take: 2 });
+        if (orgs.length === 1) bootstrapOrgId = orgs[0].id;
+      }
+      if (bootstrapOrgId) {
+        try {
+          await basePrisma.organizationMembership.create({
+            data: { userId: session.user.id, organizationId: bootstrapOrgId, role: "MEMBER" },
+          });
+        } catch {
+          // race / already created concurrently — fine, we still have the org
+        }
+        return bootstrapOrgId;
+      }
+      return null;
     } catch {
       return null;
     }
@@ -128,10 +160,28 @@ function createPrismaClient() {
         async $allOperations({ model, operation, args, query }) {
           if (!ORG_SCOPED_MODELS.has(model)) return query(args);
           const orgId = await resolveActiveOrgId(base);
-          // Non-request context (seed / build) OR invalid/missing cookie:
-          // pass through. Callers in those contexts are expected to set
-          // organizationId explicitly.
-          if (!orgId) return query(args);
+          // No org resolved — non-request context (seed / build) or a user with
+          // no membership. Reads and explicitly-scoped writes (seed/CLI set
+          // organizationId in data) pass through. But a scoped create with
+          // neither a resolved org nor an explicit one would orphan the row and
+          // crash on the NOT NULL organization_id column — fail it with a clear,
+          // friendly message instead of a raw Prisma error.
+          if (!orgId) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const ad = (args as any)?.data;
+            const hasExplicitOrg =
+              operation === "create"
+                ? ad?.organizationId != null
+                : operation === "createMany" && Array.isArray(ad)
+                  ? ad.every((row: Record<string, unknown>) => row?.organizationId != null)
+                  : true;
+            if ((operation === "create" || operation === "createMany") && !hasExplicitOrg) {
+              throw new Error(
+                "No active organisation for your account. Please sign out and sign back in, then try again.",
+              );
+            }
+            return query(args);
+          }
 
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const a = args as any;
