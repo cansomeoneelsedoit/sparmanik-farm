@@ -130,8 +130,22 @@ const resolveActiveOrgId = cache(
         if (org) bootstrapOrgId = org.id;
       }
       if (!bootstrapOrgId) {
-        const orgs = await basePrisma.organization.findMany({ select: { id: true }, take: 2 });
-        if (orgs.length === 1) bootstrapOrgId = orgs[0].id;
+        // No usable cookie. Adopt the PRIMARY org — the one with the most
+        // members (ties broken by oldest). On this deployment that's the real
+        // farm; any others are empty shells. So a signed-in user with no
+        // membership always lands in the main farm instead of being locked out.
+        type OrgRow = { id: string; createdAt: Date; _count: { memberships: number } };
+        const orgs = (await basePrisma.organization.findMany({
+          select: { id: true, createdAt: true, _count: { select: { memberships: true } } },
+        })) as OrgRow[];
+        if (orgs.length > 0) {
+          orgs.sort((a: OrgRow, b: OrgRow) => {
+            const byMembers = (b._count?.memberships ?? 0) - (a._count?.memberships ?? 0);
+            if (byMembers !== 0) return byMembers;
+            return a.createdAt.getTime() - b.createdAt.getTime();
+          });
+          bootstrapOrgId = orgs[0].id;
+        }
       }
       if (bootstrapOrgId) {
         try {
