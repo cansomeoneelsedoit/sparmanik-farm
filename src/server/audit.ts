@@ -67,8 +67,20 @@ export async function undoAction(actionId: string): Promise<{ ok: true } | { ok:
 }
 
 export async function recentActions(limit = 50) {
+  // Only the columns the topbar history sheet renders. Without the select this
+  // pulled the full `payload` JSON (entity snapshots for undo) into the RSC
+  // payload on every navigation (app review #47).
   return prisma.auditAction.findMany({
     orderBy: { createdAt: "desc" },
     take: limit,
+    select: {
+      id: true,
+      type: true,
+      description: true,
+      createdAt: true,
+      undone: true,
+      entityType: true,
+      entityId: true,
+    },
   });
 }

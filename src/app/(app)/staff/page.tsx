@@ -21,7 +21,6 @@ type StaffRow = {
   photoPath: string | null;
   bio: string | null;
   rates: { rate: Decimal; effectiveFrom: Date }[];
-  wageEntries: { totalHours: Decimal; date: Date; lines: { hours: Decimal; harvestId: string | null }[] }[];
 };
 
 export default async function StaffPage() {
@@ -30,12 +29,25 @@ export default async function StaffPage() {
       orderBy: { name: "asc" },
       include: {
         rates: { orderBy: { effectiveFrom: "desc" } },
-        wageEntries: { orderBy: { date: "desc" }, include: { lines: true } },
       },
     }),
     prisma.harvest.findMany({ where: { status: "LIVE" }, select: { id: true, name: true } }),
     prisma.greenhouse.findMany({ select: { id: true, name: true } }),
   ]);
+
+  // Card summaries via a single aggregate query instead of loading every wage
+  // entry + line ever recorded per staff member (app review #48). One WageEntry
+  // per staff per day, so the row count is the distinct-day count.
+  const staffIds = (staff as StaffRow[]).map((s) => s.id);
+  const wageAgg = (await prisma.wageEntry.groupBy({
+    by: ["staffId"],
+    where: { staffId: { in: staffIds } },
+    _sum: { totalHours: true },
+    _count: { _all: true },
+  })) as Array<{ staffId: string; _sum: { totalHours: Decimal | null }; _count: { _all: number } }>;
+  const wageByStaff = new Map(
+    wageAgg.map((w) => [w.staffId, { hours: w._sum.totalHours ?? new Decimal(0), days: w._count._all }]),
+  );
 
   return (
     <div className="space-y-6">
@@ -57,12 +69,11 @@ export default async function StaffPage() {
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
           {(staff as StaffRow[]).map((s) => {
             const currentRate = s.rates[0]?.rate.toFixed(0) ?? "—";
-            const totalHours = s.wageEntries.reduce((sum: Decimal, w) => sum.plus(w.totalHours), new Decimal(0));
-            const days = new Set(s.wageEntries.map((w) => w.date.toISOString().slice(0, 10))).size;
-            const totalEarned = s.wageEntries.reduce((sum: Decimal, w) => {
-              // best-effort: use current rate for all hours; full rate-history math in /staff/[id]
-              return sum.plus(new Decimal(w.totalHours).times(s.rates[0]?.rate ?? new Decimal(0)));
-            }, new Decimal(0));
+            const agg = wageByStaff.get(s.id);
+            const totalHours = agg?.hours ?? new Decimal(0);
+            const days = agg?.days ?? 0;
+            // best-effort: current rate × total hours; full rate-history math in /staff/[id]
+            const totalEarned = totalHours.times(s.rates[0]?.rate ?? new Decimal(0));
 
             return (
               <Card key={s.id}>

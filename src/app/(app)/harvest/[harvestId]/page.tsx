@@ -54,8 +54,8 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
         produces: { include: { produce: true }, orderBy: { createdAt: "asc" } },
         sales: { orderBy: { date: "desc" }, include: { produce: true, customer: true } },
         dispositions: { orderBy: { date: "desc" }, include: { produce: true, staff: true, customer: true } },
-        usages: { orderBy: { date: "desc" }, include: { item: true, consumptions: true } },
-        assets: { orderBy: { date: "desc" }, include: { item: true, consumptions: true } },
+        usages: { orderBy: { date: "desc" }, include: { item: { select: { id: true, name: true, unit: true, subUnit: true, subFactor: true } }, consumptions: true } },
+        assets: { orderBy: { date: "desc" }, include: { item: { select: { id: true, name: true, unit: true, subUnit: true, subFactor: true } }, consumptions: true } },
       },
     }),
     prisma.item.findMany({
