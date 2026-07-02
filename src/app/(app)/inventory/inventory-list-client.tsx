@@ -124,6 +124,21 @@ export function InventoryListClient({ rows }: { rows: InventoryRow[] }) {
       ) : null}
 
       <div className="overflow-hidden rounded-xl border bg-card">
+        {/* Compact select-all for tablet/phone — the desktop column header
+            (which holds the select-all checkbox) is hidden below lg. */}
+        <label className="flex cursor-pointer items-center gap-2 border-b bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground lg:hidden">
+          <input
+            type="checkbox"
+            aria-label="Select all"
+            checked={allSelected}
+            ref={(el) => {
+              if (el) el.indeterminate = someSelected;
+            }}
+            onChange={toggleAll}
+            className="h-4 w-4 cursor-pointer rounded border-border"
+          />
+          Select all
+        </label>
         {/* Column header only makes sense at desktop width; below lg the rows
             self-label (app review UX — tablet tables). */}
         <div className="hidden items-center gap-3 border-b bg-muted/30 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground lg:flex">
@@ -238,6 +253,9 @@ export function InventoryListClient({ rows }: { rows: InventoryRow[] }) {
                       {r.usesRemaining} / {r.usesMax} uses left
                     </span>
                   ) : null}
+                  {/* Value is a desktop column; keep it visible on small screens
+                      under the stock figure so nothing important disappears. */}
+                  <span className="text-[10px] font-medium lg:hidden">{r.valueFormatted}</span>
                 </div>
                 <div className="hidden w-16 shrink-0 text-right text-muted-foreground lg:block">
                   {r.reorder}

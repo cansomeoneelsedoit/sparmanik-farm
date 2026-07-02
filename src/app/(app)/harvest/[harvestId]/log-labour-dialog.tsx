@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { todayWIB } from "@/lib/date";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -28,17 +28,20 @@ import { createLabourTaskQuick } from "@/app/(app)/settings/actions";
 const OTHER_TASK_VALUE = "__other__";
 
 const today = () => todayWIB();
-const schema = z.object({
-  staffId: z.string().min(1, "Pick a staff member"),
-  date: z.string().min(1),
-  hours: z.string().regex(/^[0-9.]+$/, "Hours"),
-  // The displayed task — either a row from the predefined list, or
-  // OTHER_TASK_VALUE when the user wants to type their own.
-  task: z.string().min(1, "Pick or type a task"),
-  // Populated only when `task === OTHER_TASK_VALUE`.
-  customTask: z.string().optional(),
-});
-type Form = z.infer<typeof schema>;
+/** Schema built with the active translator so required-field errors follow the
+ *  EN/ID toggle instead of leaking English into a translated dialog. */
+const makeSchema = (t: (key: string) => string) =>
+  z.object({
+    staffId: z.string().min(1, t("errPickStaff")),
+    date: z.string().min(1),
+    hours: z.string().regex(/^[0-9.]+$/, t("errHours")),
+    // The displayed task — either a row from the predefined list, or
+    // OTHER_TASK_VALUE when the user wants to type their own.
+    task: z.string().min(1, t("errPickTask")),
+    // Populated only when `task === OTHER_TASK_VALUE`.
+    customTask: z.string().optional(),
+  });
+type Form = z.infer<ReturnType<typeof makeSchema>>;
 
 /**
  * Lets the user log labour hours from inside a harvest detail page so the
@@ -62,6 +65,7 @@ export function LogLabourDialog({
   const [pending, startT] = useTransition();
   const [localTasks, setLocalTasks] = useState(tasks);
   const router = useRouter();
+  const schema = useMemo(() => makeSchema(t), [t]);
   const form = useForm<Form>({
     resolver: zodResolver(schema),
     defaultValues: { staffId: "", date: today(), hours: "0", task: "", customTask: "" },

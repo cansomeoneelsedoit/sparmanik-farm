@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import { Check, ChevronsUpDown, Plus, Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -21,7 +22,7 @@ export function Combobox({
   onChange,
   placeholder = "Select…",
   disabled = false,
-  emptyHint = "No matches.",
+  emptyHint,
   // Show the search input as soon as there's more than a handful of options
   // — typing two or three letters should always filter, never hunt-and-peck.
   searchThreshold = 3,
@@ -46,6 +47,10 @@ export function Combobox({
   onCreate?: (label: string) => void | Promise<void>;
   createLabel?: (typed: string) => string;
 }) {
+  // Localized defaults so every picker in the app follows the EN/ID toggle —
+  // the hardcoded English "Type to search…" / "No matches." / "Create …" leaked
+  // into otherwise fully translated staff dialogs (app review follow-up).
+  const t = useTranslations("combobox");
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const wrapperRef = React.useRef<HTMLDivElement>(null);
@@ -118,7 +123,7 @@ export function Combobox({
                 ref={inputRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Type to search…"
+                placeholder={t("search")}
                 className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
               />
             </div>
@@ -131,7 +136,7 @@ export function Combobox({
                 filtered.some((o) => o.label.toLowerCase() === trimmed.toLowerCase());
               const showCreate = !!onCreate && trimmed !== "" && !exactMatch;
               if (filtered.length === 0 && !showCreate) {
-                return <div className="px-3 py-2 text-xs text-muted-foreground">{emptyHint}</div>;
+                return <div className="px-3 py-2 text-xs text-muted-foreground">{emptyHint ?? t("noMatches")}</div>;
               }
               return (
                 <>
@@ -179,9 +184,7 @@ export function Combobox({
                 >
                   <Plus className="h-3.5 w-3.5 shrink-0" />
                   <span className="flex-1 truncate">
-                    {createLabel
-                      ? createLabel(trimmed)
-                      : <>Create &ldquo;<strong>{trimmed}</strong>&rdquo;</>}
+                    {createLabel ? createLabel(trimmed) : t("create", { name: trimmed })}
                   </span>
                 </button>
               ) : null}

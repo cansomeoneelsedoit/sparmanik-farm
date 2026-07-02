@@ -565,7 +565,7 @@ export default async function FinancialsPage() {
           ) : null}
           {depreciationDelta.abs().gte(new Decimal("0.0001")) ? (
             <Row
-              label="± Small rounding difference"
+              label="± Difference not yet explained"
               value={depreciationDelta.toFixed(4)}
               indent
               negative={depreciationDelta.gt(0)}

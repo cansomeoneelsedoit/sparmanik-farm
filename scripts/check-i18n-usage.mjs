@@ -40,6 +40,29 @@ function* walk(dir) {
 let failed = false;
 let checked = 0;
 
+// Keys referenced via TEMPLATE LITERALS the regex below can't see — e.g. the
+// disposition dialog's t(`${k}.noun`). Assert them explicitly so deleting one
+// from a catalog still fails CI.
+const DYNAMIC_KEYS = ["breakage", "staff", "giveaway"].flatMap((k) =>
+  ["button", "noun", "blurb", "weightLabel", "summaryNoun"].map((f) => `dispoDialog.${k}.${f}`),
+);
+for (const key of DYNAMIC_KEYS) {
+  checked++;
+  for (const [locale, messages] of [["en", en], ["id", id]]) {
+    try {
+      const t = createTranslator({ locale, messages });
+      const out = t(key, PARAMS);
+      if (typeof out !== "string" || out.includes(key)) {
+        console.error(`UNRESOLVED [${locale}] ${key}  (dynamic key list)`);
+        failed = true;
+      }
+    } catch (e) {
+      console.error(`ERROR [${locale}] ${key}: ${e.message}  (dynamic key list)`);
+      failed = true;
+    }
+  }
+}
+
 for (const file of walk(SRC)) {
   const code = readFileSync(file, "utf8");
   // const t = useTranslations("ns")  |  const t = await getTranslations("ns")

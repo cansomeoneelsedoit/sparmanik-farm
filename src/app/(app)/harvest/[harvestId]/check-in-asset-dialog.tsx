@@ -153,7 +153,7 @@ export function CheckInAssetDialog({
                 autoFocus
                 value={used}
                 onChange={(e) => setUsed(e.target.value)}
-                placeholder={`0 to ${installedInUnits}`}
+                placeholder={t("usedPlaceholder", { max: installedInUnits })}
               />
               <span className="whitespace-nowrap text-sm text-muted-foreground">
                 {unitLabel}

@@ -345,7 +345,10 @@
     "date": "Date",
     "task": "Task",
     "pickTask": "Pick a task",
-    "emptyHint": "No matches — type a new name and press Create.",
+    "emptyHint": "No matches — type a new name to add it to the list.",
+    "errPickStaff": "Pick a staff member",
+    "errPickTask": "Pick or type a task",
+    "errHours": "Enter the hours worked",
     "otherOption": "Other (type below)…",
     "addToList": "Add \"{name}\" to the list",
     "addedToList": "Added \"{name}\" to the list",
@@ -399,6 +402,7 @@
     "tookOut": "Took out",
     "usesRemaining": "· {n, plural, one {# use} other {# uses}} remaining per unit",
     "howManyUsed": "How many {unit} were used?",
+    "usedPlaceholder": "0 to {max}",
     "tookOutHint": "(took out {qty})",
     "overWarning": "More than you took out — allowed, but double-check.",
     "chargeHint": "Only this much is charged to the greenhouse. Leftover isn't returned to stock yet (coming later).",
@@ -421,5 +425,10 @@
     "toastDamaged": "Marked as damaged — {qty} {unit} used",
     "toastLost": "Marked as lost — {qty} {unit} used",
     "enterUsed": "Enter how many {unit} were used."
+  },
+  "combobox": {
+    "search": "Type to search…",
+    "noMatches": "No matches.",
+    "create": "Create \"{name}\""
   }
 }
