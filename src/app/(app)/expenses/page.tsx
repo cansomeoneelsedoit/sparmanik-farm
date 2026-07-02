@@ -14,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Money } from "@/components/shared/money";
+import { MoneyDual } from "@/components/shared/money";
 import { ExpenseFormDialog } from "@/app/(app)/expenses/expense-form-dialog";
 import { ImportExpenseSheetDialog } from "@/app/(app)/expenses/import-expense-sheet-dialog";
 import { ExpenseRowActions } from "@/app/(app)/expenses/expense-row-actions";
@@ -83,7 +83,7 @@ export default async function ExpensesPage() {
           <CardContent className="p-4">
             <div className="text-xs text-muted-foreground">Total</div>
             <div className="text-2xl font-semibold">
-              <Money value={total.toFixed(4)} />
+              <MoneyDual value={total.toFixed(4)} align="start" />
             </div>
           </CardContent>
         </Card>
@@ -91,7 +91,7 @@ export default async function ExpensesPage() {
           <CardContent className="p-4">
             <div className="text-xs text-muted-foreground">Charged to harvests</div>
             <div className="text-2xl font-semibold">
-              <Money value={assigned.toFixed(4)} />
+              <MoneyDual value={assigned.toFixed(4)} align="start" />
             </div>
           </CardContent>
         </Card>
@@ -99,7 +99,7 @@ export default async function ExpensesPage() {
           <CardContent className="p-4">
             <div className="text-xs text-muted-foreground">Business overhead</div>
             <div className="text-2xl font-semibold">
-              <Money value={overhead.toFixed(4)} />
+              <MoneyDual value={overhead.toFixed(4)} align="start" />
             </div>
           </CardContent>
         </Card>
@@ -156,7 +156,7 @@ export default async function ExpensesPage() {
                     </TableCell>
                     <TableCell className="text-muted-foreground">{e.paymentMethod ?? "—"}</TableCell>
                     <TableCell className="text-right font-medium">
-                      <Money value={e.amount.toFixed(4)} />
+                      <MoneyDual value={e.amount.toFixed(4)} />
                     </TableCell>
                     <TableCell className="p-0">
                       <ExpenseRowActions

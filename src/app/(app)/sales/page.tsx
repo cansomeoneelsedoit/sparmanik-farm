@@ -12,7 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Money } from "@/components/shared/money";
+import { Money, MoneyDual } from "@/components/shared/money";
 import { SalesFilters } from "@/app/(app)/sales/sales-filters";
 import { SalesCharts } from "@/app/(app)/sales/sales-charts";
 
@@ -152,9 +152,9 @@ export default async function SalesPage({
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">Records</div><div className="text-2xl font-semibold">{rows.length}</div>{hasFilters ? <div className="text-[10px] text-muted-foreground">filtered</div> : null}</CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">Total weight</div><div className="text-2xl font-semibold">{totalWeight.toFixed(2)} kg</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">Total revenue</div><div className="text-2xl font-semibold"><Money value={totalRevenue.toFixed(4)} /></div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">Avg price / kg</div><div className="text-2xl font-semibold"><Money value={avgPrice.toFixed(4)} /></div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">Discount given</div><div className="text-2xl font-semibold text-amber-600">{totalDiscount.gt(0.005) ? <Money value={totalDiscount.toFixed(4)} /> : <span className="text-muted-foreground">—</span>}</div>{totalList.gt(0) ? <div className="text-[10px] text-muted-foreground">{totalDiscount.div(totalList).times(100).toFixed(1)}% off list</div> : null}</CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">Total revenue</div><div className="text-2xl font-semibold"><MoneyDual value={totalRevenue.toFixed(4)} align="start" /></div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">Avg price / kg</div><div className="text-2xl font-semibold"><MoneyDual value={avgPrice.toFixed(4)} align="start" /></div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">Discount given</div><div className="text-2xl font-semibold text-amber-600">{totalDiscount.gt(0.005) ? <MoneyDual value={totalDiscount.toFixed(4)} align="start" /> : <span className="text-muted-foreground">—</span>}</div>{totalList.gt(0) ? <div className="text-[10px] text-muted-foreground">{totalDiscount.div(totalList).times(100).toFixed(1)}% off list</div> : null}</CardContent></Card>
       </div>
 
       <SalesCharts
@@ -183,7 +183,7 @@ export default async function SalesPage({
                     <TableRow key={g.name}>
                       <TableCell className="font-medium">{g.name}</TableCell>
                       <TableCell className="text-right">{g.weight.toFixed(2)}</TableCell>
-                      <TableCell className="text-right font-medium"><Money value={g.revenue.toFixed(4)} /></TableCell>
+                      <TableCell className="text-right font-medium"><MoneyDual value={g.revenue.toFixed(4)} /></TableCell>
                       <TableCell className="text-right">{discountCell(g.list, g.revenue)}</TableCell>
                     </TableRow>
                   ))}
@@ -201,7 +201,7 @@ export default async function SalesPage({
                     <TableRow key={p.name}>
                       <TableCell className="font-medium">{p.name}</TableCell>
                       <TableCell className="text-right">{p.weight.toFixed(2)}</TableCell>
-                      <TableCell className="text-right font-medium"><Money value={p.revenue.toFixed(4)} /></TableCell>
+                      <TableCell className="text-right font-medium"><MoneyDual value={p.revenue.toFixed(4)} /></TableCell>
                       <TableCell className="text-right">{discountCell(p.list, p.revenue)}</TableCell>
                     </TableRow>
                   ))}
@@ -245,8 +245,8 @@ export default async function SalesPage({
                     <TableCell>{s.produce.name}</TableCell>
                     <TableCell><Badge variant="outline">{s.grade}</Badge></TableCell>
                     <TableCell className="text-right">{Number(s.weight)} kg</TableCell>
-                    <TableCell className="text-right"><Money value={s.pricePerKg.toFixed(4)} /></TableCell>
-                    <TableCell className="text-right font-medium"><Money value={s.amount.toFixed(4)} /></TableCell>
+                    <TableCell className="text-right"><MoneyDual value={s.pricePerKg.toFixed(4)} /></TableCell>
+                    <TableCell className="text-right font-medium"><MoneyDual value={s.amount.toFixed(4)} /></TableCell>
                     <TableCell className="text-right">{discountCell(s.weight.times(s.pricePerKg), s.amount)}</TableCell>
                   </TableRow>
                 ))}

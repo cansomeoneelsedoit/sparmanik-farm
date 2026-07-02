@@ -5,7 +5,7 @@ import { Decimal } from "@/server/decimal";
 import { getHarvestPL } from "@/server/pl";
 import { requireActiveOrgId } from "@/server/org";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Money } from "@/components/shared/money";
+import { Money, MoneyDual } from "@/components/shared/money";
 
 export const dynamic = "force-dynamic";
 
@@ -609,7 +609,7 @@ function Stat({ label, value, colour }: { label: string; value: string; colour: 
       <CardContent className="p-4">
         <div className="text-xs text-muted-foreground">{label}</div>
         <div className={`text-2xl font-semibold ${colour === "green" ? "text-green-600" : "text-red-600"}`}>
-          <Money value={value} />
+          <MoneyDual value={value} align="start" />
         </div>
       </CardContent>
     </Card>
@@ -646,7 +646,7 @@ function Row({
     >
       <span className={indent ? "text-muted-foreground" : ""}>{label}</span>
       <span className={positive ? "text-green-600" : negative ? "text-red-600" : ""}>
-        <Money value={value} />
+        <MoneyDual value={value} />
       </span>
     </div>
   );

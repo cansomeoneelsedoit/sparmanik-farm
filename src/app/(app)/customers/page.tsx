@@ -2,7 +2,7 @@ import { Plus } from "lucide-react";
 
 import { prisma } from "@/server/prisma";
 import { Decimal } from "@/server/decimal";
-import { Money } from "@/components/shared/money";
+import { MoneyDual } from "@/components/shared/money";
 import { Button } from "@/components/ui/button";
 import { CustomerFormDialog } from "@/app/(app)/customers/customer-form-dialog";
 import {
@@ -73,7 +73,7 @@ export default async function CustomersPage() {
       notes: c.notes,
       hasLogo: !!c.logoMime,
       salesCount: agg?._count._all ?? 0,
-      totalDisplay: <Money value={new Decimal(total).toFixed(4)} />,
+      totalDisplay: <MoneyDual value={new Decimal(total).toFixed(4)} align="start" />,
       lastSale,
     };
   });

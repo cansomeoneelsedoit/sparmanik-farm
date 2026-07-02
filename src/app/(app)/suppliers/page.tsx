@@ -2,7 +2,7 @@ import { Plus } from "lucide-react";
 
 import { prisma } from "@/server/prisma";
 import { Decimal } from "@/server/decimal";
-import { Money } from "@/components/shared/money";
+import { MoneyDual } from "@/components/shared/money";
 import { Button } from "@/components/ui/button";
 import { SupplierFormDialog } from "@/app/(app)/suppliers/supplier-form-dialog";
 import {
@@ -90,7 +90,7 @@ export default async function SuppliersPage() {
       // ReactNode so it converts to the active currency like every other money
       // figure — was hardcoded rupiah while the rest of the app showed AUD
       // (app review UX-2, two-currencies-on-one-screen).
-      totalSpendDisplay: <Money value={totalSpend.toFixed(4)} />,
+      totalSpendDisplay: <MoneyDual value={totalSpend.toFixed(4)} align="start" />,
       totalSpendNum: Number(totalSpend),
       lastDelivery,
       items,
