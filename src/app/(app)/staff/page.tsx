@@ -110,7 +110,7 @@ export default async function StaffPage() {
                     <div><div className="text-muted-foreground">Days</div><div className="font-medium">{days}</div></div>
                   </div>
                   <div className="border-t pt-3 text-xs">
-                    <span className="text-muted-foreground">Total earned: </span>
+                    <span className="text-muted-foreground">Est. earned (at current rate): </span>
                     <span className="font-medium"><Money value={totalEarned.toFixed(4)} /></span>
                   </div>
                   <div className="grid grid-cols-2 gap-2">

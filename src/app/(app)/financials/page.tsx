@@ -244,6 +244,7 @@ export default async function FinancialsPage() {
   const sumHarvestUsage = sumD(harvestPls.map((h) => h.pl.usageCost));
   const sumHarvestLabour = sumD(harvestPls.map((h) => h.pl.labourCost));
   const sumHarvestDepr = sumD(harvestPls.map((h) => h.pl.depreciationCost));
+  const sumHarvestExpense = sumD(harvestPls.map((h) => h.pl.expenseCost));
   const sumHarvestNet = sumD(harvestPls.map((h) => h.pl.netProfit));
 
   // Reconciliation deltas (accrual basis — clean tie-out).
@@ -374,6 +375,7 @@ export default async function FinancialsPage() {
                     <th className="px-2 py-2 text-right font-medium">FIFO usage</th>
                     <th className="px-2 py-2 text-right font-medium">Labour</th>
                     <th className="px-2 py-2 text-right font-medium">Depreciation</th>
+                    <th className="px-2 py-2 text-right font-medium">Expenses</th>
                     <th className="px-4 py-2 text-right font-medium">Net</th>
                   </tr>
                 </thead>
@@ -414,6 +416,9 @@ export default async function FinancialsPage() {
                         <td className="px-2 py-2 text-right text-red-600">
                           <Money value={h.pl.depreciationCost} />
                         </td>
+                        <td className="px-2 py-2 text-right text-red-600">
+                          <Money value={h.pl.expenseCost} />
+                        </td>
                         <td
                           className={`px-4 py-2 text-right font-medium ${netD.gte(0) ? "text-green-600" : "text-red-600"}`}
                         >
@@ -437,6 +442,9 @@ export default async function FinancialsPage() {
                     </td>
                     <td className="px-2 py-2 text-right text-red-600">
                       <Money value={sumHarvestDepr.toFixed(4)} />
+                    </td>
+                    <td className="px-2 py-2 text-right text-red-600">
+                      <Money value={sumHarvestExpense.toFixed(4)} />
                     </td>
                     <td
                       className={`px-4 py-2 text-right ${sumHarvestNet.gte(0) ? "text-green-600" : "text-red-600"}`}

@@ -15,7 +15,7 @@ export type SupplierRow = {
   phone: string | null;
   email: string | null;
   batchCount: number;
-  totalSpend: string;
+  totalSpendDisplay: React.ReactNode;
   totalSpendNum: number;
   lastDelivery: string | null;
   /** Items this supplier has ever delivered, sorted by spend desc. */
@@ -171,7 +171,7 @@ export function SuppliersListClient({ suppliers }: { suppliers: SupplierRow[] })
                     </div>
                     <div className="text-right">
                       <div className="text-muted-foreground">Total spend</div>
-                      <div className="font-medium">Rp {Number(s.totalSpend).toLocaleString("id-ID")}</div>
+                      <div className="font-medium">{s.totalSpendDisplay}</div>
                     </div>
                   </div>
                   {s.items.length > 0 ? (

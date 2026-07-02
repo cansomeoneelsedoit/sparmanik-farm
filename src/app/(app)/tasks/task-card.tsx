@@ -1,12 +1,13 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import {
   Select,
   SelectContent,
@@ -42,6 +43,7 @@ export function TaskCard({
 }) {
   const t = useTranslations("tasks");
   const [pending, startT] = useTransition();
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const router = useRouter();
   const priorityColour = task.priority === "HIGH" ? "destructive" : task.priority === "MEDIUM" ? "accent" : "secondary";
   const priorityLabel =
@@ -54,19 +56,23 @@ export function TaskCard({
 
   return (
     <div className="flex items-start gap-3 rounded-md border bg-background p-3">
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={pending}
-        onChange={(e) =>
-          startT(async () => {
-            const r = await setTaskStatus(task.id, e.target.checked ? "COMPLETED" : "PENDING");
-            if (r.ok) router.refresh();
-            else toast.error(r.error);
-          })
-        }
-        className="mt-1"
-      />
+      {/* Bigger tap target — this "done" toggle is the #1 field action, tapped
+          with gloves on a tablet (app review UX-3). */}
+      <label className="flex cursor-pointer items-center justify-center p-1.5">
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={pending}
+          onChange={(e) =>
+            startT(async () => {
+              const r = await setTaskStatus(task.id, e.target.checked ? "COMPLETED" : "PENDING");
+              if (r.ok) router.refresh();
+              else toast.error(r.error);
+            })
+          }
+          className="h-6 w-6 cursor-pointer accent-green-600"
+        />
+      </label>
       <div className="flex-1">
         <div className="flex items-center gap-2">
           <div className={`font-medium ${checked ? "line-through text-muted-foreground" : ""}`}>{task.title}</div>
@@ -112,19 +118,29 @@ export function TaskCard({
       <Button
         size="icon"
         variant="ghost"
-        onClick={() =>
-          startT(async () => {
-            const r = await deleteTask(task.id);
-            if (r.ok) {
-              toast.success(t("deletedToast"));
-              router.refresh();
-            } else toast.error(r.error);
-          })
-        }
+        onClick={() => setConfirmOpen(true)}
         title={t("delete")}
       >
         ×
       </Button>
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title={t("delete")}
+        description={`“${task.title}”`}
+        confirmLabel={t("delete")}
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={async () => {
+          const r = await deleteTask(task.id);
+          if (r.ok) {
+            toast.success(t("deletedToast"));
+            router.refresh();
+          } else {
+            toast.error(r.error);
+          }
+        }}
+      />
     </div>
   );
 }
