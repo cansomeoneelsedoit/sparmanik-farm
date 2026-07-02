@@ -20,11 +20,22 @@ export function parseMoney(value: string | number): Decimal {
  */
 export function formatMoney(
   value: string | null,
-  options: { locale?: "en" | "id"; convertToAUD?: boolean; exchangeRate?: string | null } = {},
+  options: {
+    locale?: "en" | "id";
+    convertToAUD?: boolean;
+    exchangeRate?: string | null;
+    /**
+     * For per-unit RATES (e.g. price/kg). Rounding a rate to 2 cents means
+     * weight × rate no longer equals the amount in AUD — the row looks like it
+     * doesn't add up (it ties out exactly in whole-rupiah IDR). Rates render at
+     * up to 4 dp so the multiplication reconciles; amounts stay at 2 dp.
+     */
+    precise?: boolean;
+  } = {},
 ): string {
   if (value === null || value === undefined) return "—";
   const dec = new Decimal(value);
-  const { locale = "en", convertToAUD = false, exchangeRate } = options;
+  const { locale = "en", convertToAUD = false, exchangeRate, precise = false } = options;
 
   if (convertToAUD && exchangeRate) {
     const rate = new Decimal(exchangeRate);
@@ -33,7 +44,8 @@ export function formatMoney(
       return new Intl.NumberFormat(locale === "id" ? "id-ID" : "en-AU", {
         style: "currency",
         currency: "AUD",
-        maximumFractionDigits: 2,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: precise ? 4 : 2,
       }).format(aud);
     }
   }

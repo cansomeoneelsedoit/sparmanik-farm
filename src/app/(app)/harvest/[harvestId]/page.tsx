@@ -643,7 +643,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                       <Badge variant="outline">{s.grade}</Badge>
                     </TableCell>
                     <TableCell className="text-right">{Number(s.weight)}</TableCell>
-                    <TableCell className="text-right"><Money value={s.pricePerKg.toFixed(4)} /></TableCell>
+                    <TableCell className="text-right"><Money value={s.pricePerKg.toFixed(4)} precise /></TableCell>
                     <TableCell className="text-right font-medium">
                       <Money value={s.amount.toFixed(4)} />
                       {Number(s.weight) * Number(s.pricePerKg) - Number(s.amount) > 0.005 ? (
@@ -1041,7 +1041,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
             <ul className="space-y-1">
               {labourRows.map((l) => (
                 <li key={l.id} className="flex items-center justify-between">
-                  <span className="text-muted-foreground">{l.date.toISOString().slice(0, 10)} — {l.name} ({l.hours.toFixed(2)}h @ <Money value={l.rate.toFixed(4)} />){l.task ? ` — ${l.task}` : ""}</span>
+                  <span className="text-muted-foreground">{l.date.toISOString().slice(0, 10)} — {l.name} ({l.hours.toFixed(2)}h @ <Money value={l.rate.toFixed(4)} precise />){l.task ? ` — ${l.task}` : ""}</span>
                   <span className="text-red-600"><Money value={l.cost.toFixed(4)} /></span>
                 </li>
               ))}

@@ -22,12 +22,15 @@ const getExchangeRate = cache(async (): Promise<string | null> => {
 export async function Money({
   value,
   forceIDR = false,
+  precise = false,
 }: {
   value: string | null | undefined;
   forceIDR?: boolean;
+  /** For per-unit rates (price/kg, cost/unit) so weight × rate ties out in AUD. */
+  precise?: boolean;
 }) {
   const locale = (await getLocale()) as "en" | "id";
   const convertToAUD = !forceIDR && locale === "en";
   const exchangeRate = convertToAUD ? await getExchangeRate() : null;
-  return <>{formatMoney(value ?? null, { locale, convertToAUD, exchangeRate })}</>;
+  return <>{formatMoney(value ?? null, { locale, convertToAUD, exchangeRate, precise })}</>;
 }
