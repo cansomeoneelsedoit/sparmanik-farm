@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { todayWIB } from "@/lib/date";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { CheckCircle2, PackageX, ShieldOff } from "lucide-react";
 import { toast } from "sonner";
 
@@ -56,6 +57,8 @@ export function CheckInAssetDialog({
   usesRemaining: number | null;
   trigger: React.ReactNode;
 }) {
+  const t = useTranslations("checkinDialog");
+  const tCommon = useTranslations("common");
   const isPack = !!(subUnit && subFactor && subFactor > 0);
   const unitLabel = isPack ? (subUnit as string) : unit;
   // Installed amount expressed in the real unit staff think in.
@@ -82,7 +85,7 @@ export function CheckInAssetDialog({
 
   function submit() {
     if (!usedValid) {
-      toast.error(`Enter how many ${unitLabel} were used.`);
+      toast.error(t("enterUsed", { unit: unitLabel }));
       return;
     }
     // Convert the real-unit figure back to pack units for the ledger.
@@ -99,8 +102,10 @@ export function CheckInAssetDialog({
       if (r.ok) {
         toast.success(
           condition === "good"
-            ? `Checked in — ${usedNum} ${unitLabel} used`
-            : `Marked as ${condition} — ${usedNum} ${unitLabel} used`,
+            ? t("toastGood", { qty: usedNum, unit: unitLabel })
+            : condition === "damaged"
+              ? t("toastDamaged", { qty: usedNum, unit: unitLabel })
+              : t("toastLost", { qty: usedNum, unit: unitLabel }),
         );
         setOpen(false);
         reset();
@@ -122,24 +127,22 @@ export function CheckInAssetDialog({
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Check in: {itemName}</DialogTitle>
+          <DialogTitle>{t("title", { name: itemName })}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-4 text-sm">
           <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-            Took out{" "}
+            {t("tookOut")}{" "}
             <strong className="text-foreground">
               {installedInUnits} {unitLabel}
             </strong>
-            {usesRemaining !== null
-              ? ` · ${usesRemaining} use${usesRemaining === 1 ? "" : "s"} remaining per unit`
-              : ""}
+            {usesRemaining !== null ? <> {t("usesRemaining", { n: usesRemaining })}</> : null}
           </div>
 
           <div className="space-y-2">
             <Label>
-              How many {unitLabel} were used?{" "}
+              {t("howManyUsed", { unit: unitLabel })}{" "}
               <span className="text-xs font-normal text-muted-foreground">
-                (took out {installedInUnits})
+                {t("tookOutHint", { qty: installedInUnits })}
               </span>
             </Label>
             <div className="flex items-center gap-2">
@@ -158,26 +161,25 @@ export function CheckInAssetDialog({
             </div>
             {overInstalled ? (
               <p className="text-xs text-amber-600 dark:text-amber-400">
-                More than you took out — allowed, but double-check.
+                {t("overWarning")}
               </p>
             ) : (
               <p className="text-[11px] text-muted-foreground">
-                Only this much is charged to the greenhouse. Leftover isn&apos;t
-                returned to stock yet (coming later).
+                {t("chargeHint")}
               </p>
             )}
           </div>
 
           <div className="space-y-2">
-            <Label>Condition</Label>
+            <Label>{t("condition")}</Label>
             <div className="grid grid-cols-3 gap-2">
               <ConditionOption
                 value="good"
                 current={condition}
                 onSelect={setCondition}
                 icon={<CheckCircle2 className="h-4 w-4" />}
-                title="Good"
-                subtitle="Used as normal"
+                title={t("good")}
+                subtitle={t("goodSub")}
                 tint="emerald"
               />
               <ConditionOption
@@ -185,8 +187,8 @@ export function CheckInAssetDialog({
                 current={condition}
                 onSelect={setCondition}
                 icon={<ShieldOff className="h-4 w-4" />}
-                title="Damaged"
-                subtitle="Note it for the log"
+                title={t("damaged")}
+                subtitle={t("damagedSub")}
                 tint="amber"
               />
               <ConditionOption
@@ -194,29 +196,29 @@ export function CheckInAssetDialog({
                 current={condition}
                 onSelect={setCondition}
                 icon={<PackageX className="h-4 w-4" />}
-                title="Lost"
-                subtitle="Note it for the log"
+                title={t("lost")}
+                subtitle={t("lostSub")}
                 tint="rose"
               />
             </div>
           </div>
 
           <div className="space-y-2">
-            <Label>Return date</Label>
+            <Label>{t("returnDate")}</Label>
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           </div>
 
           <div className="space-y-2">
-            <Label>Note {condition !== "good" ? "(why)" : "(optional)"}</Label>
+            <Label>{condition !== "good" ? t("noteWhy") : t("noteOptional")}</Label>
             <Textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder={
                 condition === "damaged"
-                  ? "e.g. cracked during install, motor burnt out…"
+                  ? t("placeholderDamaged")
                   : condition === "lost"
-                    ? "e.g. couldn't locate at greenhouse cleanup…"
-                    : "Optional note for the audit log"
+                    ? t("placeholderLost")
+                    : t("placeholderGood")
               }
               rows={2}
             />
@@ -224,10 +226,10 @@ export function CheckInAssetDialog({
         </div>
         <DialogFooter>
           <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
-            Cancel
+            {tCommon("cancel")}
           </Button>
           <Button type="button" onClick={submit} disabled={pending || !usedValid}>
-            {pending ? "Saving…" : "Check in"}
+            {pending ? t("saving") : t("checkIn")}
           </Button>
         </DialogFooter>
       </DialogContent>

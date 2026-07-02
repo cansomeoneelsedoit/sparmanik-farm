@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { todayWIB } from "@/lib/date";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -69,6 +70,8 @@ export function InstallAssetDialog({
   harvestId: string;
   items: InstallAssetItem[];
 }) {
+  const t = useTranslations("assetDialog");
+  const tCommon = useTranslations("common");
   const [open, setOpen] = useState(false);
   const [pending, startT] = useTransition();
   const router = useRouter();
@@ -98,7 +101,7 @@ export function InstallAssetDialog({
       : null;
   const nextUseLabel =
     depreciable && selected?.topBatch
-      ? `use ${selected.topBatch.useCount + 1} of ${selected.topBatch.maxUses}`
+      ? t("useLabel", { n: selected.topBatch.useCount + 1, max: selected.topBatch.maxUses })
       : null;
 
   /** Live proportional-cost preview for pack-style items. Uses the FIFO-top
@@ -116,9 +119,9 @@ export function InstallAssetDialog({
   /** Available rendered in sub-units when the item is sold as a pack. */
   const availableLabel =
     isPack && selected?.subFactor
-      ? `${(selected.available * selected.subFactor).toFixed(0)} ${selected.subUnit} avail`
+      ? t("avail", { n: (selected.available * selected.subFactor).toFixed(0), unit: selected.subUnit ?? "" })
       : selected
-        ? `${selected.available} ${selected.unit} avail`
+        ? t("avail", { n: selected.available, unit: selected.unit })
         : "";
 
   function onSubmit(v: Form) {
@@ -140,7 +143,7 @@ export function InstallAssetDialog({
         condition: v.condition === "new" ? "new" : "second-hand",
       });
       if (r.ok) {
-        toast.success("Asset installed");
+        toast.success(t("toastInstalled"));
         setOpen(false);
         form.reset({ qty: "1", date: today(), type: "reusable", condition: "new" });
         router.refresh();
@@ -153,32 +156,30 @@ export function InstallAssetDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline">Install asset</Button>
+        <Button variant="outline">{t("trigger")}</Button>
       </DialogTrigger>
       <DialogContent>
         <form onSubmit={form.handleSubmit(onSubmit)}>
           <DialogHeader>
-            <DialogTitle>Install an asset on this harvest</DialogTitle>
+            <DialogTitle>{t("title")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <p className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-              For physical things installed in the greenhouse:{" "}
-              <strong className="text-foreground">drippers, plumbing, frames</strong> (Fixed),
-              or <strong className="text-foreground">rockwool, grow bags</strong> (Reusable — depreciates per use).
+              {t("blurb")}
             </p>
             <div className="space-y-2">
-              <Label>Item</Label>
+              <Label>{t("item")}</Label>
               <Combobox
                 value={form.watch("itemId")}
                 onChange={(v) => form.setValue("itemId", v ?? "")}
-                placeholder="Pick item with stock"
+                placeholder={t("pickItem")}
                 options={items.map((i) => ({
                   value: i.id,
                   label: i.name,
                   description:
                     i.subUnit && i.subFactor && i.subFactor > 0
-                      ? `${(i.available * i.subFactor).toFixed(0)} ${i.subUnit} avail`
-                      : `${i.available} ${i.unit} avail`,
+                      ? t("avail", { n: (i.available * i.subFactor).toFixed(0), unit: i.subUnit })
+                      : t("avail", { n: i.available, unit: i.unit }),
                 }))}
               />
               {selected ? (
@@ -188,7 +189,7 @@ export function InstallAssetDialog({
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label>
-                  Quantity
+                  {t("quantity")}
                   {selected
                     ? ` (${isPack ? selected.subUnit : selected.unit})`
                     : ""}
@@ -203,28 +204,28 @@ export function InstallAssetDialog({
                 ) : null}
               </div>
               <div className="space-y-2">
-                <Label>Date</Label>
+                <Label>{t("date")}</Label>
                 <Input type="date" {...form.register("date")} />
               </div>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label>Type</Label>
+                <Label>{t("type")}</Label>
                 <Select value={form.watch("type")} onValueChange={(v) => form.setValue("type", v as "reusable" | "onetime")}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="reusable">Reusable (depreciates per use)</SelectItem>
-                    <SelectItem value="onetime">Fixed (stays here, one-time)</SelectItem>
+                    <SelectItem value="reusable">{t("reusable")}</SelectItem>
+                    <SelectItem value="onetime">{t("fixed")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Condition</Label>
+                <Label>{t("condition")}</Label>
                 <Select value={form.watch("condition")} onValueChange={(v) => form.setValue("condition", v as "new" | "secondhand")}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="new">New</SelectItem>
-                    <SelectItem value="secondhand">Second-hand</SelectItem>
+                    <SelectItem value="new">{t("conditionNew")}</SelectItem>
+                    <SelectItem value="secondhand">{t("conditionSecondhand")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -232,18 +233,14 @@ export function InstallAssetDialog({
 
             {depreciable ? (
               <div className="space-y-1 rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-                <div>
-                  Depreciable item — harvest will be charged{" "}
-                  <strong className="text-foreground">{charge ?? "—"}</strong>{" "}
-                  ({nextUseLabel}).
-                </div>
-                <div>Full purchase cost is already on Business P&amp;L.</div>
+                <div>{t("chargeNote", { charge: charge ?? "—", useLabel: nextUseLabel ?? "" })}</div>
+                <div>{t("fullCostNote")}</div>
               </div>
             ) : null}
           </div>
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={pending}>Cancel</Button>
-            <Button type="submit" disabled={pending || !itemId}>{pending ? "Installing…" : "Install"}</Button>
+            <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={pending}>{tCommon("cancel")}</Button>
+            <Button type="submit" disabled={pending || !itemId}>{pending ? t("installing") : t("install")}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

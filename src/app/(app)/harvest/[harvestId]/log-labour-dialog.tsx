@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { todayWIB } from "@/lib/date";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -55,6 +56,8 @@ export function LogLabourDialog({
   staff: { id: string; name: string; rate: string | null }[];
   tasks: { id: string; name: string }[];
 }) {
+  const t = useTranslations("labourDialog");
+  const tCommon = useTranslations("common");
   const [open, setOpen] = useState(false);
   const [pending, startT] = useTransition();
   const [localTasks, setLocalTasks] = useState(tasks);
@@ -73,7 +76,7 @@ export function LogLabourDialog({
     const resolved =
       v.task === OTHER_TASK_VALUE ? (v.customTask ?? "").trim() : v.task;
     if (!resolved) {
-      form.setError("customTask", { message: "Type a task or pick from the list" });
+      form.setError("customTask", { message: t("typeOrPick") });
       return;
     }
     startT(async () => {
@@ -89,7 +92,7 @@ export function LogLabourDialog({
         ],
       });
       if (r.ok) {
-        toast.success("Labour logged");
+        toast.success(t("toastLogged"));
         setOpen(false);
         form.reset({
           staffId: "",
@@ -110,7 +113,7 @@ export function LogLabourDialog({
     if (r.ok && r.data) {
       setLocalTasks((prev) => [...prev, { id: r.data!.id, name: r.data!.name }]);
       form.setValue("task", r.data.name);
-      toast.success(`Added "${r.data.name}" to the list`);
+      toast.success(t("addedToList", { name: r.data.name }));
     } else if (!r.ok) {
       toast.error(r.error);
     }
@@ -124,24 +127,24 @@ export function LogLabourDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline">Log labour</Button>
+        <Button variant="outline">{t("trigger")}</Button>
       </DialogTrigger>
       <DialogContent>
         <form onSubmit={form.handleSubmit(onSubmit)}>
           <DialogHeader>
-            <DialogTitle>Log labour hours for this harvest</DialogTitle>
+            <DialogTitle>{t("title")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label>Staff member</Label>
+              <Label>{t("staffMember")}</Label>
               <Combobox
                 value={form.watch("staffId")}
                 onChange={(v) => form.setValue("staffId", v ?? "")}
-                placeholder={staff.length === 0 ? "No staff yet — add via /staff" : "Pick staff"}
+                placeholder={staff.length === 0 ? t("noStaffYet") : t("pickStaff")}
                 options={staff.map((s) => ({
                   value: s.id,
                   label: s.name,
-                  description: s.rate ? `${s.rate} / hr` : "no rate set",
+                  description: s.rate ? t("perHour", { rate: s.rate }) : t("noRate"),
                 }))}
               />
               {form.formState.errors.staffId ? (
@@ -150,29 +153,29 @@ export function LogLabourDialog({
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
-                <Label>Hours</Label>
+                <Label>{t("hours")}</Label>
                 <Input type="number" step="any" min="0" {...form.register("hours")} />
               </div>
               <div className="space-y-2">
-                <Label>Date</Label>
+                <Label>{t("date")}</Label>
                 <Input type="date" {...form.register("date")} />
               </div>
             </div>
             <div className="space-y-2">
               <Label>
-                Task <span className="text-destructive">*</span>
+                {t("task")} <span className="text-destructive">*</span>
               </Label>
               <Combobox
                 value={taskValue || null}
                 onChange={(v) => form.setValue("task", v ?? "")}
-                placeholder="Pick a task"
-                emptyHint="No matches — type a new name and press Create."
+                placeholder={t("pickTask")}
+                emptyHint={t("emptyHint")}
                 options={[
-                  ...localTasks.map((t) => ({ value: t.name, label: t.name })),
-                  { value: OTHER_TASK_VALUE, label: "Other (type below)…" },
+                  ...localTasks.map((task) => ({ value: task.name, label: task.name })),
+                  { value: OTHER_TASK_VALUE, label: t("otherOption") },
                 ]}
                 onCreate={handleCreateTask}
-                createLabel={(typed) => `Add "${typed}" to the list`}
+                createLabel={(typed) => t("addToList", { name: typed })}
               />
               {form.formState.errors.task ? (
                 <p className="text-xs text-destructive">{form.formState.errors.task.message}</p>
@@ -180,7 +183,7 @@ export function LogLabourDialog({
               {isOther ? (
                 <Input
                   {...form.register("customTask")}
-                  placeholder="What did they do? (e.g. tied up melon vines)"
+                  placeholder={t("customPlaceholder")}
                   autoFocus
                 />
               ) : null}
@@ -188,25 +191,25 @@ export function LogLabourDialog({
                 <p className="text-xs text-destructive">{form.formState.errors.customTask.message}</p>
               ) : null}
               <p className="text-[10px] text-muted-foreground">
-                Manage the list under{" "}
+                {t("manageHint")}{" "}
                 <a href="/settings/labour-tasks" className="underline" target="_blank">
-                  Settings → Labour tasks
+                  {t("manageLink")}
                 </a>
                 .
               </p>
             </div>
             {estimatedCost ? (
               <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-                Estimated cost at current rate: <strong className="text-foreground">{estimatedCost}</strong>
+                {t("estimatedCost")} <strong className="text-foreground">{estimatedCost}</strong>
               </div>
             ) : null}
           </div>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
-              Cancel
+              {tCommon("cancel")}
             </Button>
             <Button type="submit" disabled={pending}>
-              {pending ? "Saving…" : "Log labour"}
+              {pending ? t("saving") : t("logButton")}
             </Button>
           </DialogFooter>
         </form>
