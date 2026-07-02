@@ -651,8 +651,8 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                         // the row visibly adds up: list − off = charged. The AUD
                         // reference lives under the amount above.
                         <div className="text-[11px] font-normal text-amber-600">
-                          −<Money value={(Number(s.weight) * Number(s.pricePerKg) - Number(s.amount)).toFixed(4)} forceIDR /> off
-                          <span className="text-muted-foreground"> (was <Money value={(Number(s.weight) * Number(s.pricePerKg)).toFixed(4)} forceIDR />)</span>
+                          −<Money value={(Number(s.weight) * Number(s.pricePerKg) - Number(s.amount)).toFixed(4)} /> off
+                          <span className="text-muted-foreground"> (was <Money value={(Number(s.weight) * Number(s.pricePerKg)).toFixed(4)} />)</span>
                         </div>
                       ) : null}
                     </TableCell>
@@ -687,7 +687,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                     <MoneyDual value={pl.revenue} />
                     {salesDiscountTotal > 0.005 ? (
                       <div className="text-[11px] font-normal text-amber-600">
-                        −<Money value={salesDiscountTotal.toFixed(4)} forceIDR /> total off
+                        −<Money value={salesDiscountTotal.toFixed(4)} /> total off
                       </div>
                     ) : null}
                   </TableCell>

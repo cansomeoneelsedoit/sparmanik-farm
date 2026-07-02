@@ -37,14 +37,12 @@ export async function Money({
 }
 
 /**
- * Dual-currency display for line-items on operational screens: Rupiah as the
- * primary figure (always clean and reconciles — it's the money that was
- * actually recorded) with a small AUD reference underneath. Rupiah prices don't
- * convert to round dollar figures, so showing AUD alone made rows look like they
- * didn't add up (app review — Boyd's choice: "Rp big, A$ small").
- *
- * The AUD line only appears when a rate is set. In ID locale it's still shown so
- * the owner keeps the AUD reference regardless of the app language.
+ * Dual-currency display for line-items. The PRIMARY figure follows the language
+ * toggle — English → AUD on top, Indonesian → Rupiah on top — with the other
+ * currency shown small underneath as a reference. So switching EN/ID flips which
+ * currency is the big number, and both are always visible so figures reconcile
+ * either way (a discounted row's "was − off = charged" ties out in whichever
+ * currency you read).
  */
 export async function MoneyDual({
   value,
@@ -60,6 +58,10 @@ export async function MoneyDual({
   const idr = formatMoney(value ?? null, { locale, convertToAUD: false });
   const rate = await getExchangeRate();
   const aud = rate ? formatMoney(value ?? null, { locale, convertToAUD: true, exchangeRate: rate }) : null;
+  // Primary follows the toggle; the other currency is the small reference line.
+  const audPrimary = locale === "en" && aud;
+  const primary = audPrimary ? aud : idr;
+  const secondary = audPrimary ? idr : aud;
   return (
     <span
       className={cn(
@@ -68,8 +70,8 @@ export async function MoneyDual({
         className,
       )}
     >
-      <span>{idr}</span>
-      {aud ? <span className="text-[10px] font-normal text-muted-foreground">{aud}</span> : null}
+      <span>{primary}</span>
+      {secondary ? <span className="text-[10px] font-normal text-muted-foreground">{secondary}</span> : null}
     </span>
   );
 }
