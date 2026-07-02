@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -16,19 +16,51 @@ import {
 } from "@/app/(app)/harvest/actions";
 
 export function DeleteSaleButton({ id }: { id: string }) {
-  return <DeleteIcon id={id} action={deleteSale} label="Delete sale" />;
+  return (
+    <DeleteIcon
+      id={id}
+      action={deleteSale}
+      label="Delete sale"
+      title="Delete this sale?"
+      description="This removes a revenue record from the harvest P&L, the Sales page and Financials. It can be undone from the History (↩) sheet."
+    />
+  );
 }
 
 export function DeleteDispositionButton({ id }: { id: string }) {
-  return <DeleteIcon id={id} action={deleteDisposition} label="Delete entry" />;
+  return (
+    <DeleteIcon
+      id={id}
+      action={deleteDisposition}
+      label="Delete entry"
+      title="Delete this entry?"
+      description="This removes a breakage / staff-use / giveaway record from the yield breakdown. It can be undone from the History (↩) sheet."
+    />
+  );
 }
 
 export function DeleteUsageButton({ id }: { id: string }) {
-  return <DeleteIcon id={id} action={deleteHarvestUsage} label="Delete usage" />;
+  return (
+    <DeleteIcon
+      id={id}
+      action={deleteHarvestUsage}
+      label="Delete usage"
+      title="Delete this usage entry?"
+      description="This removes the recorded stock usage and its cost from the harvest P&L."
+    />
+  );
 }
 
 export function DeleteAssetButton({ id }: { id: string }) {
-  return <DeleteIcon id={id} action={deleteHarvestAsset} label="Delete asset" />;
+  return (
+    <DeleteIcon
+      id={id}
+      action={deleteHarvestAsset}
+      label="Delete asset"
+      title="Delete this asset?"
+      description="This removes the installed asset and its depreciation from the harvest P&L."
+    />
+  );
 }
 
 /**
@@ -80,24 +112,44 @@ export function DeleteLabourButton({
   );
 }
 
-function DeleteIcon({ id, action, label }: { id: string; action: (id: string) => Promise<{ ok: true } | { ok: false; error: string }>; label: string }) {
-  const [pending, startT] = useTransition();
+function DeleteIcon({
+  id,
+  action,
+  label,
+  title,
+  description,
+}: {
+  id: string;
+  action: (id: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  label: string;
+  title: string;
+  description: string;
+}) {
+  const [open, setOpen] = useState(false);
   const router = useRouter();
   return (
-    <Button
-      size="icon"
-      variant="ghost"
-      disabled={pending}
-      title={label}
-      onClick={() =>
-        startT(async () => {
+    <>
+      <Button size="icon" variant="ghost" title={label} onClick={() => setOpen(true)}>
+        <Trash2 className="h-4 w-4" />
+      </Button>
+      <ConfirmDialog
+        open={open}
+        onOpenChange={setOpen}
+        title={title}
+        description={description}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={async () => {
           const r = await action(id);
-          if (r.ok) { toast.success("Deleted"); router.refresh(); }
-          else toast.error(r.error);
-        })
-      }
-    >
-      <Trash2 className="h-4 w-4" />
-    </Button>
+          if (r.ok) {
+            toast.success("Deleted");
+            router.refresh();
+          } else {
+            toast.error(r.error);
+          }
+        }}
+      />
+    </>
   );
 }
