@@ -71,11 +71,13 @@ export async function Topbar({
           <span className="font-medium text-foreground">{rate}</span>{" "}
           {t("rateUnit")}
         </span>
-        {/* Clear-cache + lang/theme toggles are nice-to-haves; bury them on
-            phone so the bell, audit, and sign-out stay reachable. */}
+        {/* Language toggle is the single most important control for the
+            Indonesian staff — keep it visible on EVERY screen size, not buried
+            in a desktop-only cluster (app review UX-1). */}
+        <LangToggle />
+        {/* Clear-cache + theme are true nice-to-haves; bury them on phone. */}
         <div className="hidden items-center gap-2 md:flex">
           <ClearCacheButton />
-          <LangToggle />
           <ThemeToggle />
         </div>
         <AlertBell alerts={alerts} />

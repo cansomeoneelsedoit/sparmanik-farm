@@ -35,7 +35,16 @@
     "settings": "Pengaturan",
     "healthCheck": "Pemeriksaan kesehatan",
     "askAi": "Tanya AI",
-    "shopping": "Daftar belanja"
+    "shopping": "Daftar belanja",
+    "stocktake": "Stok opname",
+    "simulator": "Simulator",
+    "users": "Pengguna",
+    "groups": {
+      "operations": "Operasional",
+      "financial": "Keuangan",
+      "content": "Konten",
+      "settings": "Pengaturan"
+    }
   },
   "topbar": {
     "rateLabel": "Kurs",

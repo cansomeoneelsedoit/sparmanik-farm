@@ -215,6 +215,14 @@ export function SidebarContent({
     return item.fallback ?? item.key;
   }
 
+  // Group headers (Operations/Financial/Content/Settings) were hardcoded
+  // English even in ID mode (app review UX-1). Translate via nav.groups.<id>.
+  function groupLabel(node: { id: string; label: string }): string {
+    const key = `groups.${node.id}`;
+    if (t.has(key)) return t(key);
+    return node.label;
+  }
+
   function isActive(href: string): boolean {
     if (href === "/") return pathname === "/";
     return pathname === href || pathname.startsWith(href + "/");
@@ -260,7 +268,7 @@ export function SidebarContent({
                 )}
               >
                 <Icon className="h-3.5 w-3.5" />
-                <span className="flex-1 text-left">{node.label}</span>
+                <span className="flex-1 text-left">{groupLabel(node)}</span>
                 <ChevronDown
                   className={cn(
                     "h-3.5 w-3.5 transition-transform",
@@ -287,7 +295,7 @@ export function SidebarContent({
         })}
       </nav>
       <div className="flex items-center gap-2 border-t p-3 text-[10px] text-muted-foreground">
-        <MessageSquare className="h-3 w-3" /> v0.3 · {tCommon("appName")}
+        <MessageSquare className="h-3 w-3" /> {tCommon("appName")}
       </div>
     </div>
   );
