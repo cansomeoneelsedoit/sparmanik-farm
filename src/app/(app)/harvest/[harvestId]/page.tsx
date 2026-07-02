@@ -647,8 +647,12 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                     <TableCell className="text-right font-medium">
                       <MoneyDual value={s.amount.toFixed(4)} />
                       {Number(s.weight) * Number(s.pricePerKg) - Number(s.amount) > 0.005 ? (
-                        <div className="text-[10px] font-normal text-amber-600">
-                          −<Money value={(Number(s.weight) * Number(s.pricePerKg) - Number(s.amount)).toFixed(4)} /> off
+                        // Show the discount in rupiah (the unit that reconciles) so
+                        // the row visibly adds up: list − off = charged. The AUD
+                        // reference lives under the amount above.
+                        <div className="text-[11px] font-normal text-amber-600">
+                          −<Money value={(Number(s.weight) * Number(s.pricePerKg) - Number(s.amount)).toFixed(4)} forceIDR /> off
+                          <span className="text-muted-foreground"> (was <Money value={(Number(s.weight) * Number(s.pricePerKg)).toFixed(4)} forceIDR />)</span>
                         </div>
                       ) : null}
                     </TableCell>
@@ -682,8 +686,8 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                   <TableCell className="text-right text-green-600">
                     <MoneyDual value={pl.revenue} />
                     {salesDiscountTotal > 0.005 ? (
-                      <div className="text-[10px] font-normal text-amber-600">
-                        −<Money value={salesDiscountTotal.toFixed(4)} /> total off
+                      <div className="text-[11px] font-normal text-amber-600">
+                        −<Money value={salesDiscountTotal.toFixed(4)} forceIDR /> total off
                       </div>
                     ) : null}
                   </TableCell>
