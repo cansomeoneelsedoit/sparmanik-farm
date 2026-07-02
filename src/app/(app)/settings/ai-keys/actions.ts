@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { prisma } from "@/server/prisma";
 import { SUPPORTED_PROVIDERS, testProviderKey } from "@/server/ai-chain";
+import { requireSuperuser } from "@/server/authz";
 
 export type ActionResult<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
@@ -19,6 +20,8 @@ const addSchema = z.object({
 });
 
 export async function addAiKey(input: unknown): Promise<ActionResult<{ id: string }>> {
+  const gate = await requireSuperuser();
+  if (!gate.ok) return gate;
   const parsed = addSchema.safeParse(input);
   if (!parsed.success) {
     return {
@@ -55,6 +58,8 @@ const updateSchema = z.object({
 });
 
 export async function updateAiKey(id: string, input: unknown): Promise<ActionResult> {
+  const gate = await requireSuperuser();
+  if (!gate.ok) return gate;
   const parsed = updateSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Invalid input" };
   const data: Record<string, unknown> = {
@@ -77,12 +82,16 @@ export async function setAiKeyEnabled(
   id: string,
   enabled: boolean,
 ): Promise<ActionResult> {
+  const gate = await requireSuperuser();
+  if (!gate.ok) return gate;
   await prisma.aiProviderKey.update({ where: { id }, data: { enabled } });
   revalidatePath("/settings/ai-keys");
   return { ok: true };
 }
 
 export async function deleteAiKey(id: string): Promise<ActionResult> {
+  const gate = await requireSuperuser();
+  if (!gate.ok) return gate;
   await prisma.aiProviderKey.delete({ where: { id } });
   revalidatePath("/settings/ai-keys");
   return { ok: true };
@@ -92,6 +101,8 @@ export async function reorderAiKey(
   id: string,
   direction: "up" | "down",
 ): Promise<ActionResult> {
+  const gate = await requireSuperuser();
+  if (!gate.ok) return gate;
   // Re-order by swapping rank with the immediate neighbour. Keeps gaps in
   // the rank sequence so manual inserts (e.g. via addAiKey({ rank }))
   // still work without re-numbering every row.
@@ -114,6 +125,8 @@ export async function reorderAiKey(
 }
 
 export async function testAiKey(id: string): Promise<ActionResult<{ text: string }>> {
+  const gate = await requireSuperuser();
+  if (!gate.ok) return gate;
   const row = (await prisma.aiProviderKey.findFirst({
     where: { id },
     select: { id: true, provider: true, apiKey: true, model: true },

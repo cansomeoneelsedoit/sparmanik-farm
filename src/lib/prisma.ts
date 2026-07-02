@@ -69,21 +69,23 @@ const WRITE_WHERE_OPS = new Set([
  * dashboard render did ~40 redundant DB round-trips just to figure out
  * the user's org. This made the whole site feel laggy.
  */
-const resolveActiveOrgId = cache(
+type ActiveContext = { orgId: string | null; authenticated: boolean };
+
+const resolveActiveContext = cache(
   async (
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     basePrisma: any,
-  ): Promise<string | null> => {
+  ): Promise<ActiveContext> => {
     try {
       // Dynamic import keeps next/headers out of seed/CLI bundles.
       // cookies() throws if called outside a request context; we catch
-      // and return null.
+      // and return an unauthenticated context (seed/CLI).
       const mod = await import("next/headers");
       const c = await mod.cookies();
       const raw = c.get("activeOrgId")?.value;
       const { auth } = await import("@/auth");
       const session = await auth();
-      if (!session?.user?.id) return null;
+      if (!session?.user?.id) return { orgId: null, authenticated: false };
       // A SUPERUSER (owner) may act in ANY farm; a regular user only in farms
       // they're a member of.
       const isSuper = (session.user as { role?: string }).role === "SUPERUSER";
@@ -94,7 +96,7 @@ const resolveActiveOrgId = cache(
             where: { id: raw },
             select: { id: true },
           });
-          if (org) return org.id;
+          if (org) return { orgId: org.id, authenticated: true };
         } else {
           // Regular user: the cookie's org must be one they belong to, else a
           // stale cookie would scope every query to a foreign org and pages
@@ -105,7 +107,7 @@ const resolveActiveOrgId = cache(
             },
             select: { organizationId: true },
           });
-          if (membership) return membership.organizationId;
+          if (membership) return { orgId: membership.organizationId, authenticated: true };
         }
       }
       // No usable cookie — fall back to the user's first membership.
@@ -114,7 +116,7 @@ const resolveActiveOrgId = cache(
         orderBy: { joinedAt: "asc" },
         select: { organizationId: true },
       });
-      if (m?.organizationId) return m.organizationId;
+      if (m?.organizationId) return { orgId: m.organizationId, authenticated: true };
 
       // Still nothing. A SUPERUSER manages every farm, so default them to the
       // PRIMARY org (most members, ties broken by oldest) — they switch farms
@@ -132,12 +134,14 @@ const resolveActiveOrgId = cache(
             if (byMembers !== 0) return byMembers;
             return a.createdAt.getTime() - b.createdAt.getTime();
           });
-          return orgs[0].id;
+          return { orgId: orgs[0].id, authenticated: true };
         }
       }
-      return null;
+      // Authenticated, but no org could be resolved (a user with zero
+      // memberships). The extension fails CLOSED for this case.
+      return { orgId: null, authenticated: true };
     } catch {
-      return null;
+      return { orgId: null, authenticated: false };
     }
   },
 );
@@ -151,16 +155,31 @@ function createPrismaClient() {
       $allModels: {
         async $allOperations({ model, operation, args, query }) {
           if (!ORG_SCOPED_MODELS.has(model)) return query(args);
-          const orgId = await resolveActiveOrgId(base);
-          // No org resolved — non-request context (seed / build) or a user with
-          // no membership. Reads and explicitly-scoped writes (seed/CLI set
-          // organizationId in data) pass through. But a scoped create with
-          // neither a resolved org nor an explicit one would orphan the row and
-          // crash on the NOT NULL organization_id column — fail it with a clear,
-          // friendly message instead of a raw Prisma error.
+          const { orgId, authenticated } = await resolveActiveContext(base);
+
           if (!orgId) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const ad = (args as any)?.data;
+            const a = args as any;
+            if (authenticated) {
+              // A signed-in request whose org can't be resolved (a user with no
+              // membership). FAIL CLOSED — never run a scoped query unscoped, or
+              // this user would see and mutate every farm's data. Reads and
+              // where-writes get an impossible org filter (→ empty / no-op);
+              // creates/upserts are refused with a clear message.
+              if (operation === "create" || operation === "createMany" || operation === "upsert") {
+                throw new Error(
+                  "No active organisation for your account. Please sign out and sign back in, then try again.",
+                );
+              }
+              if (READ_OPS.has(operation) || WRITE_WHERE_OPS.has(operation)) {
+                a.where = { ...(a.where ?? {}), organizationId: "__no_active_org__" };
+              }
+              return query(args);
+            }
+            // Non-request context (seed / migration / build). Explicitly-scoped
+            // writes pass through; an unscoped create would orphan the row and
+            // crash on the NOT NULL organization_id column — refuse it clearly.
+            const ad = a?.data;
             const hasExplicitOrg =
               operation === "create"
                 ? ad?.organizationId != null
@@ -169,7 +188,7 @@ function createPrismaClient() {
                   : true;
             if ((operation === "create" || operation === "createMany") && !hasExplicitOrg) {
               throw new Error(
-                "No active organisation for your account. Please sign out and sign back in, then try again.",
+                "No active organisation in this context — set organizationId explicitly (seed/CLI).",
               );
             }
             return query(args);
@@ -189,6 +208,11 @@ function createPrismaClient() {
           }
           if (operation === "createMany" && Array.isArray(a.data)) {
             a.data = a.data.map((row: Record<string, unknown>) => ({ organizationId: orgId, ...row }));
+          }
+          // upsert can also insert — stamp its create payload too so an insert
+          // via upsert can't land in the wrong (or no) org.
+          if (operation === "upsert") {
+            a.create = { organizationId: orgId, ...(a.create ?? {}) };
           }
           return query(args);
         },

@@ -1,5 +1,6 @@
 import { auth } from "@/auth";
 import { prisma } from "@/server/prisma";
+import { getActiveOrgId } from "@/server/org";
 
 export const runtime = "nodejs";
 
@@ -22,12 +23,16 @@ export async function GET(
   const session = await auth();
   if (!session?.user) return new Response("Unauthorized", { status: 401 });
 
+  // Scope to the caller's active org (app review #62).
+  const orgId = await getActiveOrgId();
+  if (!orgId) return new Response("Not found", { status: 404 });
+
   const { customerId } = await params;
 
   const rows = (await prisma.$queryRaw`
     SELECT logo_data, logo_mime
       FROM customers
-     WHERE id = ${customerId}
+     WHERE id = ${customerId} AND organization_id = ${orgId}
      LIMIT 1
   `) as Array<{ logo_data: Buffer | Uint8Array | null; logo_mime: string | null }>;
 

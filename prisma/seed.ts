@@ -1,4 +1,5 @@
 import { readFileSync, existsSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { runInNewContext } from "node:vm";
 
@@ -614,10 +615,21 @@ function staffEmailLocal(name: string): string {
     .slice(0, 32) || "staff";
 }
 
-/** Ensure every Staff row has a linked User. Idempotent. */
+/** Random one-time password — no shared default anywhere (app review #4, #13). */
+function randomSeedPassword(len = 12): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  const bytes = randomBytes(len);
+  let out = "";
+  for (let i = 0; i < len; i++) out += alphabet[bytes[i] % alphabet.length];
+  return out;
+}
+
+/**
+ * Ensure every Staff row has a linked User AND a membership in the staff's org.
+ * Idempotent. Each new login gets a RANDOM password (must be reset via
+ * /admin/users to be usable) — never a shared static default.
+ */
 async function ensureStaffUsers() {
-  const DEFAULT_PASSWORD = "Jasper1.0!";
-  const passwordHash = await bcrypt.hash(DEFAULT_PASSWORD, 10);
   const staff = await prisma.staff.findMany({ where: { userId: null } });
   let created = 0;
   for (const s of staff) {
@@ -636,15 +648,25 @@ async function ensureStaffUsers() {
       }
     }
     if (!user) {
+      const passwordHash = await bcrypt.hash(randomSeedPassword(), 10);
       user = await prisma.user.create({
         data: { email, name: s.name, passwordHash },
       });
       created += 1;
     }
     await prisma.staff.update({ where: { id: s.id }, data: { userId: user.id } });
+    // Membership in the staff's own org so the login resolves to an org (the
+    // scoping layer fails closed on membership-less logins — app review #3, #12).
+    if (s.organizationId) {
+      await prisma.organizationMembership.upsert({
+        where: { userId_organizationId: { userId: user.id, organizationId: s.organizationId } },
+        update: {},
+        create: { userId: user.id, organizationId: s.organizationId, role: "MEMBER" },
+      });
+    }
   }
   if (created > 0) {
-    console.log(`[seed] Created ${created} staff logins (default password: ${DEFAULT_PASSWORD})`);
+    console.log(`[seed] Created ${created} staff logins with random passwords — reset via /admin/users to enable sign-in`);
   }
 }
 
