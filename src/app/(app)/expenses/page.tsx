@@ -14,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Money } from "@/components/shared/money";
+import { MoneyDual } from "@/components/shared/money";
 import { ExpenseFormDialog } from "@/app/(app)/expenses/expense-form-dialog";
 import { ImportExpenseSheetDialog } from "@/app/(app)/expenses/import-expense-sheet-dialog";
 import { ExpenseRowActions } from "@/app/(app)/expenses/expense-row-actions";
@@ -83,7 +83,7 @@ export default async function ExpensesPage() {
           <CardContent className="p-4">
             <div className="text-xs text-muted-foreground">Total</div>
             <div className="text-2xl font-semibold">
-              <Money value={total.toFixed(4)} />
+              <MoneyDual value={total.toFixed(4)} align="start" />
             </div>
           </CardContent>
         </Card>
@@ -91,7 +91,7 @@ export default async function ExpensesPage() {
           <CardContent className="p-4">
             <div className="text-xs text-muted-foreground">Charged to harvests</div>
             <div className="text-2xl font-semibold">
-              <Money value={assigned.toFixed(4)} />
+              <MoneyDual value={assigned.toFixed(4)} align="start" />
             </div>
           </CardContent>
         </Card>
@@ -99,7 +99,7 @@ export default async function ExpensesPage() {
           <CardContent className="p-4">
             <div className="text-xs text-muted-foreground">Business overhead</div>
             <div className="text-2xl font-semibold">
-              <Money value={overhead.toFixed(4)} />
+              <MoneyDual value={overhead.toFixed(4)} align="start" />
             </div>
           </CardContent>
         </Card>
@@ -115,50 +115,96 @@ export default async function ExpensesPage() {
               No expenses yet. Click <strong>New expense</strong> to record one.
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Paid to</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Harvest</TableHead>
-                  <TableHead>Method</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                  <TableHead className="w-10" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            <>
+              {/* Desktop table; tablet/phone card list (app review UX — tables). */}
+              <div className="hidden lg:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Paid to</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead>Harvest</TableHead>
+                      <TableHead>Method</TableHead>
+                      <TableHead className="text-right">Amount</TableHead>
+                      <TableHead className="w-10" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rows.map((e) => (
+                      <TableRow key={e.id}>
+                        <TableCell className="text-muted-foreground">
+                          {e.date.toISOString().slice(0, 10)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="font-medium">{e.payee}</div>
+                          {e.description ? (
+                            <div className="line-clamp-1 text-xs text-muted-foreground">{e.description}</div>
+                          ) : null}
+                        </TableCell>
+                        <TableCell>
+                          {e.category ? <Badge variant="outline">{e.category}</Badge> : <span className="text-muted-foreground">—</span>}
+                        </TableCell>
+                        <TableCell>
+                          {e.harvest ? (
+                            <Link
+                              href={`/harvest/${e.harvest.id}`}
+                              className="text-muted-foreground hover:underline"
+                            >
+                              {e.harvest.name}
+                            </Link>
+                          ) : (
+                            <Badge variant="secondary">Overhead</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">{e.paymentMethod ?? "—"}</TableCell>
+                        <TableCell className="text-right font-medium">
+                          <MoneyDual value={e.amount.toFixed(4)} />
+                        </TableCell>
+                        <TableCell className="p-0">
+                          <ExpenseRowActions
+                            expense={{
+                              id: e.id,
+                              date: e.date.toISOString().slice(0, 10),
+                              amount: e.amount.toFixed(2),
+                              category: e.category,
+                              payee: e.payee,
+                              description: e.description,
+                              harvestId: e.harvestId,
+                              paymentMethod: e.paymentMethod,
+                              receiptPath: e.receiptPath,
+                            }}
+                            harvests={harvests}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="divide-y lg:hidden">
                 {rows.map((e) => (
-                  <TableRow key={e.id}>
-                    <TableCell className="text-muted-foreground">
-                      {e.date.toISOString().slice(0, 10)}
-                    </TableCell>
-                    <TableCell>
+                  <div key={e.id} className="flex items-start justify-between gap-3 p-4">
+                    <div className="min-w-0 space-y-1">
                       <div className="font-medium">{e.payee}</div>
                       {e.description ? (
-                        <div className="line-clamp-1 text-xs text-muted-foreground">{e.description}</div>
+                        <div className="line-clamp-2 text-xs text-muted-foreground">{e.description}</div>
                       ) : null}
-                    </TableCell>
-                    <TableCell>
-                      {e.category ? <Badge variant="outline">{e.category}</Badge> : <span className="text-muted-foreground">—</span>}
-                    </TableCell>
-                    <TableCell>
-                      {e.harvest ? (
-                        <Link
-                          href={`/harvest/${e.harvest.id}`}
-                          className="text-muted-foreground hover:underline"
-                        >
-                          {e.harvest.name}
-                        </Link>
-                      ) : (
-                        <Badge variant="secondary">Overhead</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{e.paymentMethod ?? "—"}</TableCell>
-                    <TableCell className="text-right font-medium">
-                      <Money value={e.amount.toFixed(4)} />
-                    </TableCell>
-                    <TableCell className="p-0">
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                        <span>{e.date.toISOString().slice(0, 10)}</span>
+                        {e.category ? <Badge variant="outline">{e.category}</Badge> : null}
+                        {e.harvest ? (
+                          <Link href={`/harvest/${e.harvest.id}`} className="hover:underline">{e.harvest.name}</Link>
+                        ) : (
+                          <Badge variant="secondary">Overhead</Badge>
+                        )}
+                        {e.paymentMethod ? <span>· {e.paymentMethod}</span> : null}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <div className="text-right font-medium">
+                        <MoneyDual value={e.amount.toFixed(4)} />
+                      </div>
                       <ExpenseRowActions
                         expense={{
                           id: e.id,
@@ -173,11 +219,11 @@ export default async function ExpensesPage() {
                         }}
                         harvests={harvests}
                       />
-                    </TableCell>
-                  </TableRow>
+                    </div>
+                  </div>
                 ))}
-              </TableBody>
-            </Table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

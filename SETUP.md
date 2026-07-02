@@ -2,10 +2,9 @@
 
 Cultivation OS for a hydroponic farm in Indonesia. Full-stack **Next.js 16 + Postgres + Prisma** app, multi-tenant, deployed on Railway.
 
-- **Live:** <https://web-production-1e6de.up.railway.app>
-- **Repo:** <https://github.com/cansomeoneelsedoit/sparmanik-farm>
+- **Live / repo URLs and credentials:** kept out of this file (it may be committed to a public repo). See your local notes.
 - **Canonical local path:** `C:\Users\boyds\Desktop\sparmanikfarm`
-- **Dev sign-in:** `dev@sparmanikfarm.local` / `devpassword`
+- **Dev sign-in:** the local seed prints the dev login to the console on first run.
 
 ---
 
@@ -134,7 +133,7 @@ Copy `.env.example` → `.env` and fill in. Full reference:
 **Seed creates:**
 - 3 organizations: `org_sparmanik` (all legacy data), `org_andre` (empty), `org_kevin` (empty).
 - Boyd / **Dev User** as OWNER across all three, auto-promoted to `SUPERUSER`.
-- A login for every Staff record: `<firstname>@sparmanikfarm.local`, password `Jasper1.0!`.
+- A login for every Staff record: email `<firstname>@sparmanikfarm.local`. Each is created with a random one-time password shown to the admin at creation (staff must change it on first sign-in).
 
 ```bash
 npm run db:seed          # tsx prisma/seed.ts (safe to re-run)
@@ -218,11 +217,11 @@ curl http://localhost:3000/api/health          # → 200 OK
 npm run typecheck                                # → no errors
 npm test                                         # → all pass
 
-# Prod
-curl https://web-production-1e6de.up.railway.app/api/health
+# Prod (use your live URL from local notes)
+curl https://<your-app>.up.railway.app/api/health
 ```
 
-Then sign in at <http://localhost:3000> with `dev@sparmanikfarm.local` / `devpassword`.
+Then sign in at <http://localhost:3000> with the dev login the seed printed to the console.
 
 ---
 

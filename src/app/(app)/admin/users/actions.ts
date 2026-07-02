@@ -7,6 +7,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/server/prisma";
 import type { TransactionClient } from "@/server/decimal";
 import { auth } from "@/auth";
+import { requireActiveOrgId } from "@/server/org";
 
 export type ActionResult<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
@@ -29,14 +30,24 @@ export async function createUser(input: unknown): Promise<ActionResult<{ id: str
   if (!auth.ok) return auth;
   const parsed = createSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
+  // New accounts get a membership in the current org so they sign in with a
+  // resolvable org (the scoping layer now fails closed on membership-less
+  // logins — app review #3).
+  const orgId = await requireActiveOrgId();
   try {
-    const u = await prisma.user.create({
-      data: {
-        name: parsed.data.name,
-        email: parsed.data.email.toLowerCase(),
-        role: parsed.data.role,
-        passwordHash: await bcrypt.hash(parsed.data.password, 10),
-      },
+    const u = await prisma.$transaction(async (tx: TransactionClient) => {
+      const created = await tx.user.create({
+        data: {
+          name: parsed.data.name,
+          email: parsed.data.email.toLowerCase(),
+          role: parsed.data.role,
+          passwordHash: await bcrypt.hash(parsed.data.password, 10),
+        },
+      });
+      await tx.organizationMembership.create({
+        data: { userId: created.id, organizationId: orgId, role: "MEMBER" },
+      });
+      return created;
     });
     revalidatePath("/admin/users");
     return { ok: true, data: { id: u.id } };

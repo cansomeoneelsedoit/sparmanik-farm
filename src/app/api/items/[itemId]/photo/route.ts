@@ -1,5 +1,6 @@
 import { auth } from "@/auth";
 import { prisma } from "@/server/prisma";
+import { getActiveOrgId } from "@/server/org";
 
 export const runtime = "nodejs";
 
@@ -33,13 +34,19 @@ export async function GET(
   const session = await auth();
   if (!session?.user) return new Response("Unauthorized", { status: 401 });
 
+  // Scope to the caller's active org so a valid cuid from another farm can't be
+  // read cross-tenant (app review #62). getActiveOrgId is a direct auth+cookie
+  // read (not the flaky extension path), so it's reliable in a route handler.
+  const orgId = await getActiveOrgId();
+  if (!orgId) return new Response("Not found", { status: 404 });
+
   const { itemId } = await params;
 
-  // $queryRaw bypasses the org-scoping extension — see header comment.
+  // $queryRaw bypasses the org-scoping extension, so we add the org filter here.
   const rows = (await prisma.$queryRaw`
     SELECT photo_data, photo_mime, photo_path
       FROM items
-     WHERE id = ${itemId}
+     WHERE id = ${itemId} AND organization_id = ${orgId}
      LIMIT 1
   `) as Array<{
     photo_data: Buffer | Uint8Array | null;

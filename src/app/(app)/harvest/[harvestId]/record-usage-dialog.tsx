@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { todayWIB } from "@/lib/date";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -22,7 +23,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Combobox } from "@/components/ui/combobox";
 import { recordHarvestUsage } from "@/app/(app)/harvest/actions";
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayWIB();
 const schema = z.object({
   itemId: z.string().min(1),
   qty: z.string().regex(/^[0-9.]+$/),

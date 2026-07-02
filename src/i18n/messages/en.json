@@ -35,7 +35,16 @@
     "settings": "Settings",
     "healthCheck": "Health check",
     "askAi": "Ask AI",
-    "shopping": "Shopping list"
+    "shopping": "Shopping list",
+    "stocktake": "Stock-take",
+    "simulator": "Simulator",
+    "users": "Users",
+    "groups": {
+      "operations": "Operations",
+      "financial": "Financial",
+      "content": "Content",
+      "settings": "Settings"
+    }
   },
   "topbar": {
     "rateLabel": "Rate",

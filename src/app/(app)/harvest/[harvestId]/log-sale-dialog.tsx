@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition, type ReactNode } from "react";
+import { todayWIB } from "@/lib/date";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -47,7 +48,7 @@ const CUSTOMER_TYPES = [
 const typeLabel = (t: string) =>
   CUSTOMER_TYPES.find((x) => x.value === t)?.label ?? t;
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayWIB();
 const schema = z.object({
   produceId: z.string().min(1),
   date: z.string().min(1),

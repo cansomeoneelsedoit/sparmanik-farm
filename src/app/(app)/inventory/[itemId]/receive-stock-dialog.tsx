@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { todayWIB } from "@/lib/date";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -21,7 +22,7 @@ import { Label } from "@/components/ui/label";
 import { Combobox } from "@/components/ui/combobox";
 import { receiveStock } from "@/app/(app)/inventory/actions";
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayWIB();
 
 const schema = z.object({
   date: z.string().min(1),
@@ -102,6 +103,11 @@ export function ReceiveStockDialog({
     isPack && itemSubFactor && parsedPrice > 0
       ? (parsedPrice / itemSubFactor).toFixed(2)
       : null;
+  /** Number of PACKS the qty represents — the unit `price` (per pack) pairs with.
+   *  For pack items the qty box is in pieces, so packs = pieces / subFactor.
+   *  The "Total paid" field must use this, not the piece count, or it stores a
+   *  per-piece figure as the per-pack price (~subFactor× too small — review #8). */
+  const packsForTotal = isPack && itemSubFactor ? qtyInput / itemSubFactor : qtyInput;
 
   function onSubmit(v: Form) {
     startTransition(async () => {
@@ -214,14 +220,14 @@ export function ReceiveStockDialog({
                   step="any"
                   min="0"
                   value={
-                    qtyInput > 0 && parsedPrice > 0
-                      ? (qtyInput * parsedPrice).toFixed(0)
+                    packsForTotal > 0 && parsedPrice > 0
+                      ? (packsForTotal * parsedPrice).toFixed(0)
                       : ""
                   }
                   onChange={(e) => {
                     const total = Number(e.target.value);
-                    if (qtyInput > 0 && total > 0) {
-                      form.setValue("price", (total / qtyInput).toFixed(4));
+                    if (packsForTotal > 0 && total > 0) {
+                      form.setValue("price", (total / packsForTotal).toFixed(4));
                     }
                   }}
                   placeholder="auto-calc, or type and qty fills unit price"

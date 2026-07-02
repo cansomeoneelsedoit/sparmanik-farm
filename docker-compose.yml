@@ -41,7 +41,6 @@ services:
       # the localhost-based DATABASE_URL the host shell uses for
       # `npm run dev` outside compose.
       DATABASE_URL: postgresql://sparmanik:sparmanik@db:5432/sparmanik?schema=public
-      DATABASE_SSL: "false"
       AUTH_URL: http://localhost:3000
       AUTH_TRUST_HOST: "true"
       UPLOAD_DIR: /app/uploads

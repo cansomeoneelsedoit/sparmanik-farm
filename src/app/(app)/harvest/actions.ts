@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { prisma } from "@/server/prisma";
 import { auth } from "@/auth";
+import { requireSuperuser } from "@/server/authz";
 import { recordAction } from "@/server/audit";
 import { consumeFifo } from "@/server/fifo";
 import { Decimal, type TransactionClient } from "@/server/decimal";
@@ -15,6 +16,15 @@ export type ActionResult<T = void> =
 
 async function uid() {
   return (await auth())?.user?.id ?? null;
+}
+
+/**
+ * Plain-JSON snapshot for audit payloads. Prisma Decimal + Date both implement
+ * toJSON (→ string / ISO), so round-tripping through JSON gives a payload the
+ * undo handlers can rehydrate (app review #29).
+ */
+function snapshot<T>(row: T): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(row));
 }
 
 const startSchema = z.object({
@@ -113,16 +123,64 @@ export async function updateHarvest(id: string, input: unknown): Promise<ActionR
 }
 
 export async function deleteHarvest(id: string): Promise<ActionResult> {
-  await prisma.harvest.delete({ where: { id } });
+  const userId = await uid();
+  try {
+    // Refuse to delete a cycle that carries money/yield history — a mistaken
+    // tap would cascade away every sale/usage/disposition under it. Steer the
+    // user to Close it instead (app review #7, #9).
+    const [sales, usages, assets, dispositions] = await Promise.all([
+      prisma.sale.count({ where: { harvestId: id } }),
+      prisma.harvestUsage.count({ where: { harvestId: id } }),
+      prisma.harvestAsset.count({ where: { harvestId: id } }),
+      prisma.harvestDisposition.count({ where: { harvestId: id } }),
+    ]);
+    if (sales + usages + assets + dispositions > 0) {
+      return {
+        ok: false,
+        error: `This greenhouse cycle has ${sales} sale(s), ${usages} usage entr(ies), ${assets} asset(s) and ${dispositions} disposition(s). Deleting would erase that history. Close the cycle instead (Edit → status Closed).`,
+      };
+    }
+    const harvest = await prisma.harvest.findUnique({ where: { id } });
+    if (!harvest) return { ok: false, error: "Not found" };
+    await prisma.$transaction(async (tx: TransactionClient) => {
+      await tx.harvest.delete({ where: { id } });
+      await recordAction(tx, {
+        type: "harvest.delete",
+        entityType: "Harvest",
+        entityId: id,
+        description: `Deleted empty greenhouse cycle: ${harvest.name}`,
+        userId,
+        payload: snapshot(harvest),
+      });
+    });
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't delete this cycle" };
+  }
   revalidatePath("/harvest");
   return { ok: true };
 }
 
 export async function deleteSale(id: string): Promise<ActionResult> {
-  const sale = await prisma.sale.findUnique({ where: { id }, select: { harvestId: true } });
-  await prisma.sale.delete({ where: { id } });
-  if (sale?.harvestId) revalidatePath(`/harvest/${sale.harvestId}`);
-  revalidatePath("/sales");
+  const userId = await uid();
+  try {
+    const sale = await prisma.sale.findUnique({ where: { id } });
+    if (!sale) return { ok: false, error: "Sale not found" };
+    await prisma.$transaction(async (tx: TransactionClient) => {
+      await tx.sale.delete({ where: { id } });
+      await recordAction(tx, {
+        type: "harvest.delete_sale",
+        entityType: "Sale",
+        entityId: id,
+        description: `Deleted a sale`,
+        userId,
+        payload: snapshot(sale),
+      });
+    });
+    if (sale.harvestId) revalidatePath(`/harvest/${sale.harvestId}`);
+    revalidatePath("/sales");
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't delete this sale" };
+  }
   return { ok: true };
 }
 
@@ -147,39 +205,89 @@ function hasOverride(v: string | undefined): v is string {
 export async function updateSale(id: string, input: unknown): Promise<ActionResult> {
   const parsed = updateSaleSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
+  const userId = await uid();
   const weight = new Decimal(parsed.data.weight);
   const price = new Decimal(parsed.data.pricePerKg);
   const amount = hasOverride(parsed.data.amountOverride)
     ? new Decimal(parsed.data.amountOverride)
     : weight.times(price);
-  const sale = await prisma.sale.update({
-    where: { id },
-    data: {
-      produceId: parsed.data.produceId,
-      date: new Date(parsed.data.date),
-      grade: parsed.data.grade,
-      weight,
-      pricePerKg: price,
-      amount,
-      customerId: parsed.data.customerId || null,
-    },
-  });
-  revalidatePath(`/harvest/${sale.harvestId}`);
-  revalidatePath("/sales");
+  try {
+    const before = await prisma.sale.findUnique({ where: { id } });
+    if (!before) return { ok: false, error: "Sale not found" };
+    const sale = await prisma.$transaction(async (tx: TransactionClient) => {
+      const updated = await tx.sale.update({
+        where: { id },
+        data: {
+          produceId: parsed.data.produceId,
+          date: new Date(parsed.data.date),
+          grade: parsed.data.grade,
+          weight,
+          pricePerKg: price,
+          amount,
+          customerId: parsed.data.customerId || null,
+        },
+      });
+      await recordAction(tx, {
+        type: "harvest.update_sale",
+        entityType: "Sale",
+        entityId: id,
+        description: `Edited a sale`,
+        userId,
+        payload: { before: snapshot(before) },
+      });
+      return updated;
+    });
+    revalidatePath(`/harvest/${sale.harvestId}`);
+    revalidatePath("/sales");
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't save this sale" };
+  }
   return { ok: true };
 }
 
 export async function deleteHarvestUsage(id: string): Promise<ActionResult> {
-  const usage = await prisma.harvestUsage.findUnique({ where: { id }, select: { harvestId: true } });
-  await prisma.harvestUsage.delete({ where: { id } });
-  if (usage?.harvestId) revalidatePath(`/harvest/${usage.harvestId}`);
+  const userId = await uid();
+  try {
+    const usage = await prisma.harvestUsage.findUnique({ where: { id } });
+    if (!usage) return { ok: false, error: "Not found" };
+    await prisma.$transaction(async (tx: TransactionClient) => {
+      await tx.harvestUsage.delete({ where: { id } });
+      await recordAction(tx, {
+        type: "harvest.delete_usage",
+        entityType: "HarvestUsage",
+        entityId: id,
+        description: `Deleted a usage entry`,
+        userId,
+        payload: snapshot(usage),
+      });
+    });
+    if (usage.harvestId) revalidatePath(`/harvest/${usage.harvestId}`);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't delete this usage" };
+  }
   return { ok: true };
 }
 
 export async function deleteHarvestAsset(id: string): Promise<ActionResult> {
-  const asset = await prisma.harvestAsset.findUnique({ where: { id }, select: { harvestId: true } });
-  await prisma.harvestAsset.delete({ where: { id } });
-  if (asset?.harvestId) revalidatePath(`/harvest/${asset.harvestId}`);
+  const userId = await uid();
+  try {
+    const asset = await prisma.harvestAsset.findUnique({ where: { id } });
+    if (!asset) return { ok: false, error: "Not found" };
+    await prisma.$transaction(async (tx: TransactionClient) => {
+      await tx.harvestAsset.delete({ where: { id } });
+      await recordAction(tx, {
+        type: "harvest.delete_asset",
+        entityType: "HarvestAsset",
+        entityId: id,
+        description: `Deleted an installed asset`,
+        userId,
+        payload: snapshot(asset),
+      });
+    });
+    if (asset.harvestId) revalidatePath(`/harvest/${asset.harvestId}`);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't delete this asset" };
+  }
   return { ok: true };
 }
 
@@ -191,16 +299,38 @@ export async function deleteHarvestAsset(id: string): Promise<ActionResult> {
  * the staff member's whole day.
  */
 export async function deleteLabourLine(id: string): Promise<ActionResult> {
-  const line = await prisma.wageEntryLine.findUnique({
-    where: { id },
-    select: { harvestId: true },
-  });
-  if (!line) return { ok: false, error: "Labour line not found" };
-  await prisma.wageEntryLine.delete({ where: { id } });
-  if (line.harvestId) revalidatePath(`/harvest/${line.harvestId}`);
-  // Wages also feed Financials and the staff page.
-  revalidatePath("/financials");
-  revalidatePath("/staff");
+  const gate = await requireSuperuser();
+  if (!gate.ok) return gate;
+  try {
+    const line = await prisma.wageEntryLine.findUnique({
+      where: { id },
+      include: { wageEntry: { select: { staffId: true } } },
+    });
+    if (!line) return { ok: false, error: "Labour line not found" };
+    // WageEntryLine has no organizationId — verify via the (org-scoped) Staff.
+    const staff = await prisma.staff.findFirst({
+      where: { id: line.wageEntry.staffId },
+      select: { id: true },
+    });
+    if (!staff) return { ok: false, error: "Not found" };
+    await prisma.$transaction(async (tx: TransactionClient) => {
+      await tx.wageEntryLine.delete({ where: { id } });
+      await recordAction(tx, {
+        type: "harvest.delete_labour_line",
+        entityType: "WageEntryLine",
+        entityId: id,
+        description: `Deleted a labour line`,
+        userId: gate.userId,
+        payload: snapshot(line),
+      });
+    });
+    if (line.harvestId) revalidatePath(`/harvest/${line.harvestId}`);
+    // Wages also feed Financials and the staff page.
+    revalidatePath("/financials");
+    revalidatePath("/staff");
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't delete this labour line" };
+  }
   return { ok: true };
 }
 
@@ -848,12 +978,25 @@ export async function updateDisposition(id: string, input: unknown): Promise<Act
 }
 
 export async function deleteDisposition(id: string): Promise<ActionResult> {
-  const disp = await prisma.harvestDisposition.findUnique({
-    where: { id },
-    select: { harvestId: true },
-  });
-  await prisma.harvestDisposition.delete({ where: { id } });
-  if (disp?.harvestId) revalidatePath(`/harvest/${disp.harvestId}`);
+  const userId = await uid();
+  try {
+    const disp = await prisma.harvestDisposition.findUnique({ where: { id } });
+    if (!disp) return { ok: false, error: "Not found" };
+    await prisma.$transaction(async (tx: TransactionClient) => {
+      await tx.harvestDisposition.delete({ where: { id } });
+      await recordAction(tx, {
+        type: "harvest.delete_disposition",
+        entityType: "HarvestDisposition",
+        entityId: id,
+        description: `Deleted a breakage/staff/giveaway entry`,
+        userId,
+        payload: snapshot(disp),
+      });
+    });
+    if (disp.harvestId) revalidatePath(`/harvest/${disp.harvestId}`);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't delete this entry" };
+  }
   return { ok: true };
 }
 

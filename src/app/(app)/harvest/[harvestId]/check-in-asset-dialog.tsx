@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { todayWIB } from "@/lib/date";
 import { useRouter } from "next/navigation";
 import { CheckCircle2, PackageX, ShieldOff } from "lucide-react";
 import { toast } from "sonner";
@@ -22,7 +23,7 @@ import { checkInHarvestAsset } from "@/app/(app)/harvest/actions";
 
 type Condition = "good" | "damaged" | "lost";
 
-const todayStr = () => new Date().toISOString().slice(0, 10);
+const todayStr = () => todayWIB();
 
 /**
  * Per-asset check-in dialog. Staff record HOW MUCH was actually used — in the

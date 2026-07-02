@@ -409,9 +409,19 @@ export async function getProductFamilyRollup(
 
 export async function deleteBatch(id: string): Promise<ActionResult> {
   try {
+    // The FK from BatchConsumption is Cascade, so a raw delete would silently
+    // erase consumption history rather than fail. Guard it explicitly and give
+    // the real reason on any other failure (app review #51).
+    const consumed = await prisma.batchConsumption.count({ where: { batchId: id } });
+    if (consumed > 0) {
+      return {
+        ok: false,
+        error: `This batch has ${consumed} usage record(s) from harvests or sales — deleting it would erase that history. Reverse the usage first if you really need to remove it.`,
+      };
+    }
     await prisma.batch.delete({ where: { id } });
-  } catch {
-    return { ok: false, error: "Can't delete a batch that's been consumed by harvests" };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't delete this batch" };
   }
   revalidatePath("/inventory");
   return { ok: true };

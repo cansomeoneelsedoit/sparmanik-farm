@@ -86,7 +86,11 @@ function main() {
 
   const dump = spawnSync(
     "docker",
-    ["compose", "exec", "-T", "db", "pg_dump", "--no-owner", "--no-privileges", PROD_URL],
+    // Use a pinned postgres:18 client image, NOT the local `db` container: that
+    // ships pg_dump 16, which refuses to dump the newer Railway PG18 server, so
+    // this script silently failed and the backups/ folder stayed empty
+    // (app review #6). Mirrors sync-local-to-prod.mjs.
+    ["run", "--rm", "postgres:18", "pg_dump", "--no-owner", "--no-privileges", PROD_URL],
     {
       stdio: ["ignore", "pipe", "inherit"],
       // Photos live in the dump now — allow up to 1 GB before bailing.
@@ -121,7 +125,7 @@ function main() {
   for (const t of ["items", "batches", "staff", "stock_sales", "sales"]) {
     try {
       const out = execSync(
-        `docker compose exec -T db psql "${PROD_URL}" -t -A -c "SELECT COUNT(*) FROM ${t};"`,
+        `docker run --rm postgres:18 psql "${PROD_URL}" -t -A -c "SELECT COUNT(*) FROM ${t};"`,
         { shell: true },
       )
         .toString()

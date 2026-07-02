@@ -7,9 +7,24 @@ import bcrypt from "bcryptjs";
 
 import { prisma } from "@/server/prisma";
 import { auth } from "@/auth";
+import { requireSuperuser } from "@/server/authz";
+import { requireActiveOrgId } from "@/server/org";
+import { generatePassword } from "@/lib/password";
 import { recordAction } from "@/server/audit";
 import { Decimal, type TransactionClient } from "@/server/decimal";
 import { saveImageUpload } from "@/server/uploads";
+
+/**
+ * Confirm a StaffRate / WageEntry / WageEntryLine row belongs to the active
+ * org before mutating it. These tables carry no organizationId, so the scoping
+ * extension can't protect them — we verify through the Staff parent, which IS
+ * org-scoped (a foreign-org staff resolves to null under the scoped client).
+ * Returns the staffId on success (app review #39).
+ */
+async function assertStaffInOrg(staffId: string): Promise<boolean> {
+  const staff = await prisma.staff.findFirst({ where: { id: staffId }, select: { id: true } });
+  return !!staff;
+}
 
 /**
  * Upload a staff profile photo. Uses the same sharp pipeline as item/video
@@ -31,8 +46,6 @@ export async function uploadStaffPhoto(
   }
 }
 
-const STAFF_DEFAULT_PASSWORD = "Jasper1.0!";
-
 function staffEmailLocal(name: string): string {
   const first = name.trim().split(/\s+/)[0] ?? "staff";
   return first
@@ -44,15 +57,17 @@ function staffEmailLocal(name: string): string {
 
 /**
  * Create a fresh User for a new Staff member. Email is "<firstname>@sparmanikfarm.local"
- * (with a numeric suffix if that's already taken); password defaults to
- * STAFF_DEFAULT_PASSWORD. Caller must link the resulting userId on the Staff row.
+ * (with a numeric suffix if that's already taken). Each login gets a RANDOM
+ * one-time password (returned to the admin once) — never a shared default
+ * (app review #4, #13). Caller must link the resulting userId on the Staff row.
  */
 async function provisionStaffUser(
   tx: TransactionClient,
   name: string,
-): Promise<{ id: string; email: string }> {
+): Promise<{ id: string; email: string; tempPassword: string }> {
   const base = staffEmailLocal(name);
-  const passwordHash = await bcrypt.hash(STAFF_DEFAULT_PASSWORD, 10);
+  const tempPassword = generatePassword();
+  const passwordHash = await bcrypt.hash(tempPassword, 10);
   let email = `${base}@sparmanikfarm.local`;
   let suffix = 2;
   while (await tx.user.findUnique({ where: { email } })) {
@@ -60,7 +75,7 @@ async function provisionStaffUser(
     suffix += 1;
   }
   const u = await tx.user.create({ data: { email, name, passwordHash } });
-  return { id: u.id, email };
+  return { id: u.id, email, tempPassword };
 }
 
 export type ActionResult<T = void> = { ok: true; data?: T } | { ok: false; error: string };
@@ -79,14 +94,26 @@ const staffSchema = z.object({
   effectiveFrom: z.string().min(1),
 });
 
-export async function createStaff(input: unknown): Promise<ActionResult<{ id: string }>> {
+export async function createStaff(
+  input: unknown,
+): Promise<ActionResult<{ id: string; loginEmail: string; tempPassword: string }>> {
+  const gate = await requireSuperuser();
+  if (!gate.ok) return gate;
   const parsed = staffSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
-  const userId = await uid();
+  const userId = gate.userId;
+  // The org the new staff (and their login) belong to.
+  const orgId = await requireActiveOrgId();
   const initials = parsed.data.name.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
-  const staff = await prisma.$transaction(async (tx: TransactionClient) => {
+  const result = await prisma.$transaction(async (tx: TransactionClient) => {
     // Provision their login first so we can attach userId at staff-create time.
     const login = await provisionStaffUser(tx, parsed.data.name);
+    // Give the login a membership in this org, else they'd sign in with no
+    // resolvable org and the scoping layer would (now) fail closed on them
+    // (app review #3, #12).
+    await tx.organizationMembership.create({
+      data: { userId: login.id, organizationId: orgId, role: "MEMBER" },
+    });
     const s = await tx.staff.create({
       data: {
         name: parsed.data.name,
@@ -106,12 +133,17 @@ export async function createStaff(input: unknown): Promise<ActionResult<{ id: st
       entityId: s.id,
       description: `Added staff: ${s.name} (login ${login.email})`,
       userId,
-      payload: { name: s.name, loginEmail: login.email, defaultPassword: STAFF_DEFAULT_PASSWORD },
+      // Never store the plaintext password in the audit log (app review #13).
+      payload: { name: s.name, loginEmail: login.email },
     });
-    return s;
+    return { staff: s, login };
   });
   revalidatePath("/staff");
-  return { ok: true, data: { id: staff.id } };
+  revalidatePath("/admin/users");
+  return {
+    ok: true,
+    data: { id: result.staff.id, loginEmail: result.login.email, tempPassword: result.login.tempPassword },
+  };
 }
 
 const updateStaffSchema = z.object({
@@ -123,6 +155,8 @@ const updateStaffSchema = z.object({
 });
 
 export async function updateStaff(id: string, input: unknown): Promise<ActionResult> {
+  const gate = await requireSuperuser();
+  if (!gate.ok) return gate;
   const parsed = updateStaffSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
   await prisma.$transaction(async (tx: TransactionClient) => {
@@ -154,6 +188,8 @@ export async function updateStaff(id: string, input: unknown): Promise<ActionRes
 const DEV_EMAIL = "dev@sparmanikfarm.local";
 
 export async function deleteStaff(id: string): Promise<ActionResult> {
+  const gate = await requireSuperuser();
+  if (!gate.ok) return gate;
   try {
     const result = await prisma.$transaction(async (tx: TransactionClient) => {
       const staff = await tx.staff.findUnique({
@@ -184,8 +220,12 @@ const updateRateSchema = z.object({
 });
 
 export async function updateStaffRate(id: string, input: unknown): Promise<ActionResult> {
+  const gate = await requireSuperuser();
+  if (!gate.ok) return gate;
   const parsed = updateRateSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
+  const rate = await prisma.staffRate.findUnique({ where: { id }, select: { staffId: true } });
+  if (!rate || !(await assertStaffInOrg(rate.staffId))) return { ok: false, error: "Not found" };
   await prisma.staffRate.update({
     where: { id },
     data: { rate: new Decimal(parsed.data.rate), effectiveFrom: new Date(parsed.data.effectiveFrom) },
@@ -195,6 +235,10 @@ export async function updateStaffRate(id: string, input: unknown): Promise<Actio
 }
 
 export async function deleteStaffRate(id: string): Promise<ActionResult> {
+  const gate = await requireSuperuser();
+  if (!gate.ok) return gate;
+  const rate = await prisma.staffRate.findUnique({ where: { id }, select: { staffId: true } });
+  if (!rate || !(await assertStaffInOrg(rate.staffId))) return { ok: false, error: "Not found" };
   await prisma.staffRate.delete({ where: { id } });
   revalidatePath("/staff");
   return { ok: true };
@@ -209,8 +253,11 @@ export async function deleteStaffRate(id: string): Promise<ActionResult> {
 const setPaySchema = z.object({ rate: z.string().regex(/^[0-9.]+$/, "Enter a number") });
 
 export async function setStaffPay(staffId: string, input: unknown): Promise<ActionResult> {
+  const gate = await requireSuperuser();
+  if (!gate.ok) return gate;
   const parsed = setPaySchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Enter a valid hourly rate" };
+  if (!(await assertStaffInOrg(staffId))) return { ok: false, error: "Not found" };
   const rate = new Decimal(parsed.data.rate);
   const latest = await prisma.staffRate.findFirst({
     where: { staffId },
@@ -227,6 +274,10 @@ export async function setStaffPay(staffId: string, input: unknown): Promise<Acti
 }
 
 export async function deleteWageEntry(id: string): Promise<ActionResult> {
+  const gate = await requireSuperuser();
+  if (!gate.ok) return gate;
+  const entry = await prisma.wageEntry.findUnique({ where: { id }, select: { staffId: true } });
+  if (!entry || !(await assertStaffInOrg(entry.staffId))) return { ok: false, error: "Not found" };
   await prisma.wageEntry.delete({ where: { id } });
   revalidatePath("/staff");
   return { ok: true };
@@ -239,8 +290,11 @@ const rateSchema = z.object({
 });
 
 export async function addStaffRate(input: unknown): Promise<ActionResult> {
+  const gate = await requireSuperuser();
+  if (!gate.ok) return gate;
   const parsed = rateSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
+  if (!(await assertStaffInOrg(parsed.data.staffId))) return { ok: false, error: "Not found" };
   const userId = await uid();
   await prisma.$transaction(async (tx: TransactionClient) => {
     const r = await tx.staffRate.create({
@@ -279,6 +333,8 @@ const wageSchema = z.object({
 export async function createWageEntry(input: unknown): Promise<ActionResult> {
   const parsed = wageSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
+  // WageEntry has no organizationId; verify the staff belongs to the active org.
+  if (!(await assertStaffInOrg(parsed.data.staffId))) return { ok: false, error: "Not found" };
   const userId = await uid();
   const totalHours = parsed.data.lines.reduce((s, l) => s + Number(l.hours), 0);
   await prisma.$transaction(async (tx: TransactionClient) => {

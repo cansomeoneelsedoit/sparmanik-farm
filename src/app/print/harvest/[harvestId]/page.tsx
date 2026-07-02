@@ -1,4 +1,5 @@
 import { notFound, redirect } from "next/navigation";
+import { todayWIB } from "@/lib/date";
 
 import { auth } from "@/auth";
 import { getActiveOrgId } from "@/server/org";
@@ -46,8 +47,8 @@ export default async function HarvestReportPage({
       produces: { include: { produce: true }, orderBy: { createdAt: "asc" } },
       sales: { orderBy: { date: "desc" }, include: { produce: true, customer: true } },
       dispositions: { orderBy: { date: "desc" }, include: { produce: true, staff: true, customer: true } },
-      usages: { orderBy: { date: "desc" }, include: { item: true, consumptions: true } },
-      assets: { orderBy: { date: "desc" }, include: { item: true, consumptions: true } },
+      usages: { orderBy: { date: "desc" }, include: { item: { select: { id: true, name: true, unit: true, subUnit: true, subFactor: true } }, consumptions: true } },
+      assets: { orderBy: { date: "desc" }, include: { item: { select: { id: true, name: true, unit: true, subUnit: true, subFactor: true } }, consumptions: true } },
     },
   });
   if (!harvest || harvest.organizationId !== activeOrgId) notFound();
@@ -158,7 +159,7 @@ export default async function HarvestReportPage({
 
   const usageCost = (u: UsageRow) => u.consumptions.reduce((s: Decimal, c) => s.plus(new Decimal(c.qty).times(c.unitCost)), new Decimal(0));
   const d = (date: Date) => date.toISOString().slice(0, 10);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayWIB();
 
   return (
     <div className="print-report min-h-screen bg-zinc-100 py-6 text-zinc-900">

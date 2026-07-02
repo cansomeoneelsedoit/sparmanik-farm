@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:restart": "docker compose restart web",
-    "dev:rebuild": "docker compose down && docker compose up -d",
+    "dev:rebuild": "docker compose down && docker compose up -d --build",
     "sync:local-to-prod": "node scripts/sync-local-to-prod.mjs",
     "backup:prod": "node scripts/backup-prod.mjs",
     "build": "prisma generate && next build",
@@ -21,6 +21,7 @@
     "prisma:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
     "check:i18n": "tsx scripts/check-i18n.ts",
+    "check:i18n-usage": "node scripts/check-i18n-usage.mjs",
     "extract-farm": "node scripts/extractFarmAssets.mjs"
   },
   "dependencies": {

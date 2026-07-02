@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition, type ReactNode } from "react";
+import { todayWIB } from "@/lib/date";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -26,7 +27,7 @@ import {
   uploadStaffPhoto,
 } from "@/app/(app)/staff/actions";
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayWIB();
 const newSchema = z.object({
   name: z.string().min(1),
   role: z.string().optional(),
@@ -59,6 +60,9 @@ export function AddStaffDialog({
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startT] = useTransition();
+  // The one-time login shown to the admin after creating a staff member. Kept
+  // on screen (not a toast) because it's the only time the password is visible.
+  const [credentials, setCredentials] = useState<{ email: string; password: string } | null>(null);
   const [photoPath, setPhotoPath] = useState<string | null>(existing?.photoPath ?? null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -99,14 +103,20 @@ export function AddStaffDialog({
   function onCreate(v: NewForm) {
     startT(async () => {
       const r = await createStaff({ ...v, photoPath });
-      if (r.ok) {
+      if (r.ok && r.data) {
         toast.success("Staff added");
-        setOpen(false);
         newForm.reset();
         setPhotoPath(null);
         router.refresh();
-      } else toast.error(r.error);
+        // Reveal the one-time login instead of closing immediately.
+        setCredentials({ email: r.data.loginEmail, password: r.data.tempPassword });
+      } else if (!r.ok) toast.error(r.error);
     });
+  }
+
+  function closeDialog() {
+    setOpen(false);
+    setCredentials(null);
   }
   function onEdit(v: EditForm) {
     if (!existing) return;
@@ -172,10 +182,45 @@ export function AddStaffDialog({
   );
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(o) => (o ? setOpen(true) : closeDialog())}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent>
-        {isEdit ? (
+        {credentials ? (
+          <div className="space-y-4 py-2">
+            <DialogHeader>
+              <DialogTitle>Staff login created</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              Give this login to the staff member. This password is shown{" "}
+              <strong>once</strong> — copy it now. They should change it after signing in.
+            </p>
+            <div className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Email</span>
+                <code className="font-mono">{credentials.email}</code>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Password</span>
+                <code className="font-mono">{credentials.password}</code>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(
+                    `${credentials.email} / ${credentials.password}`,
+                  );
+                  toast.success("Login copied");
+                }}
+              >
+                Copy login
+              </Button>
+              <Button type="button" onClick={closeDialog}>Done</Button>
+            </DialogFooter>
+          </div>
+        ) : isEdit ? (
           <form onSubmit={editForm.handleSubmit(onEdit)}>
             <DialogHeader><DialogTitle>Edit staff</DialogTitle></DialogHeader>
             <div className="space-y-4 py-4">

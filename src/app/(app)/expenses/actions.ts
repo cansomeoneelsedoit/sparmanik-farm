@@ -285,32 +285,64 @@ export async function createExpense(input: unknown): Promise<ActionResult<{ id: 
 export async function updateExpense(id: string, input: unknown): Promise<ActionResult> {
   const parsed = expenseSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
-  const existing = await prisma.expense.findUnique({ where: { id }, select: { harvestId: true } });
-  await prisma.expense.update({
-    where: { id },
-    data: {
-      date: new Date(parsed.data.date),
-      amount: new Decimal(parsed.data.amount),
-      category: parsed.data.category || null,
-      payee: parsed.data.payee,
-      description: parsed.data.description || null,
-      harvestId: parsed.data.harvestId || null,
-      paymentMethod: parsed.data.paymentMethod || null,
-      receiptPath: parsed.data.receiptPath || null,
-    },
-  });
-  revalidatePath("/expenses");
-  revalidatePath("/financials");
-  if (existing?.harvestId) revalidatePath(`/harvest/${existing.harvestId}`);
-  if (parsed.data.harvestId) revalidatePath(`/harvest/${parsed.data.harvestId}`);
+  const uid = await userId();
+  try {
+    const before = await prisma.expense.findUnique({ where: { id } });
+    if (!before) return { ok: false, error: "Expense not found" };
+    await prisma.$transaction(async (tx: TransactionClient) => {
+      await tx.expense.update({
+        where: { id },
+        data: {
+          date: new Date(parsed.data.date),
+          amount: new Decimal(parsed.data.amount),
+          category: parsed.data.category || null,
+          payee: parsed.data.payee,
+          description: parsed.data.description || null,
+          harvestId: parsed.data.harvestId || null,
+          paymentMethod: parsed.data.paymentMethod || null,
+          receiptPath: parsed.data.receiptPath || null,
+        },
+      });
+      await recordAction(tx, {
+        type: "expense.update",
+        entityType: "Expense",
+        entityId: id,
+        description: `Edited an expense`,
+        userId: uid,
+        payload: { before: JSON.parse(JSON.stringify(before)) },
+      });
+    });
+    revalidatePath("/expenses");
+    revalidatePath("/financials");
+    if (before.harvestId) revalidatePath(`/harvest/${before.harvestId}`);
+    if (parsed.data.harvestId) revalidatePath(`/harvest/${parsed.data.harvestId}`);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't save this expense" };
+  }
   return { ok: true };
 }
 
 export async function deleteExpense(id: string): Promise<ActionResult> {
-  const existing = await prisma.expense.findUnique({ where: { id }, select: { harvestId: true } });
-  await prisma.expense.delete({ where: { id } });
-  revalidatePath("/expenses");
-  revalidatePath("/financials");
-  if (existing?.harvestId) revalidatePath(`/harvest/${existing.harvestId}`);
+  const uid = await userId();
+  try {
+    const existing = await prisma.expense.findUnique({ where: { id } });
+    if (!existing) return { ok: false, error: "Expense not found" };
+    await prisma.$transaction(async (tx: TransactionClient) => {
+      await tx.expense.delete({ where: { id } });
+      await recordAction(tx, {
+        type: "expense.delete",
+        entityType: "Expense",
+        entityId: id,
+        description: `Deleted an expense`,
+        userId: uid,
+        payload: JSON.parse(JSON.stringify(existing)),
+      });
+    });
+    revalidatePath("/expenses");
+    revalidatePath("/financials");
+    if (existing.harvestId) revalidatePath(`/harvest/${existing.harvestId}`);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't delete this expense" };
+  }
   return { ok: true };
 }

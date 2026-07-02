@@ -15,7 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Money } from "@/components/shared/money";
+import { Money, MoneyDual } from "@/components/shared/money";
 import { Decimal } from "@/server/decimal";
 import { RecordUsageDialog } from "@/app/(app)/harvest/[harvestId]/record-usage-dialog";
 import {
@@ -54,8 +54,8 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
         produces: { include: { produce: true }, orderBy: { createdAt: "asc" } },
         sales: { orderBy: { date: "desc" }, include: { produce: true, customer: true } },
         dispositions: { orderBy: { date: "desc" }, include: { produce: true, staff: true, customer: true } },
-        usages: { orderBy: { date: "desc" }, include: { item: true, consumptions: true } },
-        assets: { orderBy: { date: "desc" }, include: { item: true, consumptions: true } },
+        usages: { orderBy: { date: "desc" }, include: { item: { select: { id: true, name: true, unit: true, subUnit: true, subFactor: true } }, consumptions: true } },
+        assets: { orderBy: { date: "desc" }, include: { item: { select: { id: true, name: true, unit: true, subUnit: true, subFactor: true } }, consumptions: true } },
       },
     }),
     prisma.item.findMany({
@@ -147,8 +147,14 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
         : [];
 
   const pl = await getHarvestPL(harvest.id);
+  // Must include misc expenses (pl.expenseCost) — netProfit already subtracts
+  // them, so leaving them out made "Total expenses" ≠ "Net profit" on the same
+  // card whenever a cycle had a contractor/cash expense (app review #12).
   const totalExpenses = (
-    Number(pl.usageCost) + Number(pl.labourCost) + Number(pl.depreciationCost)
+    Number(pl.usageCost) +
+    Number(pl.labourCost) +
+    Number(pl.depreciationCost) +
+    Number(pl.expenseCost)
   ).toFixed(4);
 
   // Labour lines for this harvest — resolves rates via effective-from history
@@ -330,12 +336,11 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
               ? new Decimal(b.amortisedCostPerUse).toFixed(4)
               : null,
           };
-          // Unit price for the cost preview on pack-style items. price is
-          // stored as the total batch price (e.g. $50 for the whole roll),
-          // so unit price = price / qty (e.g. $50 / 1 roll = $50/roll).
-          topBatchUnitPrice = new Decimal(b.price)
-            .div(new Decimal(b.qty))
-            .toFixed(4);
+          // Batch.price is per-unit (per pack) system-wide — consumeFifo uses it
+          // directly as unit cost, and totalValue multiplies remaining × price.
+          // Do NOT divide by qty here (that treated it as a batch total and made
+          // the install cost preview understate the real charge — app review #14).
+          topBatchUnitPrice = new Decimal(b.price).toFixed(4);
         }
         available = available.plus(rem);
       }
@@ -488,17 +493,21 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
             {harvest.status === "LIVE" ? "Live" : "Closed"}
           </Badge>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button asChild variant="outline">
-            <a href={`/print/harvest/${harvest.id}?auto=1`} target="_blank" rel="noopener noreferrer">Download PDF</a>
-          </Button>
+        {/* Re-tiered (app review UX-5): the daily field actions come FIRST and
+            prominent; occasional/content actions are smaller; cycle-admin
+            (Edit / End / Delete) is separated so Delete isn't next to the
+            everyday buttons. */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* — Everyday field actions — */}
+          <LogSaleDialog
+            harvestId={harvest.id}
+            produces={produces.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }))}
+            customers={(customers as { id: string; name: string; type: string }[]).map((c) => ({ id: c.id, name: c.name, type: c.type }))}
+            packagingItems={packagingItems}
+          />
           <RecordUsageDialog
             harvestId={harvest.id}
             items={items.map((i: { id: string; name: string; unit: string }) => ({ id: i.id, name: i.name, unit: i.unit }))}
-          />
-          <InstallAssetDialog
-            harvestId={harvest.id}
-            items={installItems}
           />
           <LogLabourDialog
             harvestId={harvest.id}
@@ -510,18 +519,26 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
             defaultHarvestId={harvest.id}
             trigger={<Button variant="outline">Add expense</Button>}
           />
+
+          <div className="mx-1 hidden h-8 w-px self-center bg-border sm:block" />
+
+          {/* — Occasional / content — */}
           <ImportExpenseSheetDialog
             harvests={[{ id: harvest.id, name: harvest.name }]}
             defaultHarvestId={harvest.id}
-            trigger={<Button variant="outline">Scan sheet</Button>}
+            trigger={<Button variant="outline" size="sm">Scan sheet</Button>}
           />
-          <LogSaleDialog
+          <InstallAssetDialog
             harvestId={harvest.id}
-            produces={produces.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }))}
-            customers={(customers as { id: string; name: string; type: string }[]).map((c) => ({ id: c.id, name: c.name, type: c.type }))}
-            packagingItems={packagingItems}
+            items={installItems}
           />
-          {harvest.status === "LIVE" ? <EndHarvestButton id={harvest.id} /> : null}
+          <Button asChild variant="outline" size="sm">
+            <a href={`/print/harvest/${harvest.id}?auto=1`} target="_blank" rel="noopener noreferrer">Download PDF</a>
+          </Button>
+
+          <div className="mx-1 hidden h-8 w-px self-center bg-border sm:block" />
+
+          {/* — Cycle admin (rare, kept away from the daily buttons) — */}
           <StartHarvestDialog
             greenhouses={greenhouses.map((g: { id: string; name: string }) => ({ id: g.id, name: g.name }))}
             produces={produces.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }))}
@@ -535,8 +552,9 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
               endDate: harvest.endDate ? harvest.endDate.toISOString().slice(0, 10) : null,
               status: harvest.status,
             }}
-            trigger={<Button variant="outline">Edit</Button>}
+            trigger={<Button variant="ghost" size="sm">Edit</Button>}
           />
+          {harvest.status === "LIVE" ? <EndHarvestButton id={harvest.id} /> : null}
           <DeleteHarvestButton id={harvest.id} name={harvest.name} />
         </div>
       </header>
@@ -560,12 +578,12 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
       </div>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
-        <StatCard label="Revenue" value={<Money value={pl.revenue} />} accent="green" />
-        <StatCard label="Usage cost" value={<Money value={pl.usageCost} />} accent="red" />
-        <StatCard label="Depreciation" value={<Money value={pl.depreciationCost} />} accent="red" />
-        <StatCard label="Labour cost" value={<Money value={pl.labourCost} />} accent="red" />
-        <StatCard label="Misc expenses" value={<Money value={pl.expenseCost} />} accent="red" />
-        <StatCard label="Net profit" value={<Money value={pl.netProfit} />} accent={Number(pl.netProfit) >= 0 ? "green" : "red"} />
+        <StatCard label="Revenue" value={<MoneyDual value={pl.revenue} align="start" />} accent="green" />
+        <StatCard label="Usage cost" value={<MoneyDual value={pl.usageCost} align="start" />} accent="neutral" />
+        <StatCard label="Depreciation" value={<MoneyDual value={pl.depreciationCost} align="start" />} accent="neutral" />
+        <StatCard label="Labour cost" value={<MoneyDual value={pl.labourCost} align="start" />} accent="neutral" />
+        <StatCard label="Misc expenses" value={<MoneyDual value={pl.expenseCost} align="start" />} accent="neutral" />
+        <StatCard label="Net profit" value={<MoneyDual value={pl.netProfit} align="start" />} accent={Number(pl.netProfit) >= 0 ? "green" : "red"} hero />
       </div>
 
       <Card>
@@ -638,12 +656,16 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                       <Badge variant="outline">{s.grade}</Badge>
                     </TableCell>
                     <TableCell className="text-right">{Number(s.weight)}</TableCell>
-                    <TableCell className="text-right"><Money value={s.pricePerKg.toFixed(4)} /></TableCell>
+                    <TableCell className="text-right"><MoneyDual value={s.pricePerKg.toFixed(4)} /></TableCell>
                     <TableCell className="text-right font-medium">
-                      <Money value={s.amount.toFixed(4)} />
+                      <MoneyDual value={s.amount.toFixed(4)} />
                       {Number(s.weight) * Number(s.pricePerKg) - Number(s.amount) > 0.005 ? (
-                        <div className="text-[10px] font-normal text-amber-600">
+                        // Show the discount in rupiah (the unit that reconciles) so
+                        // the row visibly adds up: list − off = charged. The AUD
+                        // reference lives under the amount above.
+                        <div className="text-[11px] font-normal text-amber-600">
                           −<Money value={(Number(s.weight) * Number(s.pricePerKg) - Number(s.amount)).toFixed(4)} /> off
+                          <span className="text-muted-foreground"> (was <Money value={(Number(s.weight) * Number(s.pricePerKg)).toFixed(4)} />)</span>
                         </div>
                       ) : null}
                     </TableCell>
@@ -675,9 +697,9 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                   <TableCell className="text-right">{salesWeightTotal} kg</TableCell>
                   <TableCell />
                   <TableCell className="text-right text-green-600">
-                    <Money value={pl.revenue} />
+                    <MoneyDual value={pl.revenue} />
                     {salesDiscountTotal > 0.005 ? (
-                      <div className="text-[10px] font-normal text-amber-600">
+                      <div className="text-[11px] font-normal text-amber-600">
                         −<Money value={salesDiscountTotal.toFixed(4)} /> total off
                       </div>
                     ) : null}
@@ -1015,12 +1037,28 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
             </section>
           ) : null}
 
+          {expenseRows.length > 0 ? (
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Expenses — Misc</h3>
+              <ul className="space-y-1">
+                {expenseRows.map((e) => (
+                  <li key={e.id} className="flex items-center justify-between">
+                    <span className="text-muted-foreground">
+                      {e.date.toISOString().slice(0, 10)} — {e.payee}{e.category ? ` (${e.category})` : ""}
+                    </span>
+                    <span className="text-red-600"><Money value={e.amount.toFixed(4)} /></span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
           <section>
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Expenses — Labour</h3>
             <ul className="space-y-1">
               {labourRows.map((l) => (
                 <li key={l.id} className="flex items-center justify-between">
-                  <span className="text-muted-foreground">{l.date.toISOString().slice(0, 10)} — {l.name} ({l.hours.toFixed(2)}h @ <Money value={l.rate.toFixed(4)} />){l.task ? ` — ${l.task}` : ""}</span>
+                  <span className="text-muted-foreground">{l.date.toISOString().slice(0, 10)} — {l.name} ({l.hours.toFixed(2)}h @ <Money value={l.rate.toFixed(4)} precise />){l.task ? ` — ${l.task}` : ""}</span>
                   <span className="text-red-600"><Money value={l.cost.toFixed(4)} /></span>
                 </li>
               ))}
@@ -1041,12 +1079,26 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
   );
 }
 
-function StatCard({ label, value, accent }: { label: string; value: React.ReactNode; accent: "green" | "red" }) {
+function StatCard({
+  label,
+  value,
+  accent,
+  hero = false,
+}: {
+  label: string;
+  value: React.ReactNode;
+  accent: "green" | "red" | "neutral";
+  /** The one number that matters — Net profit. Gets a ring + bigger text so a
+      profitable harvest doesn't drown in a row of equal red cost cards. */
+  hero?: boolean;
+}) {
+  const colour =
+    accent === "green" ? "text-green-600" : accent === "red" ? "text-red-600" : "text-foreground";
   return (
-    <Card>
+    <Card className={hero ? "ring-2 ring-primary/30" : undefined}>
       <CardContent className="p-4">
         <div className="text-xs text-muted-foreground">{label}</div>
-        <div className={`text-2xl font-semibold ${accent === "green" ? "text-green-600" : "text-red-600"}`}>{value}</div>
+        <div className={`${hero ? "text-3xl" : "text-2xl"} font-semibold ${colour}`}>{value}</div>
       </CardContent>
     </Card>
   );

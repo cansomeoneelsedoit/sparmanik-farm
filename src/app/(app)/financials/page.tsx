@@ -3,8 +3,9 @@ import Link from "next/link";
 import { prisma } from "@/server/prisma";
 import { Decimal } from "@/server/decimal";
 import { getHarvestPL } from "@/server/pl";
+import { requireActiveOrgId } from "@/server/org";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Money } from "@/components/shared/money";
+import { Money, MoneyDual } from "@/components/shared/money";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,12 @@ function effectiveRateFromCache(
 }
 
 export default async function FinancialsPage() {
+  // BatchConsumption, StaffRate and WageEntryLine have no organizationId, so the
+  // scoping extension can't protect them — filter them through their org-scoped
+  // parents with this id, else this page mixes every farm's costs into one
+  // farm's P&L (app review #9).
+  const orgId = await requireActiveOrgId();
+
   // --- Revenue: produce sales (greenhouse cycles) + direct stock sales. ---
   const [sales, stockSales] = await Promise.all([
     prisma.sale.findMany({ select: { amount: true } }),
@@ -57,6 +64,14 @@ export default async function FinancialsPage() {
   // exactly what flows into per-harvest usage costs, so the harvest sum lines
   // up cleanly with this figure — no double-count with depreciation below.
   const consumptions = await prisma.batchConsumption.findMany({
+    where: {
+      batch: { organizationId: orgId },
+      // Exclude installs of depreciable assets: their cost is recognised over
+      // the asset's life via Depreciation (amortisedCharge) below. Counting the
+      // full purchase price here AND the amortisation was a double-count that
+      // understated profit (app review #10).
+      OR: [{ harvestAssetId: null }, { harvestAsset: { depreciable: false } }],
+    },
     select: { qty: true, unitCost: true },
   });
   const cogsConsumed = consumptions.reduce(
@@ -89,10 +104,12 @@ export default async function FinancialsPage() {
   // that dominated this page's render time on orgs with months of data.
   const [allRates, wageLines, allocatedLines] = await Promise.all([
     prisma.staffRate.findMany({
+      where: { staff: { organizationId: orgId } },
       orderBy: { effectiveFrom: "desc" },
       select: { staffId: true, rate: true, effectiveFrom: true },
     }),
     prisma.wageEntryLine.findMany({
+      where: { wageEntry: { staff: { organizationId: orgId } } },
       select: {
         hours: true,
         harvestId: true,
@@ -100,7 +117,7 @@ export default async function FinancialsPage() {
       },
     }) as Promise<(WageLineRow & { harvestId: string | null })[]>,
     prisma.wageEntryLine.findMany({
-      where: { harvestId: { not: null } },
+      where: { harvestId: { not: null }, wageEntry: { staff: { organizationId: orgId } } },
       select: {
         hours: true,
         wageEntry: { select: { staffId: true, date: true } },
@@ -227,6 +244,7 @@ export default async function FinancialsPage() {
   const sumHarvestUsage = sumD(harvestPls.map((h) => h.pl.usageCost));
   const sumHarvestLabour = sumD(harvestPls.map((h) => h.pl.labourCost));
   const sumHarvestDepr = sumD(harvestPls.map((h) => h.pl.depreciationCost));
+  const sumHarvestExpense = sumD(harvestPls.map((h) => h.pl.expenseCost));
   const sumHarvestNet = sumD(harvestPls.map((h) => h.pl.netProfit));
 
   // Reconciliation deltas (accrual basis — clean tie-out).
@@ -357,6 +375,7 @@ export default async function FinancialsPage() {
                     <th className="px-2 py-2 text-right font-medium">FIFO usage</th>
                     <th className="px-2 py-2 text-right font-medium">Labour</th>
                     <th className="px-2 py-2 text-right font-medium">Depreciation</th>
+                    <th className="px-2 py-2 text-right font-medium">Expenses</th>
                     <th className="px-4 py-2 text-right font-medium">Net</th>
                   </tr>
                 </thead>
@@ -397,6 +416,9 @@ export default async function FinancialsPage() {
                         <td className="px-2 py-2 text-right text-red-600">
                           <Money value={h.pl.depreciationCost} />
                         </td>
+                        <td className="px-2 py-2 text-right text-red-600">
+                          <Money value={h.pl.expenseCost} />
+                        </td>
                         <td
                           className={`px-4 py-2 text-right font-medium ${netD.gte(0) ? "text-green-600" : "text-red-600"}`}
                         >
@@ -420,6 +442,9 @@ export default async function FinancialsPage() {
                     </td>
                     <td className="px-2 py-2 text-right text-red-600">
                       <Money value={sumHarvestDepr.toFixed(4)} />
+                    </td>
+                    <td className="px-2 py-2 text-right text-red-600">
+                      <Money value={sumHarvestExpense.toFixed(4)} />
                     </td>
                     <td
                       className={`px-4 py-2 text-right ${sumHarvestNet.gte(0) ? "text-green-600" : "text-red-600"}`}
@@ -584,7 +609,7 @@ function Stat({ label, value, colour }: { label: string; value: string; colour: 
       <CardContent className="p-4">
         <div className="text-xs text-muted-foreground">{label}</div>
         <div className={`text-2xl font-semibold ${colour === "green" ? "text-green-600" : "text-red-600"}`}>
-          <Money value={value} />
+          <MoneyDual value={value} align="start" />
         </div>
       </CardContent>
     </Card>
@@ -621,7 +646,7 @@ function Row({
     >
       <span className={indent ? "text-muted-foreground" : ""}>{label}</span>
       <span className={positive ? "text-green-600" : negative ? "text-red-600" : ""}>
-        <Money value={value} />
+        <MoneyDual value={value} />
       </span>
     </div>
   );

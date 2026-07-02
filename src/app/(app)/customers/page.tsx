@@ -2,7 +2,7 @@ import { Plus } from "lucide-react";
 
 import { prisma } from "@/server/prisma";
 import { Decimal } from "@/server/decimal";
-import { Money } from "@/components/shared/money";
+import { MoneyDual } from "@/components/shared/money";
 import { Button } from "@/components/ui/button";
 import { CustomerFormDialog } from "@/app/(app)/customers/customer-form-dialog";
 import {
@@ -30,11 +30,10 @@ export default async function CustomersPage() {
       email: true,
       notes: true,
       logoMime: true,
-      sales: { select: { amount: true, date: true } },
     },
   });
 
-  type CustomerWithSales = {
+  type CustomerLite = {
     id: string;
     name: string;
     type: string;
@@ -42,14 +41,29 @@ export default async function CustomersPage() {
     email: string | null;
     notes: string | null;
     logoMime: string | null;
-    sales: { amount: Decimal; date: Date }[];
   };
+  const list = customers as CustomerLite[];
 
-  const rows: CustomerRow[] = (customers as CustomerWithSales[]).map((c) => {
-    const total = c.sales.reduce((s: Decimal, x) => s.plus(new Decimal(x.amount)), new Decimal(0));
-    const lastSale = c.sales.length
-      ? c.sales.map((x) => x.date).sort((a, b) => b.getTime() - a.getTime())[0].toISOString().slice(0, 10)
-      : null;
+  // Sales totals via one aggregate query instead of loading every sale per
+  // customer (app review #67). Sale is org-scoped and we filter by these ids.
+  const salesAgg = (await prisma.sale.groupBy({
+    by: ["customerId"],
+    where: { customerId: { in: list.map((c) => c.id) } },
+    _sum: { amount: true },
+    _count: { _all: true },
+    _max: { date: true },
+  })) as Array<{
+    customerId: string | null;
+    _sum: { amount: Decimal | null };
+    _count: { _all: number };
+    _max: { date: Date | null };
+  }>;
+  const salesByCustomer = new Map(salesAgg.map((a) => [a.customerId, a]));
+
+  const rows: CustomerRow[] = list.map((c) => {
+    const agg = salesByCustomer.get(c.id);
+    const total = agg?._sum.amount ?? new Decimal(0);
+    const lastSale = agg?._max.date ? agg._max.date.toISOString().slice(0, 10) : null;
     return {
       id: c.id,
       name: c.name,
@@ -58,8 +72,8 @@ export default async function CustomersPage() {
       email: c.email,
       notes: c.notes,
       hasLogo: !!c.logoMime,
-      salesCount: c.sales.length,
-      totalDisplay: <Money value={total.toFixed(4)} />,
+      salesCount: agg?._count._all ?? 0,
+      totalDisplay: <MoneyDual value={new Decimal(total).toFixed(4)} align="start" />,
       lastSale,
     };
   });

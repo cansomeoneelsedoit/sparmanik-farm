@@ -139,6 +139,65 @@ export function registerAllUndoHandlers() {
     await tx.sale.delete({ where: { id: action.entityId } });
   });
 
+  // ---- Destructive edits/deletes recorded in Batch C (app review #29). ----
+  // Snapshots are plain JSON (Decimal → string, Date → ISO); Prisma coerces
+  // those back on write. Best-effort: single-row restores, not cascaded
+  // children (e.g. a restored usage does not rebuild its BatchConsumption rows).
+  const stripId = (o: Record<string, unknown>) => {
+    const { id: _id, ...rest } = o;
+    void _id;
+    return rest;
+  };
+
+  registerUndoHandler("harvest.delete", async (tx, action) => {
+    const h = action.payload as Record<string, unknown>;
+    if (!h?.id) return;
+    await tx.harvest.create({ data: h as never });
+  });
+  registerUndoHandler("harvest.delete_sale", async (tx, action) => {
+    const s = action.payload as Record<string, unknown>;
+    if (!s?.id) return;
+    await tx.sale.create({ data: s as never });
+  });
+  registerUndoHandler("harvest.update_sale", async (tx, action) => {
+    const before = action.payload.before as Record<string, unknown> | undefined;
+    if (!before?.id) return;
+    await tx.sale.update({ where: { id: before.id as string }, data: stripId(before) as never });
+  });
+  registerUndoHandler("harvest.delete_usage", async (tx, action) => {
+    const u = action.payload as Record<string, unknown>;
+    if (!u?.id) return;
+    await tx.harvestUsage.create({ data: u as never });
+  });
+  registerUndoHandler("harvest.delete_asset", async (tx, action) => {
+    const a = action.payload as Record<string, unknown>;
+    if (!a?.id) return;
+    await tx.harvestAsset.create({ data: a as never });
+  });
+  registerUndoHandler("harvest.delete_disposition", async (tx, action) => {
+    const d = action.payload as Record<string, unknown>;
+    if (!d?.id) return;
+    await tx.harvestDisposition.create({ data: d as never });
+  });
+  registerUndoHandler("harvest.delete_labour_line", async (tx, action) => {
+    const l = action.payload as Record<string, unknown>;
+    if (!l?.id) return;
+    // wageEntry is a relation snapshot; keep only the line's own columns.
+    const { wageEntry: _we, ...line } = l;
+    void _we;
+    await tx.wageEntryLine.create({ data: line as never });
+  });
+  registerUndoHandler("expense.delete", async (tx, action) => {
+    const e = action.payload as Record<string, unknown>;
+    if (!e?.id) return;
+    await tx.expense.create({ data: e as never });
+  });
+  registerUndoHandler("expense.update", async (tx, action) => {
+    const before = action.payload.before as Record<string, unknown> | undefined;
+    if (!before?.id) return;
+    await tx.expense.update({ where: { id: before.id as string }, data: stripId(before) as never });
+  });
+
   // Staff / wages
   registerUndoHandler("staff.create", async (tx, action) => {
     await tx.staff.delete({ where: { id: action.entityId } });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { todayWIB } from "@/lib/date";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -21,7 +22,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { createWageEntry } from "@/app/(app)/staff/actions";
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayWIB();
 const schema = z.object({
   staffId: z.string().min(1),
   date: z.string().min(1),

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { todayWIB } from "@/lib/date";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -25,7 +26,7 @@ import { createLabourTaskQuick } from "@/app/(app)/settings/actions";
 /** Sentinel option representing "type something custom". */
 const OTHER_TASK_VALUE = "__other__";
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayWIB();
 const schema = z.object({
   staffId: z.string().min(1, "Pick a staff member"),
   date: z.string().min(1),

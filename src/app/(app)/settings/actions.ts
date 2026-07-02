@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { prisma } from "@/server/prisma";
 import { Decimal, type TransactionClient } from "@/server/decimal";
+import { requireSuperuser } from "@/server/authz";
 
 export type ActionResult<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
@@ -256,6 +257,8 @@ const generalSchema = z.object({
 });
 
 export async function updateGeneralSettings(input: unknown): Promise<ActionResult> {
+  const gate = await requireSuperuser();
+  if (!gate.ok) return gate;
   const parsed = generalSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Invalid" };
   const rate = new Decimal(parsed.data.exchangeRate);

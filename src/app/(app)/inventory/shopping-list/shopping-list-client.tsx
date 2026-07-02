@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { todayWIB } from "@/lib/date";
 import { useTranslations } from "next-intl";
 import { Copy, Phone, ShoppingCart } from "lucide-react";
 import { toast } from "sonner";
@@ -63,7 +64,7 @@ export function ShoppingListClient({
           : t("tierBelow");
 
   function groupText(g: SupplierGroup): string {
-    const date = new Date().toISOString().slice(0, 10);
+    const date = todayWIB();
     const header = t("copyTitle", {
       supplier: g.name ?? t("noSupplier"),
       date,
