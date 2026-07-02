@@ -493,17 +493,21 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
             {harvest.status === "LIVE" ? "Live" : "Closed"}
           </Badge>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button asChild variant="outline">
-            <a href={`/print/harvest/${harvest.id}?auto=1`} target="_blank" rel="noopener noreferrer">Download PDF</a>
-          </Button>
+        {/* Re-tiered (app review UX-5): the daily field actions come FIRST and
+            prominent; occasional/content actions are smaller; cycle-admin
+            (Edit / End / Delete) is separated so Delete isn't next to the
+            everyday buttons. */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* — Everyday field actions — */}
+          <LogSaleDialog
+            harvestId={harvest.id}
+            produces={produces.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }))}
+            customers={(customers as { id: string; name: string; type: string }[]).map((c) => ({ id: c.id, name: c.name, type: c.type }))}
+            packagingItems={packagingItems}
+          />
           <RecordUsageDialog
             harvestId={harvest.id}
             items={items.map((i: { id: string; name: string; unit: string }) => ({ id: i.id, name: i.name, unit: i.unit }))}
-          />
-          <InstallAssetDialog
-            harvestId={harvest.id}
-            items={installItems}
           />
           <LogLabourDialog
             harvestId={harvest.id}
@@ -515,18 +519,26 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
             defaultHarvestId={harvest.id}
             trigger={<Button variant="outline">Add expense</Button>}
           />
+
+          <div className="mx-1 hidden h-8 w-px self-center bg-border sm:block" />
+
+          {/* — Occasional / content — */}
           <ImportExpenseSheetDialog
             harvests={[{ id: harvest.id, name: harvest.name }]}
             defaultHarvestId={harvest.id}
-            trigger={<Button variant="outline">Scan sheet</Button>}
+            trigger={<Button variant="outline" size="sm">Scan sheet</Button>}
           />
-          <LogSaleDialog
+          <InstallAssetDialog
             harvestId={harvest.id}
-            produces={produces.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }))}
-            customers={(customers as { id: string; name: string; type: string }[]).map((c) => ({ id: c.id, name: c.name, type: c.type }))}
-            packagingItems={packagingItems}
+            items={installItems}
           />
-          {harvest.status === "LIVE" ? <EndHarvestButton id={harvest.id} /> : null}
+          <Button asChild variant="outline" size="sm">
+            <a href={`/print/harvest/${harvest.id}?auto=1`} target="_blank" rel="noopener noreferrer">Download PDF</a>
+          </Button>
+
+          <div className="mx-1 hidden h-8 w-px self-center bg-border sm:block" />
+
+          {/* — Cycle admin (rare, kept away from the daily buttons) — */}
           <StartHarvestDialog
             greenhouses={greenhouses.map((g: { id: string; name: string }) => ({ id: g.id, name: g.name }))}
             produces={produces.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }))}
@@ -540,8 +552,9 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
               endDate: harvest.endDate ? harvest.endDate.toISOString().slice(0, 10) : null,
               status: harvest.status,
             }}
-            trigger={<Button variant="outline">Edit</Button>}
+            trigger={<Button variant="ghost" size="sm">Edit</Button>}
           />
+          {harvest.status === "LIVE" ? <EndHarvestButton id={harvest.id} /> : null}
           <DeleteHarvestButton id={harvest.id} name={harvest.name} />
         </div>
       </header>
@@ -566,11 +579,11 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
         <StatCard label="Revenue" value={<MoneyDual value={pl.revenue} align="start" />} accent="green" />
-        <StatCard label="Usage cost" value={<MoneyDual value={pl.usageCost} align="start" />} accent="red" />
-        <StatCard label="Depreciation" value={<MoneyDual value={pl.depreciationCost} align="start" />} accent="red" />
-        <StatCard label="Labour cost" value={<MoneyDual value={pl.labourCost} align="start" />} accent="red" />
-        <StatCard label="Misc expenses" value={<MoneyDual value={pl.expenseCost} align="start" />} accent="red" />
-        <StatCard label="Net profit" value={<MoneyDual value={pl.netProfit} align="start" />} accent={Number(pl.netProfit) >= 0 ? "green" : "red"} />
+        <StatCard label="Usage cost" value={<MoneyDual value={pl.usageCost} align="start" />} accent="neutral" />
+        <StatCard label="Depreciation" value={<MoneyDual value={pl.depreciationCost} align="start" />} accent="neutral" />
+        <StatCard label="Labour cost" value={<MoneyDual value={pl.labourCost} align="start" />} accent="neutral" />
+        <StatCard label="Misc expenses" value={<MoneyDual value={pl.expenseCost} align="start" />} accent="neutral" />
+        <StatCard label="Net profit" value={<MoneyDual value={pl.netProfit} align="start" />} accent={Number(pl.netProfit) >= 0 ? "green" : "red"} hero />
       </div>
 
       <Card>
@@ -1066,12 +1079,26 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
   );
 }
 
-function StatCard({ label, value, accent }: { label: string; value: React.ReactNode; accent: "green" | "red" }) {
+function StatCard({
+  label,
+  value,
+  accent,
+  hero = false,
+}: {
+  label: string;
+  value: React.ReactNode;
+  accent: "green" | "red" | "neutral";
+  /** The one number that matters — Net profit. Gets a ring + bigger text so a
+      profitable harvest doesn't drown in a row of equal red cost cards. */
+  hero?: boolean;
+}) {
+  const colour =
+    accent === "green" ? "text-green-600" : accent === "red" ? "text-red-600" : "text-foreground";
   return (
-    <Card>
+    <Card className={hero ? "ring-2 ring-primary/30" : undefined}>
       <CardContent className="p-4">
         <div className="text-xs text-muted-foreground">{label}</div>
-        <div className={`text-2xl font-semibold ${accent === "green" ? "text-green-600" : "text-red-600"}`}>{value}</div>
+        <div className={`${hero ? "text-3xl" : "text-2xl"} font-semibold ${colour}`}>{value}</div>
       </CardContent>
     </Card>
   );
