@@ -220,38 +220,78 @@ export default async function SalesPage({
               {hasFilters ? "No sales match your filters." : "No sales yet."}
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Greenhouse</TableHead>
-                  <TableHead>Harvest</TableHead>
-                  <TableHead>Produce</TableHead>
-                  <TableHead>Grade</TableHead>
-                  <TableHead className="text-right">Weight</TableHead>
-                  <TableHead className="text-right">Price/kg</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                  <TableHead className="text-right">Discount</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            <>
+              {/* Desktop: full table. Below lg it would push Amount/Discount
+                  off-screen, so we switch to a card list on tablet/phone
+                  (app review UX — tablet-first tables). */}
+              <div className="hidden lg:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Greenhouse</TableHead>
+                      <TableHead>Harvest</TableHead>
+                      <TableHead>Produce</TableHead>
+                      <TableHead>Grade</TableHead>
+                      <TableHead className="text-right">Weight</TableHead>
+                      <TableHead className="text-right">Price/kg</TableHead>
+                      <TableHead className="text-right">Amount</TableHead>
+                      <TableHead className="text-right">Discount</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rows.map((s) => (
+                      <TableRow key={s.id}>
+                        <TableCell className="text-muted-foreground">{s.date.toISOString().slice(0, 10)}</TableCell>
+                        <TableCell className="text-muted-foreground">{s.harvest.greenhouse.name}</TableCell>
+                        <TableCell>
+                          <Link href={`/harvest/${s.harvest.id}`} className="hover:underline">{s.harvest.name}</Link>
+                        </TableCell>
+                        <TableCell>{s.produce.name}</TableCell>
+                        <TableCell><Badge variant="outline">{s.grade}</Badge></TableCell>
+                        <TableCell className="text-right">{Number(s.weight)} kg</TableCell>
+                        <TableCell className="text-right"><MoneyDual value={s.pricePerKg.toFixed(4)} /></TableCell>
+                        <TableCell className="text-right font-medium"><MoneyDual value={s.amount.toFixed(4)} /></TableCell>
+                        <TableCell className="text-right">{discountCell(s.weight.times(s.pricePerKg), s.amount)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              {/* Tablet/phone: one card per sale, key figures prominent. */}
+              <div className="divide-y lg:hidden">
                 {rows.map((s) => (
-                  <TableRow key={s.id}>
-                    <TableCell className="text-muted-foreground">{s.date.toISOString().slice(0, 10)}</TableCell>
-                    <TableCell className="text-muted-foreground">{s.harvest.greenhouse.name}</TableCell>
-                    <TableCell>
-                      <Link href={`/harvest/${s.harvest.id}`} className="hover:underline">{s.harvest.name}</Link>
-                    </TableCell>
-                    <TableCell>{s.produce.name}</TableCell>
-                    <TableCell><Badge variant="outline">{s.grade}</Badge></TableCell>
-                    <TableCell className="text-right">{Number(s.weight)} kg</TableCell>
-                    <TableCell className="text-right"><MoneyDual value={s.pricePerKg.toFixed(4)} /></TableCell>
-                    <TableCell className="text-right font-medium"><MoneyDual value={s.amount.toFixed(4)} /></TableCell>
-                    <TableCell className="text-right">{discountCell(s.weight.times(s.pricePerKg), s.amount)}</TableCell>
-                  </TableRow>
+                  <div key={s.id} className="space-y-1.5 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate font-medium">{s.produce.name}</span>
+                          <Badge variant="outline">{s.grade}</Badge>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {s.date.toISOString().slice(0, 10)} · {s.harvest.greenhouse.name}
+                        </div>
+                        <Link href={`/harvest/${s.harvest.id}`} className="text-xs text-muted-foreground hover:underline">
+                          {s.harvest.name}
+                        </Link>
+                      </div>
+                      <div className="shrink-0 text-right font-medium">
+                        <MoneyDual value={s.amount.toFixed(4)} />
+                        <div className="text-xs font-normal">{discountCell(s.weight.times(s.pricePerKg), s.amount)}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>{Number(s.weight)} kg</span>
+                      <span className="flex items-center gap-1">
+                        <span>@</span>
+                        <MoneyDual value={s.pricePerKg.toFixed(4)} />
+                        <span>/kg</span>
+                      </span>
+                    </div>
+                  </div>
                 ))}
-              </TableBody>
-            </Table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
