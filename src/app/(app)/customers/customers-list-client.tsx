@@ -82,7 +82,9 @@ export function CustomersListClient({ customers }: { customers: CustomerRow[] })
           {customers.length === 0 ? "No customers yet. Add one, or create them on the fly when logging a sale." : "No customers match this search."}
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border bg-card">
+        <>
+        {/* Desktop table; card list below lg (app review UX — tablet tables). */}
+        <div className="hidden overflow-x-auto rounded-xl border bg-card lg:block">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-xs text-muted-foreground">
@@ -140,7 +142,7 @@ export function CustomersListClient({ customers }: { customers: CustomerRow[] })
                           </Button>
                         }
                       />
-                      <Button size="icon" variant="ghost" title="Delete" disabled={pending} onClick={() => onDelete(c)}>
+                      <Button size="icon" variant="ghost" title="Delete" disabled={pending} onClick={() => onDelete(c)} className="text-destructive hover:text-destructive">
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
@@ -150,6 +152,53 @@ export function CustomersListClient({ customers }: { customers: CustomerRow[] })
             </tbody>
           </table>
         </div>
+        <div className="divide-y rounded-xl border bg-card lg:hidden">
+          {filtered.map((c) => (
+            <div key={c.id} className="flex items-start justify-between gap-3 p-4">
+              <div className="min-w-0 space-y-1">
+                <div className="flex items-center gap-2.5">
+                  {c.hasLogo ? (
+                    <SmartImage
+                      src={`/api/customers/${c.id}/logo`}
+                      alt={c.name}
+                      className="h-7 w-7 shrink-0 rounded border object-contain"
+                    />
+                  ) : null}
+                  <span className="truncate font-medium">{c.name}</span>
+                  <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[11px]", TYPE_STYLE[c.type] ?? TYPE_STYLE.CONSUMER)}>
+                    {typeLabel(c.type)}
+                  </span>
+                </div>
+                {c.phone || c.email ? (
+                  <div className="text-xs text-muted-foreground">
+                    {[c.phone, c.email].filter(Boolean).join(" · ")}
+                  </div>
+                ) : null}
+                <div className="text-xs text-muted-foreground">
+                  {c.salesCount > 0 ? `${c.salesCount} sales` : "No sales yet"}
+                  {c.lastSale ? ` · last ${c.lastSale}` : ""}
+                </div>
+              </div>
+              <div className="flex shrink-0 flex-col items-end gap-1.5">
+                <div className="font-medium tabular-nums">{c.totalDisplay}</div>
+                <div className="flex gap-1">
+                  <CustomerFormDialog
+                    existing={{ id: c.id, name: c.name, type: c.type, phone: c.phone, email: c.email, notes: c.notes, hasLogo: c.hasLogo }}
+                    trigger={
+                      <Button size="icon" variant="ghost" title="Edit">
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    }
+                  />
+                  <Button size="icon" variant="ghost" title="Delete" disabled={pending} onClick={() => onDelete(c)} className="text-destructive hover:text-destructive">
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        </>
       )}
     </div>
   );

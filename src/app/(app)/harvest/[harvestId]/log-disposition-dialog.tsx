@@ -3,6 +3,7 @@
 import { useState, useTransition, type ReactNode } from "react";
 import { todayWIB } from "@/lib/date";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -39,28 +40,11 @@ export type EditableDisposition = {
   note: string;
 };
 
-const TYPE_CONFIG: Record<
-  DispositionType,
-  { noun: string; button: string; blurb: string; weightLabel: string }
-> = {
-  BREAKAGE: {
-    noun: "breakage / spillage",
-    button: "Log breakage",
-    blurb: "Melon that cracked, spoiled or spilled. Counts toward total yield — no money.",
-    weightLabel: "Weight lost (kg)",
-  },
-  STAFF: {
-    noun: "staff consumption",
-    button: "Log staff use",
-    blurb: "Melon eaten or taken by staff. Counts toward total yield — no charge.",
-    weightLabel: "Weight (kg)",
-  },
-  GIVEAWAY: {
-    noun: "giveaway / sample",
-    button: "Log giveaway",
-    blurb: "Free samples or giveaways. Counts toward total yield — no charge.",
-    weightLabel: "Weight given (kg)",
-  },
+/** Message-catalog sub-key per disposition type (dispoDialog.<key>.*). */
+const TYPE_KEY: Record<DispositionType, "breakage" | "staff" | "giveaway"> = {
+  BREAKAGE: "breakage",
+  STAFF: "staff",
+  GIVEAWAY: "giveaway",
 };
 
 const today = () => todayWIB();
@@ -92,7 +76,16 @@ export function LogDispositionDialog({
   /** Custom trigger (e.g. an edit pencil). Defaults to a "Log …" button. */
   trigger?: ReactNode;
 }) {
-  const cfg = TYPE_CONFIG[type];
+  const t = useTranslations("dispoDialog");
+  const tCommon = useTranslations("common");
+  const k = TYPE_KEY[type];
+  const cfg = {
+    noun: t(`${k}.noun`),
+    button: t(`${k}.button`),
+    blurb: t(`${k}.blurb`),
+    weightLabel: t(`${k}.weightLabel`),
+    summaryNoun: t(`${k}.summaryNoun`),
+  };
   const isEdit = !!existing;
   const [open, setOpen] = useState(false);
   const [pending, startT] = useTransition();
@@ -119,7 +112,7 @@ export function LogDispositionDialog({
       const c = { id: r.data.id, name: r.data.name, type: r.data.type };
       setCustomers((prev) => [...prev, c].sort((a, b) => a.name.localeCompare(b.name)));
       setCustomerId(c.id);
-      toast.success(`Added ${c.name}`);
+      toast.success(t("addedCustomer", { name: c.name }));
     } else if (!r.ok) {
       toast.error(r.error);
     }
@@ -149,7 +142,7 @@ export function LogDispositionDialog({
         ? await updateDisposition(existing.id, payload)
         : await logDisposition({ harvestId, ...payload });
       if (r.ok) {
-        toast.success(isEdit ? "Saved" : "Recorded");
+        toast.success(isEdit ? t("toastSaved") : t("toastRecorded"));
         setOpen(false);
         reset();
         router.refresh();
@@ -178,7 +171,7 @@ export function LogDispositionDialog({
         <form onSubmit={form.handleSubmit(onSubmit)} className="min-w-0">
           <DialogHeader>
             <DialogTitle>
-              {isEdit ? "Edit" : "Log"} {cfg.noun}
+              {isEdit ? t("titleEdit", { noun: cfg.noun }) : t("titleLog", { noun: cfg.noun })}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
@@ -188,11 +181,11 @@ export function LogDispositionDialog({
 
             <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-3 [&>*]:min-w-0">
               <div className="space-y-2">
-                <Label>Produce</Label>
+                <Label>{t("produce")}</Label>
                 <Combobox
                   value={form.watch("produceId") ?? null}
                   onChange={(v) => form.setValue("produceId", v ?? "")}
-                  placeholder="Pick produce"
+                  placeholder={t("pickProduce")}
                   options={produces.map((p) => ({ value: p.id, label: p.name }))}
                 />
               </div>
@@ -205,13 +198,13 @@ export function LogDispositionDialog({
             {type === "STAFF" ? (
               <div className="space-y-2">
                 <Label>
-                  Staff member{" "}
-                  <span className="text-xs font-normal text-muted-foreground">(optional)</span>
+                  {t("staffMember")}{" "}
+                  <span className="text-xs font-normal text-muted-foreground">{t("optional")}</span>
                 </Label>
                 <Combobox
                   value={staffId}
                   onChange={(v) => setStaffId(v)}
-                  placeholder={staff.length === 0 ? "No staff yet — add via /staff" : "Who took it?"}
+                  placeholder={staff.length === 0 ? t("noStaffYet") : t("whoTookIt")}
                   options={staff.map((s) => ({ value: s.id, label: s.name }))}
                 />
               </div>
@@ -220,13 +213,13 @@ export function LogDispositionDialog({
             {type === "GIVEAWAY" ? (
               <div className="space-y-2">
                 <Label>
-                  Given to{" "}
-                  <span className="text-xs font-normal text-muted-foreground">(optional)</span>
+                  {t("givenTo")}{" "}
+                  <span className="text-xs font-normal text-muted-foreground">{t("optional")}</span>
                 </Label>
                 <Combobox
                   value={customerId}
                   onChange={(v) => setCustomerId(v)}
-                  placeholder="Search or type to add"
+                  placeholder={t("searchOrAdd")}
                   options={customers.map((c) => ({ value: c.id, label: c.name }))}
                   onCreate={handleCreateCustomer}
                 />
@@ -235,13 +228,13 @@ export function LogDispositionDialog({
 
             <div className="grid grid-cols-2 gap-3 [&>*]:min-w-0">
               <div className="space-y-2">
-                <Label>Date</Label>
+                <Label>{t("date")}</Label>
                 <Input type="date" {...form.register("date")} />
               </div>
               <div className="space-y-2">
                 <Label>
-                  Value/kg (Rp){" "}
-                  <span className="text-xs font-normal text-muted-foreground">(optional)</span>
+                  {t("valuePerKg")}{" "}
+                  <span className="text-xs font-normal text-muted-foreground">{t("optional")}</span>
                 </Label>
                 <Input
                   type="number"
@@ -249,51 +242,46 @@ export function LogDispositionDialog({
                   min="0"
                   value={pricePerKg}
                   onChange={(e) => setPricePerKg(e.target.value)}
-                  placeholder="e.g. 50000"
+                  placeholder={t("valuePlaceholder")}
                 />
               </div>
             </div>
 
             <div className="space-y-2">
               <Label>
-                Note{" "}
-                <span className="text-xs font-normal text-muted-foreground">(optional)</span>
+                {t("note")}{" "}
+                <span className="text-xs font-normal text-muted-foreground">{t("optional")}</span>
               </Label>
               <Textarea
                 rows={2}
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
-                placeholder="What happened?"
+                placeholder={t("notePlaceholder")}
               />
             </div>
 
             <div className="rounded-md bg-muted/30 px-3 py-2 text-sm">
               {weightNum > 0 ? (
                 <>
-                  <strong className="text-foreground">{weightNum} kg</strong> recorded as{" "}
-                  {type === "BREAKAGE"
-                    ? "breakage"
-                    : type === "STAFF"
-                      ? "staff consumption"
-                      : "giveaway"}
+                  <strong className="text-foreground">{weightNum} kg</strong> {t("recordedAs")}{" "}
+                  {cfg.summaryNoun}
                   {memoValue > 0 ? (
                     <span className="text-xs text-muted-foreground">
-                      {" "}· memo value ≈ Rp{" "}
-                      {memoValue.toLocaleString("id-ID", { maximumFractionDigits: 0 })} (not charged)
+                      {" "}{t("memoValue", { amount: memoValue.toLocaleString("id-ID", { maximumFractionDigits: 0 }) })}
                     </span>
                   ) : null}
                 </>
               ) : (
-                <span className="text-muted-foreground">Enter a weight to record.</span>
+                <span className="text-muted-foreground">{t("enterWeight")}</span>
               )}
             </div>
           </div>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
-              Cancel
+              {tCommon("cancel")}
             </Button>
             <Button type="submit" disabled={pending}>
-              {pending ? "Saving…" : isEdit ? "Save" : "Record"}
+              {pending ? t("saving") : isEdit ? t("save") : t("record")}
             </Button>
           </DialogFooter>
         </form>

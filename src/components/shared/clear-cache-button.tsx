@@ -50,12 +50,15 @@ export function ClearCacheButton() {
   }
 
   return (
+    // Quiet ghost styling: this is a troubleshooting tool, not a daily action —
+    // the loud amber pill made it the most eye-catching thing in the topbar
+    // (app review polish). The /clear fallback page still exists.
     <button
       type="button"
       onClick={handleClick}
       disabled={working}
       title="Wipe browser cache and reload — use if a change isn't showing"
-      className="flex items-center gap-1.5 rounded-md border border-amber-400 bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-900 shadow-sm transition-colors hover:bg-amber-200 disabled:opacity-50 dark:border-amber-600 dark:bg-amber-900/50 dark:text-amber-100 dark:hover:bg-amber-900/70"
+      className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
     >
       <Brush className="h-3.5 w-3.5" />
       {working ? "Clearing…" : "Clear cache"}

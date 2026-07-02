@@ -259,11 +259,11 @@ export default async function FinancialsPage() {
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         <Stat label="Revenue" value={revenue.toFixed(4)} colour="green" />
-        <Stat label="COGS consumed" value={cogsConsumed.toFixed(4)} colour="red" />
+        <Stat label="Cost of stock used" value={cogsConsumed.toFixed(4)} colour="red" />
         <Stat label="Wages" value={totalWages.toFixed(4)} colour="red" />
-        <Stat label="Depreciation" value={depreciation.toFixed(4)} colour="red" />
+        <Stat label="Equipment (per-use)" value={depreciation.toFixed(4)} colour="red" />
         <Stat
-          label="Net P&L"
+          label="Net profit / loss"
           value={net.toFixed(4)}
           colour={net.gte(0) ? "green" : "red"}
         />
@@ -271,10 +271,10 @@ export default async function FinancialsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Profit &amp; Loss statement (accrual)</CardTitle>
+          <CardTitle>Profit &amp; Loss statement</CardTitle>
           <p className="pt-1 text-xs text-muted-foreground">
-            Costs are recognised when inventory is consumed (not at purchase),
-            so this number ties out cleanly with the sum of harvest P&amp;Ls.
+            Costs count when stock is actually used — not when it&apos;s bought —
+            so these numbers line up with the greenhouse pages.
           </p>
         </CardHeader>
         <CardContent className="space-y-3 p-6 text-sm">
@@ -293,9 +293,9 @@ export default async function FinancialsPage() {
             />
             <Row label="Total revenue" value={revenue.toFixed(4)} positive bold />
           </Section>
-          <Section title="Cost of goods sold">
+          <Section title="Cost of stock used">
             <Row
-              label="Inventory consumed (Σ FIFO consumption cost)"
+              label="Stock used across the farm (at what it cost you)"
               value={cogsConsumed.toFixed(4)}
               negative
             />
@@ -315,9 +315,9 @@ export default async function FinancialsPage() {
             />
             <Row label="Total wages" value={totalWages.toFixed(4)} negative bold />
           </Section>
-          <Section title="Depreciation">
+          <Section title="Reusable equipment">
             <Row
-              label="Amortised assets (per-use share)"
+              label="Per-use share of purchase price (rockwool, cocopeat…)"
               value={depreciation.toFixed(4)}
               negative
             />
@@ -521,15 +521,15 @@ export default async function FinancialsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Reconciliation: harvest contributions → business P&amp;L</CardTitle>
+          <CardTitle>Where the profit comes from</CardTitle>
           <p className="pt-1 text-xs text-muted-foreground">
-            Δ should be zero. Each line is a real cost or revenue the
-            harvest view doesn&apos;t see.
+            Starts from what the greenhouse cycles made, then adds the money
+            that happens outside any cycle. The last line is the whole business.
           </p>
         </CardHeader>
         <CardContent className="space-y-2 p-6 text-sm">
           <Row
-            label="Sum of harvest net P&L (from table)"
+            label="All greenhouse cycles together"
             value={sumHarvestNet.toFixed(4)}
             positive={sumHarvestNet.gte(0)}
             negative={sumHarvestNet.lt(0)}
@@ -543,7 +543,7 @@ export default async function FinancialsPage() {
           />
           {adhocUsage.abs().gte(new Decimal("0.0001")) ? (
             <Row
-              label="− Inventory consumed off-harvest (ad-hoc use)"
+              label="− Stock used outside any cycle"
               value={adhocUsage.toFixed(4)}
               indent
               negative={adhocUsage.gt(0)}
@@ -565,7 +565,7 @@ export default async function FinancialsPage() {
           ) : null}
           {depreciationDelta.abs().gte(new Decimal("0.0001")) ? (
             <Row
-              label="± Depreciation gap (should be 0)"
+              label="± Difference not yet explained"
               value={depreciationDelta.toFixed(4)}
               indent
               negative={depreciationDelta.gt(0)}
@@ -574,7 +574,7 @@ export default async function FinancialsPage() {
           ) : null}
           <div className="my-2 border-t" />
           <Row
-            label="= Business Net P&L"
+            label="= Whole-business net profit"
             value={net.toFixed(4)}
             bold
             positive={net.gte(0)}
@@ -585,15 +585,15 @@ export default async function FinancialsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Balance sheet (informational)</CardTitle>
+          <CardTitle>What you still own</CardTitle>
           <p className="pt-1 text-xs text-muted-foreground">
-            What&apos;s still owned by the business. Not part of the P&amp;L
-            above; just the snapshot value of the inventory pool.
+            The value of stock sitting on the shelf right now. Not part of the
+            profit figures above — just a snapshot.
           </p>
         </CardHeader>
         <CardContent className="space-y-2 p-6 text-sm">
           <Row
-            label="Stock on hand (Σ remaining qty × FIFO unit cost)"
+            label="Stock on hand (remaining × what it cost)"
             value={stockOnHand.toFixed(4)}
             positive
           />

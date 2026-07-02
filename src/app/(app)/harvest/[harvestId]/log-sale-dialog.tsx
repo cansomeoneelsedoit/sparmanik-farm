@@ -3,6 +3,7 @@
 import { useState, useTransition, type ReactNode } from "react";
 import { todayWIB } from "@/lib/date";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -39,15 +40,6 @@ export type EditableSale = {
   customerId: string | null;
 };
 
-const CUSTOMER_TYPES = [
-  { value: "RETAILER", label: "Retailer", hint: "resells to the final consumer" },
-  { value: "WHOLESALER", label: "Wholesaler / Distributor", hint: "buys bulk to distribute" },
-  { value: "CONSUMER", label: "Consumer", hint: "the final buyer" },
-] as const;
-
-const typeLabel = (t: string) =>
-  CUSTOMER_TYPES.find((x) => x.value === t)?.label ?? t;
-
 const today = () => todayWIB();
 const schema = z.object({
   produceId: z.string().min(1),
@@ -77,6 +69,14 @@ export function LogSaleDialog({
   trigger?: ReactNode;
 }) {
   const isEdit = !!existing;
+  const t = useTranslations("saleDialog");
+  const tCommon = useTranslations("common");
+  const CUSTOMER_TYPES = [
+    { value: "RETAILER", label: t("typeRetailer") },
+    { value: "WHOLESALER", label: t("typeWholesaler") },
+    { value: "CONSUMER", label: t("typeConsumer") },
+  ];
+  const typeLabel = (ty: string) => CUSTOMER_TYPES.find((x) => x.value === ty)?.label ?? ty;
   const [open, setOpen] = useState(false);
   const [pending, startT] = useTransition();
   const router = useRouter();
@@ -132,7 +132,7 @@ export function LogSaleDialog({
       const c = { id: r.data.id, name: r.data.name, type: r.data.type };
       setCustomers((prev) => [...prev, c].sort((a, b) => a.name.localeCompare(b.name)));
       setCustomerId(c.id);
-      toast.success(`Added ${typeLabel(c.type).toLowerCase()}: ${c.name}`);
+      toast.success(t("addedCustomer", { name: c.name }));
     } else if (!r.ok) {
       toast.error(r.error);
     }
@@ -174,7 +174,7 @@ export function LogSaleDialog({
             amountOverride,
           });
       if (r.ok) {
-        toast.success(isEdit ? "Sale updated" : "Sale logged");
+        toast.success(isEdit ? t("toastUpdated") : t("toastLogged"));
         setOpen(false);
         reset();
         router.refresh();
@@ -192,23 +192,23 @@ export function LogSaleDialog({
         if (!o) reset();
       }}
     >
-      <DialogTrigger asChild>{trigger ?? <Button>Log sale</Button>}</DialogTrigger>
+      <DialogTrigger asChild>{trigger ?? <Button>{t("trigger")}</Button>}</DialogTrigger>
       <DialogContent>
         <form onSubmit={form.handleSubmit(onSubmit)} className="min-w-0">
-          <DialogHeader><DialogTitle>{isEdit ? "Edit sale" : "Log sale"}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{isEdit ? t("titleEdit") : t("titleNew")}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-4">
             <div className="grid grid-cols-2 gap-3 [&>*]:min-w-0">
               <div className="space-y-2">
-                <Label>Produce</Label>
+                <Label>{t("produce")}</Label>
                 <Combobox
                   value={form.watch("produceId") ?? null}
                   onChange={(v) => form.setValue("produceId", v ?? "")}
-                  placeholder="Pick produce"
+                  placeholder={t("pickProduce")}
                   options={produces.map((p) => ({ value: p.id, label: p.name }))}
                 />
               </div>
               <div className="space-y-2">
-                <Label>Grade</Label>
+                <Label>{t("grade")}</Label>
                 <Select value={form.watch("grade")} onValueChange={(v) => form.setValue("grade", v as Grade)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -223,13 +223,13 @@ export function LogSaleDialog({
             <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1.4fr)] gap-3 [&>*]:min-w-0">
               <div className="space-y-2">
                 <Label>
-                  Customer{" "}
-                  <span className="text-xs font-normal text-muted-foreground">(optional)</span>
+                  {t("customer")}{" "}
+                  <span className="text-xs font-normal text-muted-foreground">{t("optional")}</span>
                 </Label>
                 <Combobox
                   value={customerId}
                   onChange={(v) => setCustomerId(v)}
-                  placeholder="Search or type to add"
+                  placeholder={t("searchOrAdd")}
                   options={customers.map((c) => ({
                     value: c.id,
                     label: c.name,
@@ -239,7 +239,7 @@ export function LogSaleDialog({
                 />
               </div>
               <div className="space-y-2">
-                <Label className="text-xs">New customer is a…</Label>
+                <Label className="text-xs">{t("newCustomerType")}</Label>
                 <Select value={newType} onValueChange={setNewType}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -253,15 +253,15 @@ export function LogSaleDialog({
 
             <div className="grid grid-cols-3 gap-3 [&>*]:min-w-0">
               <div className="space-y-2">
-                <Label>Date</Label>
+                <Label>{t("date")}</Label>
                 <Input type="date" {...form.register("date")} />
               </div>
               <div className="space-y-2">
-                <Label>Weight (kg)</Label>
+                <Label>{t("weight")}</Label>
                 <Input type="number" step="any" min="0" {...form.register("weight")} />
               </div>
               <div className="space-y-2">
-                <Label>Price/kg (IDR)</Label>
+                <Label>{t("pricePerKg")}</Label>
                 <Input type="number" step="any" min="0" {...form.register("pricePerKg")} />
               </div>
             </div>
@@ -271,11 +271,11 @@ export function LogSaleDialog({
             {!isEdit && packagingItems.length > 0 ? (
               <div className="space-y-3 rounded-md border bg-muted/20 p-3">
                 <div className="space-y-2">
-                  <Label className="text-sm">Packaging (optional)</Label>
+                  <Label className="text-sm">{t("packaging")}</Label>
                   <Combobox
                     value={pkgItemId}
                     onChange={(v) => pickPackaging(v)}
-                    placeholder="No packaging — or pick a box / bag / container"
+                    placeholder={t("packagingPlaceholder")}
                     options={packagingItems.map((p) => ({
                       value: p.id,
                       label: p.name,
@@ -286,30 +286,28 @@ export function LogSaleDialog({
                 {pkgItem ? (
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 [&>*]:min-w-0">
                     <div className="space-y-1">
-                      <Label className="text-xs">How many ({pkgItem.unit})?</Label>
+                      <Label className="text-xs">{t("howMany", { unit: pkgItem.unit })}</Label>
                       <Input type="number" step="any" min="0" value={pkgQty} onChange={(e) => setPkgQty(e.target.value)} />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs">Packaging cost is…</Label>
+                      <Label className="text-xs">{t("packagingCostIs")}</Label>
                       <Select value={pkgMode} onValueChange={(v) => setPkgMode(v as "included" | "ontop")}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="included">Included in the kg price</SelectItem>
-                          <SelectItem value="ontop">Charged on top</SelectItem>
+                          <SelectItem value="included">{t("includedInPrice")}</SelectItem>
+                          <SelectItem value="ontop">{t("chargedOnTop")}</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
                     {pkgMode === "ontop" ? (
                       <div className="space-y-1 sm:col-span-2">
-                        <Label className="text-xs">Charge per {pkgItem.unit} (Rp) — defaults to cost</Label>
+                        <Label className="text-xs">{t("chargePerUnit", { unit: pkgItem.unit })}</Label>
                         <Input type="number" step="any" min="0" value={pkgCharge} onChange={(e) => setPkgCharge(e.target.value)} />
                       </div>
                     ) : null}
                     <p className="text-[11px] break-words text-muted-foreground sm:col-span-2">
-                      {`${pkgQtyNum || 0} × ${pkgItem.name} comes off stock onto this cycle’s usage at cost.`}
-                      {pkgMode === "ontop"
-                        ? " The charge above is added to the sale total."
-                        : " (Cost only — not added to the sale total.)"}
+                      {t("packagingNote", { qty: pkgQtyNum || 0, name: pkgItem.name })}{" "}
+                      {pkgMode === "ontop" ? t("packagingOnTopNote") : t("packagingIncludedNote")}
                     </p>
                   </div>
                 ) : null}
@@ -327,11 +325,11 @@ export function LogSaleDialog({
                   checked={overrideOn}
                   onChange={(e) => toggleOverride(e.target.checked)}
                 />
-                Custom total (discount / markup) — keeps the kg + price/kg as recorded
+                {t("customTotal")}
               </label>
               {overrideOn ? (
                 <div className="flex items-center gap-2">
-                  <Label className="whitespace-nowrap text-xs">Total charged (Rp)</Label>
+                  <Label className="whitespace-nowrap text-xs">{t("totalCharged")}</Label>
                   <Input
                     type="number"
                     step="any"
@@ -343,29 +341,29 @@ export function LogSaleDialog({
                 </div>
               ) : null}
               <div>
-                Sale total:{" "}
+                {t("saleTotal")}{" "}
                 <strong className="text-foreground">
                   Rp {finalAmount.toLocaleString("id-ID", { maximumFractionDigits: 2 })}
                 </strong>
                 {overrideOn && Math.abs(finalAmount - autoTotal) > 0.005 ? (
                   <span className="text-xs text-muted-foreground">
-                    {" "}(list Rp {autoTotal.toLocaleString("id-ID", { maximumFractionDigits: 2 })}
+                    {" "}({t("listLabel")} Rp {autoTotal.toLocaleString("id-ID", { maximumFractionDigits: 2 })}
                     {finalAmount < autoTotal
-                      ? ` · discount Rp ${(autoTotal - finalAmount).toLocaleString("id-ID", { maximumFractionDigits: 2 })}`
+                      ? ` · ${t("discountLabel")} Rp ${(autoTotal - finalAmount).toLocaleString("id-ID", { maximumFractionDigits: 2 })}`
                       : ` · +Rp ${(finalAmount - autoTotal).toLocaleString("id-ID", { maximumFractionDigits: 2 })}`}
                     )
                   </span>
                 ) : onTopExtra > 0 ? (
                   <span className="text-xs text-muted-foreground">
-                    {" "}(incl. Rp {onTopExtra.toLocaleString("id-ID")} packaging)
+                    {" "}{t("inclPackaging", { amount: onTopExtra.toLocaleString("id-ID") })}
                   </span>
                 ) : null}
               </div>
             </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={pending}>Cancel</Button>
-            <Button type="submit" disabled={pending}>{pending ? "Saving…" : isEdit ? "Save" : "Log"}</Button>
+            <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={pending}>{tCommon("cancel")}</Button>
+            <Button type="submit" disabled={pending}>{pending ? t("saving") : isEdit ? t("save") : t("log")}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
