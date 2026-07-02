@@ -10,7 +10,7 @@ Cultivation OS for a hydroponic farm. Full-stack **Next.js 16 + Postgres + Prism
 - **Live:** https://[Ask client for name].up.railway.app
 - **Repo:** https://github.com/[Ask client for name]/[Ask client for name]
 - **Canonical local path:** C:\Users\boyds\Desktop\[Ask client for name]
-- **Dev sign-in:** dev@[Ask client for name].local / devpassword
+- **Dev sign-in:** the local seed prints the dev login to the console on first run (do not commit credentials).
 
 ---
 

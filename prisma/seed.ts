@@ -112,6 +112,9 @@ type LegacyS = {
 
 function loadLegacy(): LegacyS | null {
   const candidates = [
+    path.join(process.cwd(), "prisma", "legacy", "farm-legacy.js"),
+    path.join(__dirname, "legacy", "farm-legacy.js"),
+    // Legacy fallbacks for the old public/ location (pre-2026-07 clones).
     path.join(process.cwd(), "public", "farm-legacy.js"),
     path.join(__dirname, "..", "public", "farm-legacy.js"),
   ];
@@ -187,11 +190,19 @@ async function main() {
   });
 
   // ---- Dev user ----
+  // The dev login is a local-development convenience only. It must NEVER be
+  // auto-created on production: a public repo + a known default password is a
+  // full-access hole (see app review #1). In prod, promote a real owner via the
+  // OWNER_EMAILS env var instead. Set SEED_DEV_USER=1 to force-create it (e.g.
+  // for a brand-new prod DB you control) — it still never resets an existing
+  // account's password.
+  const allowDevUser =
+    process.env.NODE_ENV !== "production" || process.env.SEED_DEV_USER === "1";
   const devEmail = "dev@sparmanikfarm.local";
   const devPassword = "devpassword";
   const existingUser = await prisma.user.findUnique({ where: { email: devEmail } });
   let devUserId = existingUser?.id;
-  if (!existingUser) {
+  if (!existingUser && allowDevUser) {
     const created = await prisma.user.create({
       data: {
         email: devEmail,
@@ -202,7 +213,9 @@ async function main() {
     });
     devUserId = created.id;
     console.log(`[seed] Dev user: ${devEmail} / ${devPassword} (SUPERUSER)`);
-  } else if (existingUser.role !== "SUPERUSER") {
+  } else if (!existingUser && !allowDevUser) {
+    console.log("[seed] Skipping dev user creation (production; set SEED_DEV_USER=1 to override)");
+  } else if (existingUser && existingUser.role !== "SUPERUSER") {
     await prisma.user.update({ where: { id: existingUser.id }, data: { role: "SUPERUSER" } });
     console.log(`[seed] Dev user promoted to SUPERUSER`);
   }

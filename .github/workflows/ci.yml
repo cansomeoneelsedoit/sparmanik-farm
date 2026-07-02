@@ -13,7 +13,6 @@ jobs:
       # Prisma needs a valid-looking URL even when we're only generating the
       # client. The CI Postgres service below uses the same credentials.
       DATABASE_URL: postgresql://sparmanik:sparmanik@localhost:5432/sparmanik?schema=public
-      DATABASE_SSL: "false"
       AUTH_SECRET: ci-secret
       AUTH_URL: http://localhost:3000
       NEXT_TELEMETRY_DISABLED: "1"
@@ -58,6 +57,12 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Check i18n key + placeholder parity (EN/ID)
+        run: npm run check:i18n
+
+      - name: Check i18n usage (every t() call resolves in both locales)
+        run: npm run check:i18n-usage
 
       - name: Test
         run: npm test

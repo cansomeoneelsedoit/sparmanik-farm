@@ -3,12 +3,14 @@
 ## What this is
 
 Cultivation OS for a hydroponic farm in Indonesia. Originally a single-file
-vanilla-JS SPA (`public/farm-legacy.js`); now a full-stack Next.js 16 app with
-Postgres. The legacy script is still in `public/` but is no longer loaded.
+vanilla-JS SPA; now a full-stack Next.js 16 app with Postgres. The legacy script
+lives at `prisma/legacy/farm-legacy.js` (used only by the seed for a fresh DB;
+no longer web-served).
 
-Live: <https://web-production-1e6de.up.railway.app>
-Repo: <https://github.com/cansomeoneelsedoit/sparmanik-farm>
-Sign in (dev): `dev@sparmanikfarm.local` / `devpassword`
+Live + repo URLs and credentials are intentionally NOT stored in this file — it
+is committed to a repo that may be public. Keep the live URL, the dev login, and
+any passwords in your local notes only. For local dev, the seed prints the dev
+login to the console on first run.
 
 ## Design priority — TABLET-FIRST (non-negotiable)
 
@@ -136,7 +138,7 @@ prisma/
 - **Staff rates** are versioned (`StaffRate.effectiveFrom`). Use the most-recent `effectiveFrom ≤ date`.
 - **Wages split**: `WageEntry.totalHours` is total per day per staff; `WageEntryLine` allocates hours per `harvestId` (null = general farm work). Harvest P&L charges only allocated lines; Financials charges every line.
 - **Two-tier auth**: `User.role` is `USER` or `SUPERUSER`. Only SUPERUSER sees `/admin/users` (create / edit / reset password / delete) and the "Users" sidebar entry. Dev User is auto-promoted on every seed.
-- **Staff ↔ User**: `Staff.userId` is a unique nullable FK. Seed auto-creates a login for every staff (`<firstname>@sparmanikfarm.local`, password `Jasper1.0!`). `createStaff` provisions one in the same transaction.
+- **Staff ↔ User**: `Staff.userId` is a unique nullable FK. `createStaff` provisions a login (`<firstname>@sparmanikfarm.local`) in the same transaction with a random one-time password (returned to the admin once; staff must change it on first sign-in). Do not hardcode a shared default password.
 - **Ask AI conversations**: `AiConversation` groups `AiMessage`s per user (ChatGPT/Claude.ai-style sidebar). `AiMessage.attachments` (Json) holds vision images for user messages: `[{ path, mimeType, width, height }]`.
 - **SOP / Video** have parallel EN/ID columns. Render via `<LocalizedText en={…} id={…} />` in **server** components or `<LocalizedTextClient>` (from `localized-text-client.tsx`) in **client** components. The server version uses `getLocale()` which throws inside a `"use client"` tree.
 - **Items have a sequential code `SF#####`** auto-stamped on create (`nextItemCode()` in `src/app/(app)/inventory/actions.ts`). Backfilled in creation order for legacy rows. Unique per org. Shown on inventory cards + detail header; searchable. New: Visual Identifier at `/inventory/identify` matches a photo against the catalogue via Claude vision.
@@ -514,7 +516,7 @@ npm run check:i18n         # diff EN vs ID keysets
   - Financials → real P&L statement with Revenue, COGS (Σ batch
     purchases), Wages split (allocated vs general), Depreciation, Net.
   - Staff auto-login: every Staff gets a User (email
-    `<firstname>@sparmanikfarm.local`, password `Jasper1.0!`); seed
+    `<firstname>@sparmanikfarm.local`, random one-time password); seed
     backfills idempotently, `createStaff` provisions in-transaction.
   - Two-tier auth: `User.role` (`USER` / `SUPERUSER`). Dev User
     auto-promoted. `/admin/users` (SUPERUSER-only) with create / edit /
