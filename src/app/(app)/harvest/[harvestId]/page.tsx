@@ -15,7 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Money } from "@/components/shared/money";
+import { Money, MoneyDual } from "@/components/shared/money";
 import { Decimal } from "@/server/decimal";
 import { RecordUsageDialog } from "@/app/(app)/harvest/[harvestId]/record-usage-dialog";
 import {
@@ -565,12 +565,12 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
       </div>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
-        <StatCard label="Revenue" value={<Money value={pl.revenue} />} accent="green" />
-        <StatCard label="Usage cost" value={<Money value={pl.usageCost} />} accent="red" />
-        <StatCard label="Depreciation" value={<Money value={pl.depreciationCost} />} accent="red" />
-        <StatCard label="Labour cost" value={<Money value={pl.labourCost} />} accent="red" />
-        <StatCard label="Misc expenses" value={<Money value={pl.expenseCost} />} accent="red" />
-        <StatCard label="Net profit" value={<Money value={pl.netProfit} />} accent={Number(pl.netProfit) >= 0 ? "green" : "red"} />
+        <StatCard label="Revenue" value={<MoneyDual value={pl.revenue} align="start" />} accent="green" />
+        <StatCard label="Usage cost" value={<MoneyDual value={pl.usageCost} align="start" />} accent="red" />
+        <StatCard label="Depreciation" value={<MoneyDual value={pl.depreciationCost} align="start" />} accent="red" />
+        <StatCard label="Labour cost" value={<MoneyDual value={pl.labourCost} align="start" />} accent="red" />
+        <StatCard label="Misc expenses" value={<MoneyDual value={pl.expenseCost} align="start" />} accent="red" />
+        <StatCard label="Net profit" value={<MoneyDual value={pl.netProfit} align="start" />} accent={Number(pl.netProfit) >= 0 ? "green" : "red"} />
       </div>
 
       <Card>
@@ -643,9 +643,9 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                       <Badge variant="outline">{s.grade}</Badge>
                     </TableCell>
                     <TableCell className="text-right">{Number(s.weight)}</TableCell>
-                    <TableCell className="text-right"><Money value={s.pricePerKg.toFixed(4)} precise /></TableCell>
+                    <TableCell className="text-right"><MoneyDual value={s.pricePerKg.toFixed(4)} /></TableCell>
                     <TableCell className="text-right font-medium">
-                      <Money value={s.amount.toFixed(4)} />
+                      <MoneyDual value={s.amount.toFixed(4)} />
                       {Number(s.weight) * Number(s.pricePerKg) - Number(s.amount) > 0.005 ? (
                         <div className="text-[10px] font-normal text-amber-600">
                           −<Money value={(Number(s.weight) * Number(s.pricePerKg) - Number(s.amount)).toFixed(4)} /> off
@@ -680,7 +680,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                   <TableCell className="text-right">{salesWeightTotal} kg</TableCell>
                   <TableCell />
                   <TableCell className="text-right text-green-600">
-                    <Money value={pl.revenue} />
+                    <MoneyDual value={pl.revenue} />
                     {salesDiscountTotal > 0.005 ? (
                       <div className="text-[10px] font-normal text-amber-600">
                         −<Money value={salesDiscountTotal.toFixed(4)} /> total off
