@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition, type ReactNode } from "react";
+import { todayWIB } from "@/lib/date";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -35,7 +36,7 @@ import {
 } from "@/app/(app)/expenses/actions";
 import { EXPENSE_CATEGORIES } from "@/lib/expense-categories";
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayWIB();
 const schema = z.object({
   date: z.string().min(1),
   amount: z.string().regex(/^[0-9.]+$/, "Number"),

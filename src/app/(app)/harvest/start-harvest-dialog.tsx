@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition, type ReactNode } from "react";
+import { todayWIB } from "@/lib/date";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -25,7 +26,7 @@ import { cn } from "@/lib/utils";
 import { startHarvest, updateHarvest } from "@/app/(app)/harvest/actions";
 import { createProduceQuick } from "@/app/(app)/settings/actions";
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayWIB();
 const schema = z.object({
   name: z.string().min(1),
   greenhouseId: z.string().min(1),

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import { todayWIB } from "@/lib/date";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -55,7 +56,7 @@ const newLine = (): Line => ({
   maxUses: "1",
 });
 
-const todayStr = () => new Date().toISOString().slice(0, 10);
+const todayStr = () => todayWIB();
 
 export function ReceiveStockClient({
   items: initialItems,

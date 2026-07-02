@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition, type ReactNode } from "react";
+import { todayWIB } from "@/lib/date";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
@@ -21,7 +22,7 @@ import { Combobox } from "@/components/ui/combobox";
 import { extractExpenseSheet, createExpensesBulk } from "@/app/(app)/expenses/actions";
 import { EXPENSE_CATEGORIES } from "@/lib/expense-categories";
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayWIB();
 const PAYMENT_OPTIONS = ["Cash", "Bank transfer", "Card", "E-wallet"];
 const fmt = (n: number) => `Rp ${Math.round(n).toLocaleString("id-ID")}`;
 

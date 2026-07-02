@@ -147,8 +147,14 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
         : [];
 
   const pl = await getHarvestPL(harvest.id);
+  // Must include misc expenses (pl.expenseCost) — netProfit already subtracts
+  // them, so leaving them out made "Total expenses" ≠ "Net profit" on the same
+  // card whenever a cycle had a contractor/cash expense (app review #12).
   const totalExpenses = (
-    Number(pl.usageCost) + Number(pl.labourCost) + Number(pl.depreciationCost)
+    Number(pl.usageCost) +
+    Number(pl.labourCost) +
+    Number(pl.depreciationCost) +
+    Number(pl.expenseCost)
   ).toFixed(4);
 
   // Labour lines for this harvest — resolves rates via effective-from history
@@ -330,12 +336,11 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
               ? new Decimal(b.amortisedCostPerUse).toFixed(4)
               : null,
           };
-          // Unit price for the cost preview on pack-style items. price is
-          // stored as the total batch price (e.g. $50 for the whole roll),
-          // so unit price = price / qty (e.g. $50 / 1 roll = $50/roll).
-          topBatchUnitPrice = new Decimal(b.price)
-            .div(new Decimal(b.qty))
-            .toFixed(4);
+          // Batch.price is per-unit (per pack) system-wide — consumeFifo uses it
+          // directly as unit cost, and totalValue multiplies remaining × price.
+          // Do NOT divide by qty here (that treated it as a batch total and made
+          // the install cost preview understate the real charge — app review #14).
+          topBatchUnitPrice = new Decimal(b.price).toFixed(4);
         }
         available = available.plus(rem);
       }
@@ -1009,6 +1014,22 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                       {a.date.toISOString().slice(0, 10)} — {a.item.name} × {fmtAssetQty(a)} (use {a.useCount} of {a.maxUses})
                     </span>
                     <span className="text-red-600"><Money value={(a.amortisedCharge ?? new Decimal(0)).toFixed(4)} /></span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
+          {expenseRows.length > 0 ? (
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Expenses — Misc</h3>
+              <ul className="space-y-1">
+                {expenseRows.map((e) => (
+                  <li key={e.id} className="flex items-center justify-between">
+                    <span className="text-muted-foreground">
+                      {e.date.toISOString().slice(0, 10)} — {e.payee}{e.category ? ` (${e.category})` : ""}
+                    </span>
+                    <span className="text-red-600"><Money value={e.amount.toFixed(4)} /></span>
                   </li>
                 ))}
               </ul>

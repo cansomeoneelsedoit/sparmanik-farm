@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { todayWIB } from "@/lib/date";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { HandCoins } from "lucide-react";
@@ -19,7 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { sellStock } from "@/app/(app)/inventory/actions";
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayWIB();
 
 /**
  * Sell stock straight to a buyer — no greenhouse involved. "Pak Budi

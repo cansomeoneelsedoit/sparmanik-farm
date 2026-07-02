@@ -367,6 +367,14 @@ function normaliseAmount(v: unknown): string | null {
     normalised = cleaned.replace(",", ".");
   } else if (dots > 1) {
     normalised = cleaned.replace(/\./g, "");
+  } else if (dots === 1 && commas === 0) {
+    // Single dot: in Indonesian formatting a dot followed by exactly 3 digits is
+    // a thousands separator ("150.000" = 150000), NOT a decimal point — IDR has
+    // no cents in practice. Without this, "150.000" parsed as Rp 150 — a silent
+    // 1000x under-count (app review #13). A 1–2 digit fraction ("150000.50") is
+    // left as a real decimal.
+    const frac = cleaned.split(".")[1] ?? "";
+    if (frac.length === 3) normalised = cleaned.replace(".", "");
   }
   if (!/^[0-9]+(\.[0-9]+)?$/.test(normalised)) return null;
   return normalised;

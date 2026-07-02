@@ -41,6 +41,13 @@ export async function consumeFifo(
   const needed = new Decimal(qtyNeeded);
   if (needed.lte(0)) throw new Error("FIFO consume: qty must be positive");
 
+  // Serialize concurrent consumers of the SAME item within their transactions,
+  // so two tablets can't both pass the availability check below and drive stock
+  // negative (app review #16). A transaction-scoped advisory lock releases
+  // automatically at commit/rollback; it only blocks other consumers of the
+  // same itemId, not the rest of the app.
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${itemId}))`;
+
   const batches = await tx.batch.findMany({
     where: { itemId },
     orderBy: [{ date: "asc" }, { createdAt: "asc" }],
