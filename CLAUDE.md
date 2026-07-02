@@ -101,7 +101,7 @@ src/
 │   ├── alerts.ts                   getAlerts (low stock + live harvest + overdue task)
 │   ├── audit.ts                    recordAction, undoAction, registry
 │   ├── audit-handlers.ts           every undo handler registered here
-│   ├── uploads.ts                  sharp resize → ./uploads (Volume in prod)
+│   ├── uploads.ts                  sharp resize; item/customer photos → DB blob, receipts/staff/video → ./uploads Volume
 │   ├── ai.ts                       Claude SDK + farm-context system prompt
 │   ├── receipt-ocr.ts              Claude vision for expense receipts
 │   └── item-vision.ts              Claude vision for inventory item identification
@@ -116,7 +116,7 @@ src/
 └── types/next-auth.d.ts            session.user.id augmentation
 prisma/
 ├── schema.prisma                   ~20 domain entities + auth + audit
-├── migrations/                     14 migrations (see prisma/migrations/)
+├── migrations/                     see prisma/migrations/ for the full list
 └── seed.ts                         loads legacy farm-legacy.js S object via vm
 ```
 

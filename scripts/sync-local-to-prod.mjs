@@ -137,6 +137,43 @@ async function main() {
     `\nAfter this runs, prod will be IDENTICAL to your local DB.\n`,
   );
 
+  // -------- 0. Identity guard --------------------------------------------
+  // Boyd runs several Railway projects with identically-shaped Postgres URLs.
+  // Pasting the WRONG project's URL here would wipe THAT project's database.
+  // Refuse to continue unless the target really is Sparmanik Farm, and show
+  // what's about to be overwritten (app review #40).
+  const idCheck = spawnSync(
+    "docker",
+    ["run", "--rm", "postgres:18", "psql", PROD_URL, "-t", "-A", "-c",
+      "SELECT id FROM organizations WHERE id = 'org_sparmanik' LIMIT 1;"],
+    { encoding: "utf8" },
+  );
+  if (idCheck.status !== 0) {
+    console.error(
+      "\nFAILED: couldn't query the target database. Check the URL is the Postgres 'Connection URL' from Railway's Connect tab.",
+    );
+    process.exit(1);
+  }
+  if (!String(idCheck.stdout).includes("org_sparmanik")) {
+    console.error(
+      "\nABORTED: this database does NOT look like Sparmanik Farm prod (no org_sparmanik row).",
+    );
+    console.error(
+      "Double-check you pasted the SPARMANIK project's URL — not another Railway project. Nothing was changed.",
+    );
+    process.exit(1);
+  }
+  const counts = spawnSync(
+    "docker",
+    ["run", "--rm", "postgres:18", "psql", PROD_URL, "-t", "-A", "-c",
+      "SELECT 'items=' || (SELECT count(*) FROM items) || '  sales=' || (SELECT count(*) FROM sales) || '  staff=' || (SELECT count(*) FROM staff);"],
+    { encoding: "utf8" },
+  );
+  if (counts.stdout) {
+    console.log(`Confirmed target = Sparmanik Farm prod. It currently holds: ${String(counts.stdout).trim()}`);
+    console.log("These rows will be REPLACED by your local data.\n");
+  }
+
   if (!(await confirm("Type 'yes' to proceed: "))) {
     console.log("Aborted.");
     process.exit(0);

@@ -207,12 +207,12 @@ export function SidebarContent({
   ];
 
   function labelFor(item: LeafItem): string {
-    if (item.fallback) return item.fallback;
-    try {
-      return t(item.key);
-    } catch {
-      return item.key;
-    }
+    // Prefer the translated label; only fall back to the hardcoded English when
+    // the key is missing from the catalog. The old order returned `fallback`
+    // first, so items like Customers/Financials stayed English even though the
+    // ID translation existed (app review #25).
+    if (t.has(item.key)) return t(item.key);
+    return item.fallback ?? item.key;
   }
 
   function isActive(href: string): boolean {
