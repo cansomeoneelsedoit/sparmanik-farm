@@ -124,7 +124,9 @@ export function InventoryListClient({ rows }: { rows: InventoryRow[] }) {
       ) : null}
 
       <div className="overflow-hidden rounded-xl border bg-card">
-        <div className="flex items-center gap-3 border-b bg-muted/30 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        {/* Column header only makes sense at desktop width; below lg the rows
+            self-label (app review UX — tablet tables). */}
+        <div className="hidden items-center gap-3 border-b bg-muted/30 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground lg:flex">
           <div className="flex w-5 shrink-0 items-center justify-center">
             <input
               type="checkbox"
@@ -172,11 +174,11 @@ export function InventoryListClient({ rows }: { rows: InventoryRow[] }) {
                   <SmartImage
                     src={r.photoPath ? `/api/items/${r.id}/photo` : null}
                     alt={r.name}
-                    className="h-20 w-20 rounded-md border object-cover"
+                    className="h-14 w-14 rounded-md border object-cover lg:h-20 lg:w-20"
                     fallbackClassName="border-dashed"
                   />
                 </Link>
-                <div className="w-64 min-w-0 shrink-0">
+                <div className="min-w-0 flex-1 lg:w-64 lg:flex-none">
                   <Link
                     href={`/inventory/${r.id}`}
                     className="block truncate font-medium text-foreground hover:underline"
@@ -196,14 +198,14 @@ export function InventoryListClient({ rows }: { rows: InventoryRow[] }) {
                     ) : null}
                   </div>
                 </div>
-                <div className="w-32 shrink-0 truncate text-muted-foreground">
+                <div className="hidden w-32 shrink-0 truncate text-muted-foreground lg:block">
                   {r.categoryName ? (
                     <CategoryChipLink name={r.categoryName} />
                   ) : (
                     "—"
                   )}
                 </div>
-                <div className="flex w-44 shrink-0 flex-col items-end gap-0.5">
+                <div className="flex shrink-0 flex-col items-end gap-0.5 lg:w-44">
                   <div className="flex items-center gap-1.5">
                     <span
                       className={cn(
@@ -237,13 +239,13 @@ export function InventoryListClient({ rows }: { rows: InventoryRow[] }) {
                     </span>
                   ) : null}
                 </div>
-                <div className="w-16 shrink-0 text-right text-muted-foreground">
+                <div className="hidden w-16 shrink-0 text-right text-muted-foreground lg:block">
                   {r.reorder}
                 </div>
-                <div className="w-24 shrink-0 text-right font-medium">
+                <div className="hidden w-24 shrink-0 text-right font-medium lg:block">
                   {r.valueFormatted}
                 </div>
-                <div className="flex-1" />
+                <div className="hidden flex-1 lg:block" />
               </li>
             );
           })}
