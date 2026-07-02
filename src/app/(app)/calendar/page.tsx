@@ -145,11 +145,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
         </CardContent>
       </Card>
 
-      <Card>
-        <CardContent className="p-4 text-xs text-muted-foreground">
-          Google Calendar two-way sync arrives in Phase 6 once <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> are configured in your environment.
-        </CardContent>
-      </Card>
+      {/* Roadmap/config internals don't belong in user-facing copy (app review). */}
     </div>
   );
 }
