@@ -464,27 +464,59 @@ export async function checkInHarvestAsset(input: unknown): Promise<ActionResult>
         throw new Error(`Asset already checked in (${asset.returnCondition})`);
       }
 
-      // --- Lightweight path (Boyd's "option 3") -------------------------
-      // Staff entered how much was actually USED (in real units → packs).
-      // Charge only that to the harvest by scaling amortisedCharge down
-      // proportionally; record the used qty. No stock return, no batch
-      // changes. (A proper partial-return version comes later.)
+      // --- Used-quantity path -------------------------------------------
+      // Staff entered how much was actually USED. RETURN the unused remainder to
+      // stock (app review #11) by trimming the install's BatchConsumption rows
+      // to the used quantity — deleting/reducing a consumption row puts that qty
+      // back on the shelf (stock = qty − Σconsumed).
+      //
+      // How the harvest is charged depends on the asset kind, matching the
+      // Financials treatment:
+      //  • DEPRECIABLE (rockwool, cocopeat): cost is the per-use amortised
+      //    charge, scaled to the used amount here. (Its install consumptions are
+      //    excluded from COGS by design — review #10 — so trimming them only
+      //    moves stock, it does NOT double-reduce the charge.)
+      //  • NON-DEPRECIABLE reusable asset: install consumptions hang off the
+      //    HarvestAsset, and getHarvestPL.usageCost only reads HarvestUsage
+      //    consumptions — so these never enter the harvest P&L either way. The
+      //    trim here purely returns the unused stock; the harvest is charged
+      //    nothing (the full price stays on Total Business Financials).
       if (parsed.data.usedQty !== undefined) {
-        const usedPacks = new Decimal(parsed.data.usedQty);
         const installedPacks = new Decimal(asset.qty);
-        const origCharge = asset.amortisedCharge
-          ? new Decimal(asset.amortisedCharge)
-          : new Decimal(0);
-        const perPack = installedPacks.gt(0)
-          ? origCharge.div(installedPacks)
-          : new Decimal(0);
-        const newCharge = usedPacks.times(perPack);
+        // Clamp: staff may type "more than installed" (the dialog allows it with
+        // a warning). Never delete more than was consumed or over-scale the
+        // amortised charge.
+        const usedPacks = Decimal.min(new Decimal(parsed.data.usedQty), installedPacks);
+        const remainder = installedPacks.minus(usedPacks);
+
+        if (remainder.gt(new Decimal("0.00005"))) {
+          // Deterministic order (by id) so which batch keeps the return is
+          // stable across runs.
+          const slices = [...asset.consumptions].sort((a, b) => a.id.localeCompare(b.id));
+          let keep = usedPacks;
+          for (const c of slices) {
+            const cQty = new Decimal(c.qty);
+            if (keep.lte(0)) {
+              // Whole slice is unused — return it to stock.
+              await tx.batchConsumption.delete({ where: { id: c.id } });
+            } else if (keep.gte(cQty)) {
+              keep = keep.minus(cQty);
+            } else {
+              // Boundary slice: keep the used part, return the rest.
+              await tx.batchConsumption.update({ where: { id: c.id }, data: { qty: keep } });
+              keep = new Decimal(0);
+            }
+          }
+        }
+
+        const origCharge = asset.amortisedCharge ? new Decimal(asset.amortisedCharge) : new Decimal(0);
+        const perPack = installedPacks.gt(0) ? origCharge.div(installedPacks) : new Decimal(0);
+        const newCharge = asset.depreciable ? usedPacks.times(perPack) : null;
 
         await tx.harvestAsset.update({
           where: { id: asset.id },
           data: {
             qty: usedPacks,
-            depreciable: true, // keep the (now used-only) cost in the harvest P&L
             amortisedCharge: newCharge,
             returnCondition: parsed.data.condition,
             returnedAt: when,
@@ -813,16 +845,23 @@ export async function logSale(input: unknown): Promise<ActionResult> {
       const price = new Decimal(d.pricePerKg);
       let amount = weight.times(price);
 
-      // Packaging charged "on top" adds to the sale total (revenue).
+      // Packaging charged "on top" adds to the sale total (revenue). Track it
+      // separately so discount stats can exclude it — otherwise a boxed sale
+      // reads as a markup and cancels real discounts (app review #15).
+      let packagingCharge = new Decimal(0);
       if (hasPackaging && d.packagingMode === "ontop") {
-        const charge = new Decimal(d.packagingChargePerUnit || "0").times(d.packagingQty as string);
-        amount = amount.plus(charge);
+        packagingCharge = new Decimal(d.packagingChargePerUnit || "0").times(d.packagingQty as string);
+        amount = amount.plus(packagingCharge);
       }
 
       // Manual total override (discount/markup) wins over the computed total.
       // weight + price are still stored above so yield/reporting stay honest.
+      // The override is a single figure with no known packaging split, so zero
+      // the stored packagingCharge — otherwise "produce charged = amount −
+      // packaging" could go negative and overstate the discount (review follow-up).
       if (hasOverride(d.amountOverride)) {
         amount = new Decimal(d.amountOverride);
+        packagingCharge = new Decimal(0);
       }
 
       const sale = await tx.sale.create({
@@ -834,6 +873,7 @@ export async function logSale(input: unknown): Promise<ActionResult> {
           weight,
           pricePerKg: price,
           amount,
+          packagingCharge,
           customerId: d.customerId || null,
         },
       });
@@ -1021,6 +1061,17 @@ export async function createCustomerQuick(
   if (!trimmed) return { ok: false, error: "Name is required" };
   const userId = await uid();
   try {
+    // Find-or-create: return an existing same-name customer (case-insensitive)
+    // instead of erroring on the new unique constraint, so a double-tap or a
+    // re-typed name reuses the row rather than failing (app review #38).
+    const existing = (await prisma.customer.findFirst({
+      where: { name: { equals: trimmed, mode: "insensitive" } },
+      select: { id: true, name: true, type: true },
+    })) as { id: string; name: string; type: string } | null;
+    if (existing) {
+      revalidatePath("/sales");
+      return { ok: true, data: existing };
+    }
     const customer = await prisma.$transaction(async (tx: TransactionClient) => {
       const created = await tx.customer.create({
         data: { name: trimmed, type: parsed.data.type },

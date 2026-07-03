@@ -405,7 +405,7 @@
     "usedPlaceholder": "0 sampai {max}",
     "tookOutHint": "(diambil {qty})",
     "overWarning": "Lebih dari yang diambil — boleh, tapi periksa lagi.",
-    "chargeHint": "Hanya sebanyak ini yang dibebankan ke rumah kaca. Sisanya belum dikembalikan ke stok (menyusul).",
+    "chargeHint": "Hanya sebanyak ini yang dibebankan ke rumah kaca — sisanya dikembalikan ke stok.",
     "condition": "Kondisi",
     "good": "Baik",
     "goodSub": "Dipakai seperti biasa",

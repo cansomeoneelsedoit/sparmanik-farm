@@ -249,10 +249,13 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
   // Per-section column totals shown in each table's footer row. Money totals
   // reuse the P&L figures so the footer always matches the stat cards above.
   const salesWeightTotal = Math.round((harvest.sales as { weight: Decimal }[]).reduce((s, x) => s + Number(x.weight), 0) * 1000) / 1000;
-  // Total discount given = Σ max(0, list − charged) across this harvest's sales.
-  const salesDiscountTotal = (harvest.sales as { weight: Decimal; pricePerKg: Decimal; amount: Decimal }[]).reduce(
+  // Total discount given = Σ max(0, list − produce charged) across this harvest's
+  // sales. Exclude the on-top packaging charge from "charged" so a boxed sale
+  // isn't mistaken for a markup that cancels real discounts (app review #15).
+  const salesDiscountTotal = (harvest.sales as { weight: Decimal; pricePerKg: Decimal; amount: Decimal; packagingCharge: Decimal }[]).reduce(
     (s, x) => {
-      const d = Number(x.weight) * Number(x.pricePerKg) - Number(x.amount);
+      const produceCharged = Number(x.amount) - Number(x.packagingCharge);
+      const d = Number(x.weight) * Number(x.pricePerKg) - produceCharged;
       return s + (d > 0 ? d : 0);
     },
     0,
@@ -638,7 +641,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(harvest.sales as { id: string; date: Date; produceId: string; produce: { name: string }; customerId: string | null; customer: { name: string; type: string } | null; grade: string; weight: Decimal; pricePerKg: Decimal; amount: Decimal }[]).map((s) => (
+                {(harvest.sales as { id: string; date: Date; produceId: string; produce: { name: string }; customerId: string | null; customer: { name: string; type: string } | null; grade: string; weight: Decimal; pricePerKg: Decimal; amount: Decimal; packagingCharge: Decimal }[]).map((s) => (
                   <TableRow key={s.id}>
                     <TableCell className="text-muted-foreground">{s.date.toISOString().slice(0, 10)}</TableCell>
                     <TableCell>{s.produce.name}</TableCell>
@@ -659,12 +662,12 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                     <TableCell className="text-right"><MoneyDual value={s.pricePerKg.toFixed(4)} /></TableCell>
                     <TableCell className="text-right font-medium">
                       <MoneyDual value={s.amount.toFixed(4)} />
-                      {Number(s.weight) * Number(s.pricePerKg) - Number(s.amount) > 0.005 ? (
-                        // Show the discount in rupiah (the unit that reconciles) so
-                        // the row visibly adds up: list − off = charged. The AUD
-                        // reference lives under the amount above.
+                      {Number(s.weight) * Number(s.pricePerKg) - (Number(s.amount) - Number(s.packagingCharge)) > 0.005 ? (
+                        // Discount = list − produce charged (excl. on-top packaging),
+                        // shown in rupiah (the unit that reconciles) so the row
+                        // visibly adds up. AUD reference lives under the amount.
                         <div className="text-[11px] font-normal text-amber-600">
-                          −<Money value={(Number(s.weight) * Number(s.pricePerKg) - Number(s.amount)).toFixed(4)} /> off
+                          −<Money value={(Number(s.weight) * Number(s.pricePerKg) - (Number(s.amount) - Number(s.packagingCharge))).toFixed(4)} /> off
                           <span className="text-muted-foreground"> (was <Money value={(Number(s.weight) * Number(s.pricePerKg)).toFixed(4)} />)</span>
                         </div>
                       ) : null}
