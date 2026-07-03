@@ -15,6 +15,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { MoneyDual } from "@/components/shared/money";
+import { DownloadCsvButton } from "@/components/shared/download-csv-button";
 import { ExpenseFormDialog } from "@/app/(app)/expenses/expense-form-dialog";
 import { ImportExpenseSheetDialog } from "@/app/(app)/expenses/import-expense-sheet-dialog";
 import { ExpenseRowActions } from "@/app/(app)/expenses/expense-row-actions";
@@ -65,7 +66,8 @@ export default async function ExpensesPage() {
             P&amp;L, or leave blank for business overhead.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <DownloadCsvButton type="expenses" />
           <ImportExpenseSheetDialog harvests={harvests} />
           <ExpenseFormDialog
             harvests={harvests}

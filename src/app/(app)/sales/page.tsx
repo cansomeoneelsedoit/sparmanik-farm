@@ -13,6 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Money, MoneyDual } from "@/components/shared/money";
+import { DownloadCsvButton } from "@/components/shared/download-csv-button";
 import { SalesFilters } from "@/app/(app)/sales/sales-filters";
 import { SalesCharts } from "@/app/(app)/sales/sales-charts";
 
@@ -69,31 +70,38 @@ export default async function SalesPage({
     weight: Decimal;
     pricePerKg: Decimal;
     amount: Decimal;
+    packagingCharge: Decimal;
     harvest: { id: string; name: string; greenhouse: { name: string } };
     produce: { id: string; name: string };
   };
 
   const rows = sales as SaleRow[];
+  // What was charged for the PRODUCE (excludes any on-top packaging charge) —
+  // the figure discount stats compare against list, so a boxed sale isn't read
+  // as a markup (app review #15). Revenue cards still use the full amount.
+  const produceCharged = (x: SaleRow) => x.amount.minus(x.packagingCharge ?? new Decimal(0));
 
   const totalRevenue = rows.reduce((s: Decimal, x) => s.plus(x.amount), new Decimal(0));
   const totalWeight = rows.reduce((s: Decimal, x) => s.plus(x.weight), new Decimal(0));
   const avgPrice = totalWeight.gt(0) ? totalRevenue.div(totalWeight) : new Decimal(0);
-  // Discount = list value (weight × price/kg) minus what we actually charged
-  // (amount). Positive = we charged below list. Net of any markups.
+  // Discount = list value (weight × price/kg) minus produce charged. Positive =
+  // we charged below list. Net of any markups.
   const totalList = rows.reduce((s: Decimal, x) => s.plus(x.weight.times(x.pricePerKg)), new Decimal(0));
-  const totalDiscount = totalList.minus(totalRevenue);
+  const totalProduceCharged = rows.reduce((s: Decimal, x) => s.plus(produceCharged(x)), new Decimal(0));
+  const totalDiscount = totalList.minus(totalProduceCharged);
 
-  type RollupRow = { name: string; revenue: Decimal; weight: Decimal; list: Decimal };
+  type RollupRow = { name: string; revenue: Decimal; weight: Decimal; list: Decimal; charged: Decimal };
   const byGreenhouse = new Map<string, RollupRow>();
   const byProduce = new Map<string, RollupRow>();
   for (const r of rows) {
     const gname = r.harvest.greenhouse.name;
     const pname = r.produce.name;
     const listVal = r.weight.times(r.pricePerKg);
-    const g = byGreenhouse.get(gname) ?? { name: gname, revenue: new Decimal(0), weight: new Decimal(0), list: new Decimal(0) };
-    byGreenhouse.set(gname, { ...g, revenue: g.revenue.plus(r.amount), weight: g.weight.plus(r.weight), list: g.list.plus(listVal) });
-    const p = byProduce.get(pname) ?? { name: pname, revenue: new Decimal(0), weight: new Decimal(0), list: new Decimal(0) };
-    byProduce.set(pname, { ...p, revenue: p.revenue.plus(r.amount), weight: p.weight.plus(r.weight), list: p.list.plus(listVal) });
+    const charged = produceCharged(r);
+    const g = byGreenhouse.get(gname) ?? { name: gname, revenue: new Decimal(0), weight: new Decimal(0), list: new Decimal(0), charged: new Decimal(0) };
+    byGreenhouse.set(gname, { ...g, revenue: g.revenue.plus(r.amount), weight: g.weight.plus(r.weight), list: g.list.plus(listVal), charged: g.charged.plus(charged) });
+    const p = byProduce.get(pname) ?? { name: pname, revenue: new Decimal(0), weight: new Decimal(0), list: new Decimal(0), charged: new Decimal(0) };
+    byProduce.set(pname, { ...p, revenue: p.revenue.plus(r.amount), weight: p.weight.plus(r.weight), list: p.list.plus(listVal), charged: p.charged.plus(charged) });
   }
   const greenhouseRollup = Array.from(byGreenhouse.values()).sort((a, b) => b.revenue.cmp(a.revenue));
   const produceRollup = Array.from(byProduce.values()).sort((a, b) => b.revenue.cmp(a.revenue));
@@ -140,11 +148,14 @@ export default async function SalesPage({
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="font-serif text-3xl">Sales</h1>
-        <p className="text-sm text-muted-foreground">
-          Every produce sale, grouped and filterable by greenhouse, harvest, and date.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="font-serif text-3xl">Sales</h1>
+          <p className="text-sm text-muted-foreground">
+            Every produce sale, grouped and filterable by greenhouse, harvest, and date.
+          </p>
+        </div>
+        <DownloadCsvButton type="sales" />
       </header>
 
       <SalesFilters greenhouses={greenhouses} harvests={harvests} />
@@ -184,7 +195,7 @@ export default async function SalesPage({
                       <TableCell className="font-medium">{g.name}</TableCell>
                       <TableCell className="text-right">{g.weight.toFixed(2)}</TableCell>
                       <TableCell className="text-right font-medium"><MoneyDual value={g.revenue.toFixed(4)} /></TableCell>
-                      <TableCell className="text-right">{discountCell(g.list, g.revenue)}</TableCell>
+                      <TableCell className="text-right">{discountCell(g.list, g.charged)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -202,7 +213,7 @@ export default async function SalesPage({
                       <TableCell className="font-medium">{p.name}</TableCell>
                       <TableCell className="text-right">{p.weight.toFixed(2)}</TableCell>
                       <TableCell className="text-right font-medium"><MoneyDual value={p.revenue.toFixed(4)} /></TableCell>
-                      <TableCell className="text-right">{discountCell(p.list, p.revenue)}</TableCell>
+                      <TableCell className="text-right">{discountCell(p.list, p.charged)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -252,7 +263,7 @@ export default async function SalesPage({
                         <TableCell className="text-right">{Number(s.weight)} kg</TableCell>
                         <TableCell className="text-right"><MoneyDual value={s.pricePerKg.toFixed(4)} /></TableCell>
                         <TableCell className="text-right font-medium"><MoneyDual value={s.amount.toFixed(4)} /></TableCell>
-                        <TableCell className="text-right">{discountCell(s.weight.times(s.pricePerKg), s.amount)}</TableCell>
+                        <TableCell className="text-right">{discountCell(s.weight.times(s.pricePerKg), produceCharged(s))}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -277,7 +288,7 @@ export default async function SalesPage({
                       </div>
                       <div className="shrink-0 text-right font-medium">
                         <MoneyDual value={s.amount.toFixed(4)} />
-                        <div className="text-xs font-normal">{discountCell(s.weight.times(s.pricePerKg), s.amount)}</div>
+                        <div className="text-xs font-normal">{discountCell(s.weight.times(s.pricePerKg), produceCharged(s))}</div>
                       </div>
                     </div>
                     <div className="flex items-center justify-between text-xs text-muted-foreground">

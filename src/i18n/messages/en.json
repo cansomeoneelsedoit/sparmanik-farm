@@ -405,7 +405,7 @@
     "usedPlaceholder": "0 to {max}",
     "tookOutHint": "(took out {qty})",
     "overWarning": "More than you took out — allowed, but double-check.",
-    "chargeHint": "Only this much is charged to the greenhouse. Leftover isn't returned to stock yet (coming later).",
+    "chargeHint": "Only this much is charged to the greenhouse — the rest goes back into stock.",
     "condition": "Condition",
     "good": "Good",
     "goodSub": "Used as normal",

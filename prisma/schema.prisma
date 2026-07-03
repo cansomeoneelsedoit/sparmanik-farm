@@ -312,6 +312,10 @@ model Supplier {
 
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
+  // A double-tap / re-typed name must not split a supplier's purchase history
+  // across duplicate rows (app review #38). App code find-or-creates
+  // case-insensitively; this constraint is the backstop.
+  @@unique([organizationId, name])
   @@index([organizationId])
   @@map("suppliers")
 }
@@ -339,6 +343,8 @@ model Customer {
   sales        Sale[]
   dispositions HarvestDisposition[]
 
+  // See Supplier: prevents duplicate customers splitting sales history (#38).
+  @@unique([organizationId, name])
   @@index([organizationId])
   @@map("customers")
 }
@@ -582,6 +588,11 @@ model Sale {
   weight         Decimal   @db.Decimal(18, 4)
   pricePerKg     Decimal   @db.Decimal(18, 4) @map("price_per_kg")
   amount         Decimal   @db.Decimal(18, 4)
+  /// The on-top packaging charge INCLUDED in `amount` (0 when none). Stored
+  /// separately so discount maths can exclude it — without this, a boxed sale
+  /// looked like a markup and cancelled real discounts in the stats (review #15).
+  /// Historical rows stay 0 (the component wasn't recorded separately).
+  packagingCharge Decimal  @default(0) @db.Decimal(18, 4) @map("packaging_charge")
   customerId     String?   @map("customer_id")
   createdAt      DateTime  @default(now()) @map("created_at")
 

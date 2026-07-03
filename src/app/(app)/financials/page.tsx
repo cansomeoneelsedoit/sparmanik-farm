@@ -4,6 +4,7 @@ import { prisma } from "@/server/prisma";
 import { Decimal } from "@/server/decimal";
 import { getHarvestPL } from "@/server/pl";
 import { requireActiveOrgId } from "@/server/org";
+import { DownloadCsvButton } from "@/components/shared/download-csv-button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Money, MoneyDual } from "@/components/shared/money";
 
@@ -255,7 +256,15 @@ export default async function FinancialsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="font-serif text-3xl">Financials</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="font-serif text-3xl">Financials</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <DownloadCsvButton type="sales" label="Sales CSV" />
+          <DownloadCsvButton type="expenses" label="Expenses CSV" />
+          <DownloadCsvButton type="wages" label="Wages CSV" />
+          <DownloadCsvButton type="inventory" label="Inventory CSV" />
+        </div>
+      </div>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         <Stat label="Revenue" value={revenue.toFixed(4)} colour="green" />
