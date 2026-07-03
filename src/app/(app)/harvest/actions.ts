@@ -465,20 +465,36 @@ export async function checkInHarvestAsset(input: unknown): Promise<ActionResult>
       }
 
       // --- Used-quantity path -------------------------------------------
-      // Staff entered how much was actually USED. Charge only that, and RETURN
-      // the unused remainder to stock (app review #11) by trimming the install's
-      // BatchConsumption rows down to the used quantity — deleting/reducing a
-      // consumption row puts that qty back on the shelf (stock = qty − Σconsumed).
-      // For a non-depreciable asset that also drops the remainder out of COGS,
-      // so only the used amount is charged.
+      // Staff entered how much was actually USED. RETURN the unused remainder to
+      // stock (app review #11) by trimming the install's BatchConsumption rows
+      // to the used quantity — deleting/reducing a consumption row puts that qty
+      // back on the shelf (stock = qty − Σconsumed).
+      //
+      // How the harvest is charged depends on the asset kind, matching the
+      // Financials treatment:
+      //  • DEPRECIABLE (rockwool, cocopeat): cost is the per-use amortised
+      //    charge, scaled to the used amount here. (Its install consumptions are
+      //    excluded from COGS by design — review #10 — so trimming them only
+      //    moves stock, it does NOT double-reduce the charge.)
+      //  • NON-DEPRECIABLE reusable asset: install consumptions hang off the
+      //    HarvestAsset, and getHarvestPL.usageCost only reads HarvestUsage
+      //    consumptions — so these never enter the harvest P&L either way. The
+      //    trim here purely returns the unused stock; the harvest is charged
+      //    nothing (the full price stays on Total Business Financials).
       if (parsed.data.usedQty !== undefined) {
-        const usedPacks = new Decimal(parsed.data.usedQty);
         const installedPacks = new Decimal(asset.qty);
+        // Clamp: staff may type "more than installed" (the dialog allows it with
+        // a warning). Never delete more than was consumed or over-scale the
+        // amortised charge.
+        const usedPacks = Decimal.min(new Decimal(parsed.data.usedQty), installedPacks);
         const remainder = installedPacks.minus(usedPacks);
 
         if (remainder.gt(new Decimal("0.00005"))) {
+          // Deterministic order (by id) so which batch keeps the return is
+          // stable across runs.
+          const slices = [...asset.consumptions].sort((a, b) => a.id.localeCompare(b.id));
           let keep = usedPacks;
-          for (const c of asset.consumptions) {
+          for (const c of slices) {
             const cQty = new Decimal(c.qty);
             if (keep.lte(0)) {
               // Whole slice is unused — return it to stock.
@@ -493,10 +509,6 @@ export async function checkInHarvestAsset(input: unknown): Promise<ActionResult>
           }
         }
 
-        // Depreciable: scale the per-use charge to the used amount. Non-
-        // depreciable: cost now flows via the trimmed consumptions, so leave
-        // amortisedCharge null and don't flip `depreciable` on (the old code did
-        // both, which charged a non-depreciable asset nothing at all).
         const origCharge = asset.amortisedCharge ? new Decimal(asset.amortisedCharge) : new Decimal(0);
         const perPack = installedPacks.gt(0) ? origCharge.div(installedPacks) : new Decimal(0);
         const newCharge = asset.depreciable ? usedPacks.times(perPack) : null;
@@ -844,8 +856,12 @@ export async function logSale(input: unknown): Promise<ActionResult> {
 
       // Manual total override (discount/markup) wins over the computed total.
       // weight + price are still stored above so yield/reporting stay honest.
+      // The override is a single figure with no known packaging split, so zero
+      // the stored packagingCharge — otherwise "produce charged = amount −
+      // packaging" could go negative and overstate the discount (review follow-up).
       if (hasOverride(d.amountOverride)) {
         amount = new Decimal(d.amountOverride);
+        packagingCharge = new Decimal(0);
       }
 
       const sale = await tx.sale.create({

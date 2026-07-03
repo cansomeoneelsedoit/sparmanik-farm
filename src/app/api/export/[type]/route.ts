@@ -13,7 +13,11 @@ export const dynamic = "force-dynamic";
 
 function csvCell(v: unknown): string {
   if (v === null || v === undefined) return "";
-  const s = String(v);
+  let s = String(v);
+  // Neutralize CSV/formula injection: a cell starting with = + - @ (or tab/CR)
+  // is executed as a formula by Excel/Sheets. Prefix a quote so it's read as
+  // text — the accountant opens these files (OWASP CSV-injection mitigation).
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 function toCsv(headers: string[], rows: (unknown[])[]): string {
@@ -40,6 +44,7 @@ export async function GET(
 
   if (type === "sales") {
     const rows = await prisma.sale.findMany({
+      where: { organizationId: orgId },
       orderBy: { date: "desc" },
       include: {
         produce: { select: { name: true } },
@@ -58,6 +63,7 @@ export async function GET(
     filename = "sales";
   } else if (type === "expenses") {
     const rows = await prisma.expense.findMany({
+      where: { organizationId: orgId },
       orderBy: { date: "desc" },
       include: { harvest: { select: { name: true } } },
     });
@@ -100,6 +106,7 @@ export async function GET(
     filename = "wages";
   } else if (type === "inventory") {
     const items = await prisma.item.findMany({
+      where: { organizationId: orgId },
       orderBy: { code: "asc" },
       select: {
         code: true, name: true, unit: true, category: { select: { name: true } },
