@@ -84,6 +84,25 @@ enum HarvestStatus {
   CLOSED
 }
 
+// Payment lifecycle for a POS sale. Record-only / cash sales are born PAID.
+// Live QRIS/Square sales (Phase 2/3) are born PENDING and a webhook flips them
+// to PAID/FAILED/EXPIRED — reporting only counts PAID so pending/abandoned QRs
+// never inflate revenue.
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+  EXPIRED
+}
+
+enum PaymentMethod {
+  CASH
+  QRIS
+  CARD
+  TRANSFER
+}
+
 enum SaleGrade {
   A
   B
@@ -184,6 +203,8 @@ model Organization {
   labourTasks     LabourTask[]
   aiProviderKeys  AiProviderKey[]
   stockSales      StockSale[]
+  posPayments     PosPayment[]
+  paymentGatewayCredentials PaymentGatewayCredential[]
 
   @@map("organizations")
 }
@@ -594,17 +615,92 @@ model Sale {
   /// Historical rows stay 0 (the component wasn't recorded separately).
   packagingCharge Decimal  @default(0) @db.Decimal(18, 4) @map("packaging_charge")
   customerId     String?   @map("customer_id")
+  /// Payment lifecycle. Existing/cash sales are PAID; a live QRIS/Square sale is
+  /// born PENDING and flipped by a webhook (Phase 2/3). Reporting sums PAID only.
+  paymentStatus  PaymentStatus @default(PAID) @map("payment_status")
+  /// The POS basket this sale line was paid under (many lines → one payment).
+  /// Non-unique FK: a multi-grade cart is one payment across several Sale rows.
+  paymentId      String?   @map("payment_id")
   createdAt      DateTime  @default(now()) @map("created_at")
 
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   harvest      Harvest      @relation(fields: [harvestId], references: [id], onDelete: Cascade)
   produce      Produce      @relation(fields: [produceId], references: [id])
   customer     Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  payment      PosPayment?  @relation(fields: [paymentId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
   @@index([harvestId, date])
   @@index([customerId])
+  @@index([paymentId])
   @@map("sales")
+}
+
+// A POS checkout: ONE payment covering a basket that may be several Sale lines
+// (e.g. 50kg Grade A + 20kg Grade B, paid once). `Sale.paymentId` points here.
+// `provider` = record-only (Phase 1, no live charge) | xendit (QRIS) | square.
+// Live charges are created PENDING and confirmed by a webhook (Phase 2/3);
+// grossAmount = Σ line amounts, feeAmount/netAmount reconcile against the
+// gateway payout. `externalId` is the gateway charge id and the webhook
+// idempotency anchor.
+model PosPayment {
+  id             String        @id @default(cuid())
+  organizationId String?       @map("organization_id")
+  method         PaymentMethod
+  status         PaymentStatus @default(PENDING)
+  provider       String        @default("record-only")
+  currency       String        @default("IDR")
+  grossAmount    Decimal       @db.Decimal(18, 4) @map("gross_amount")
+  feeAmount      Decimal       @default(0) @db.Decimal(18, 4) @map("fee_amount")
+  netAmount      Decimal?      @db.Decimal(18, 4) @map("net_amount")
+  /// Cash: amount handed over and change given back (for the receipt).
+  tendered       Decimal?      @db.Decimal(18, 4)
+  changeDue      Decimal?      @db.Decimal(18, 4) @map("change_due")
+  /// Free-text reference for "other method" (e.g. a bank ref the staff typed).
+  note           String?
+  externalId     String?       @map("external_id")
+  checkoutUrl    String?       @map("checkout_url")
+  qrString       String?       @map("qr_string")
+  expiresAt      DateTime?     @map("expires_at")
+  paidAt         DateTime?     @map("paid_at")
+  rawEvent       Json?         @map("raw_event")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sales        Sale[]
+
+  @@unique([provider, externalId])
+  @@index([organizationId])
+  @@index([status])
+  @@map("pos_payments")
+}
+
+// Per-org payment-gateway credentials (Phase 2/3). Mirrors AiProviderKey: the
+// secret is never sent to the client (masked in the settings UI). `merchantRef`
+// (Square location / Xendit business id) lets a session-less webhook resolve the
+// org. The table is created in Phase 1 so the model exists; rows arrive in P2/3.
+model PaymentGatewayCredential {
+  id             String    @id @default(cuid())
+  organizationId String?   @map("organization_id")
+  provider       String
+  currency       String
+  label          String?
+  apiKey         String    @map("api_key")
+  webhookSecret  String?   @map("webhook_secret")
+  merchantRef    String?   @map("merchant_ref")
+  enabled        Boolean   @default(true)
+  lastStatus     String?   @map("last_status")
+  lastUsedAt     DateTime? @map("last_used_at")
+  lastError      String?   @map("last_error")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, merchantRef])
+  @@index([organizationId])
+  @@map("payment_gateway_credentials")
 }
 
 // Non-sale disposition of harvested produce (breakage, staff consumption,

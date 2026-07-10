@@ -1,4 +1,5 @@
 import { Decimal } from "@/server/decimal";
+import { formatIDR, formatAUD } from "@/lib/money-format";
 
 /** Serialize a Prisma.Decimal for safe transport across the RSC boundary. */
 export function serializeMoney(value: Decimal | number | string | null | undefined): string | null {
@@ -40,19 +41,11 @@ export function formatMoney(
   if (convertToAUD && exchangeRate) {
     const rate = new Decimal(exchangeRate);
     if (rate.gt(0)) {
-      const aud = dec.div(rate).toNumber();
-      return new Intl.NumberFormat(locale === "id" ? "id-ID" : "en-AU", {
-        style: "currency",
-        currency: "AUD",
-        minimumFractionDigits: 2,
-        maximumFractionDigits: precise ? 4 : 2,
-      }).format(aud);
+      // Divide with Decimal for exactness, then hand the number to the shared
+      // formatter (Intl config lives in one place — src/lib/money-format.ts).
+      return formatAUD(dec.div(rate).toNumber(), locale, precise);
     }
   }
 
-  return new Intl.NumberFormat(locale === "id" ? "id-ID" : "en-ID", {
-    style: "currency",
-    currency: "IDR",
-    maximumFractionDigits: 0,
-  }).format(dec.toNumber());
+  return formatIDR(dec.toNumber(), locale);
 }
