@@ -8,6 +8,7 @@ import { auth } from "@/auth";
 import { requireSuperuser } from "@/server/authz";
 import { recordAction } from "@/server/audit";
 import { draftCourseFromYouTube } from "@/server/youtube-course";
+import { setJobProgress } from "@/server/job-progress";
 import type { TransactionClient } from "@/server/decimal";
 
 export type ActionResult<T = void> =
@@ -19,14 +20,17 @@ const schema = z.object({
     .string()
     .url()
     .refine((u) => /youtube\.com|youtu\.be/.test(u), "Paste a YouTube link."),
+  /** Client-generated id for the live progress bar (see job-progress.ts). */
+  jobId: z.string().min(8).max(64).optional(),
 });
 
 /**
  * Build a whole DRAFT course from a YouTube video: Gemini watches the video,
- * structures it into lessons + bilingual questions, and everything is saved
- * unpublished for review in the builder. The video itself is added to the
- * Videos library (reused if the same URL already exists) and attached to
- * lesson 1 so staff watch it in the player.
+ * structures it into modules + bilingual questions, and everything is saved
+ * unpublished for review in the builder. Each module is created in the
+ * library and joined to the course in order (CourseModule rank 1..n). The
+ * video itself is added to the Videos library (reused if the same URL already
+ * exists) and attached to module 1 so staff watch it in the player.
  *
  * Slow by nature (the AI actually processes the video) — the dialog warns
  * that it can take a couple of minutes.
@@ -41,16 +45,25 @@ export async function createCourseFromYouTube(
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Paste a YouTube link." };
   }
   const userId = (await auth())?.user?.id ?? null;
+  const jobId = parsed.data.jobId ?? "";
 
+  // Real stages for the live status bar — the AI watching the video is the
+  // long part (minutes); saving then ticks per module.
+  setJobProgress(jobId, { stage: "watching", pct: 12 });
   let draft;
   try {
     draft = await draftCourseFromYouTube(parsed.data.url);
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Could not read the video" };
+    const msg = e instanceof Error ? e.message : "Could not read the video";
+    setJobProgress(jobId, { stage: "error", pct: 100, done: true, error: msg });
+    return { ok: false, error: msg };
   }
   if (draft.lessons.length === 0) {
-    return { ok: false, error: "The AI couldn't build lessons from this video — try a clearer teaching video." };
+    const msg = "The AI couldn't build modules from this video — try a clearer teaching video.";
+    setJobProgress(jobId, { stage: "error", pct: 100, done: true, error: msg });
+    return { ok: false, error: msg };
   }
+  setJobProgress(jobId, { stage: "saving", pct: 72, detail: `0/${draft.lessons.length}` });
 
   try {
     const courseId = await prisma.$transaction(async (tx: TransactionClient) => {
@@ -82,28 +95,30 @@ export async function createCourseFromYouTube(
         select: { id: true },
       })) as { id: string };
 
-      for (let li = 0; li < draft.lessons.length; li++) {
-        const l = draft.lessons[li];
-        const lesson = (await tx.lesson.create({
+      for (let mi = 0; mi < draft.lessons.length; mi++) {
+        const l = draft.lessons[mi];
+        const mod = (await tx.module.create({
           data: {
-            courseId: course.id,
-            rank: li + 1,
             titleEn: l.titleEn,
             titleId: l.titleId,
             bodyEn: l.bodyEn || null,
             bodyId: l.bodyId || null,
-            // The source video plays in lesson 1; later lessons carry the
+            // The source video plays in module 1; later modules carry the
             // segment summaries + questions (staff can scroll back anytime).
-            videoId: li === 0 ? video.id : null,
+            videoId: mi === 0 ? video.id : null,
           },
           select: { id: true },
         })) as { id: string };
+
+        await tx.courseModule.create({
+          data: { courseId: course.id, moduleId: mod.id, rank: mi + 1 },
+        });
 
         for (let qi = 0; qi < l.questions.length; qi++) {
           const q = l.questions[qi];
           await tx.question.create({
             data: {
-              lessonId: lesson.id,
+              moduleId: mod.id,
               rank: qi + 1,
               type: q.type,
               promptEn: q.promptEn,
@@ -112,15 +127,22 @@ export async function createCourseFromYouTube(
             },
           });
         }
+
+        // Real per-module tick for the status bar (72 → 98%).
+        setJobProgress(jobId, {
+          stage: "saving",
+          pct: 72 + Math.round(((mi + 1) / draft.lessons.length) * 26),
+          detail: `${mi + 1}/${draft.lessons.length}`,
+        });
       }
 
       await recordAction(tx, {
         type: "training.youtube_course",
         entityType: "Course",
         entityId: course.id,
-        description: `AI course from YouTube — ${draft.lessons.length} lessons`,
+        description: `AI course from YouTube — ${draft.lessons.length} modules`,
         userId,
-        payload: { url: parsed.data.url, lessons: draft.lessons.length },
+        payload: { url: parsed.data.url, modules: draft.lessons.length },
       });
 
       return course.id;
@@ -130,8 +152,12 @@ export async function createCourseFromYouTube(
     });
 
     revalidatePath("/training");
+    revalidatePath("/training/modules");
+    setJobProgress(jobId, { stage: "done", pct: 100, done: true });
     return { ok: true, data: { courseId } };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Failed to save the course" };
+    const msg = e instanceof Error ? e.message : "Failed to save the course";
+    setJobProgress(jobId, { stage: "error", pct: 100, done: true, error: msg });
+    return { ok: false, error: msg };
   }
 }

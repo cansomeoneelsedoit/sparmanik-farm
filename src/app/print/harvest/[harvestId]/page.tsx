@@ -30,6 +30,9 @@ export default async function HarvestReportPage({
 }) {
   const session = await auth();
   if (!session?.user) redirect("/signin");
+  // Education-portal logins never see farm financials (belt-and-braces with
+  // the proxy fence — this route lives outside the (app) layout).
+  if (session.user.role === "PORTAL") redirect("/training");
   // Explicit org guard: this route lives outside the (app) layout, so don't
   // lean only on the Prisma org-scoping extension. Resolve the active org and
   // verify the harvest belongs to it before rendering (or querying its labour

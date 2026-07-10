@@ -102,7 +102,13 @@ export function SidebarContent({
 
   function toggleGroup(id: string) {
     setOpenGroups((prev) => {
-      const next = { ...prev, [id]: !prev[id] };
+      // Accordion behaviour: opening a group closes the others so the menu
+      // never stacks several expanded sections (Boyd's request). Closing an
+      // open group just closes it.
+      const opening = !prev[id];
+      const next: Record<string, boolean> = {};
+      for (const key of Object.keys(prev)) next[key] = false;
+      next[id] = opening;
       try {
         window.localStorage.setItem("sidebarOpenGroups", JSON.stringify(next));
       } catch {}

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { prisma } from "@/server/prisma";
-import { auth } from "@/auth";
+import { requireStaff } from "@/server/authz";
 import { saveImageBuffer, saveImageUpload } from "@/server/uploads";
 
 export type ActionResult<T = void> = { ok: true; data?: T } | { ok: false; error: string };
@@ -20,8 +20,8 @@ export type ActionResult<T = void> = { ok: true; data?: T } | { ok: false; error
 export async function uploadVideoThumbnail(
   formData: FormData,
 ): Promise<ActionResult<{ path: string }>> {
-  const s = await auth();
-  if (!s?.user?.id) return { ok: false, error: "Not signed in" };
+  const gate = await requireStaff();
+  if (!gate.ok) return gate;
   const file = formData.get("file");
   if (!(file instanceof File)) return { ok: false, error: "No file provided" };
   try {
@@ -80,6 +80,8 @@ function resolveThumbnail(ytId: string | null, customPath: string | null | undef
 }
 
 export async function addYoutubeVideo(input: unknown): Promise<ActionResult> {
+  const gate = await requireStaff();
+  if (!gate.ok) return gate;
   const parsed = youtubeSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
   const platform = detectPlatform(parsed.data.url);
@@ -106,6 +108,8 @@ export async function addYoutubeVideo(input: unknown): Promise<ActionResult> {
 }
 
 export async function updateYoutubeVideo(id: string, input: unknown): Promise<ActionResult> {
+  const gate = await requireStaff();
+  if (!gate.ok) return gate;
   const parsed = youtubeSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
   const platform = detectPlatform(parsed.data.url);
@@ -135,10 +139,12 @@ const uploadedVideoSchema = z.object({
   thumbnailPath: z.string().optional().nullable(),
 });
 
-export async function addUploadedVideo(input: unknown): Promise<ActionResult> {
+export async function addUploadedVideo(input: unknown): Promise<ActionResult<{ id: string }>> {
+  const gate = await requireStaff();
+  if (!gate.ok) return gate;
   const parsed = uploadedVideoSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
-  await prisma.video.create({
+  const video = await prisma.video.create({
     data: {
       titleEn: parsed.data.titleEn,
       titleId: parsed.data.titleId,
@@ -149,7 +155,9 @@ export async function addUploadedVideo(input: unknown): Promise<ActionResult> {
     },
   });
   revalidatePath("/videos");
-  return { ok: true };
+  // The id lets callers (e.g. the training module dialog's inline upload)
+  // select the new video immediately without re-querying the library.
+  return { ok: true, data: { id: video.id } };
 }
 
 /** Stream-save a video file from a FormData blob. No sharp; just write to
@@ -157,8 +165,8 @@ export async function addUploadedVideo(input: unknown): Promise<ActionResult> {
 export async function uploadVideoFile(
   formData: FormData,
 ): Promise<ActionResult<{ path: string }>> {
-  const s = await auth();
-  if (!s?.user?.id) return { ok: false, error: "Not signed in" };
+  const gate = await requireStaff();
+  if (!gate.ok) return gate;
   const file = formData.get("file");
   if (!(file instanceof File)) return { ok: false, error: "No file provided" };
   const MAX_VIDEO_BYTES = 200 * 1024 * 1024; // 200 MB
@@ -166,11 +174,8 @@ export async function uploadVideoFile(
     return { ok: false, error: "Video too large (max 200 MB)" };
   }
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const path = require("node:path");
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const fs = require("node:fs/promises");
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const crypto = require("node:crypto");
     const UPLOAD_DIR = process.env.UPLOAD_DIR ?? path.join(process.cwd(), "uploads");
     const ext = (file.name.split(".").pop() ?? "mp4").toLowerCase().slice(0, 6);
@@ -187,6 +192,8 @@ export async function uploadVideoFile(
 }
 
 export async function deleteVideo(id: string): Promise<ActionResult> {
+  const gate = await requireStaff();
+  if (!gate.ok) return gate;
   await prisma.video.delete({ where: { id } });
   revalidatePath("/videos");
   return { ok: true };

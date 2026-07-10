@@ -5,8 +5,9 @@ import { prisma } from "@/server/prisma";
 import {
   CourseEditClient,
   type CourseRow,
-  type VideoOption,
+  type LibraryModuleOption,
 } from "@/app/(app)/training/[courseId]/edit/edit-client";
+import type { VideoOption } from "@/app/(app)/training/module-editor";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,7 @@ export default async function CourseEditPage({
 
   // `select` (not include) so the Bytes image blobs never enter the RSC
   // payload — the client shows them via /api/training/image/... instead.
+  // Modules come through the CourseModule join, ordered by its rank.
   const course = (await prisma.course.findFirst({
     where: { id: courseId },
     select: {
@@ -31,28 +33,34 @@ export default async function CourseEditPage({
       titleId: true,
       description: true,
       published: true,
-      lessons: {
+      imageMime: true,
+      modules: {
         orderBy: { rank: "asc" },
         select: {
-          id: true,
           rank: true,
-          titleEn: true,
-          titleId: true,
-          videoId: true,
-          bodyEn: true,
-          bodyId: true,
-          imageMime: true,
-          passPct: true,
-          questions: {
-            orderBy: { rank: "asc" },
+          module: {
             select: {
               id: true,
-              rank: true,
-              type: true,
-              promptEn: true,
-              promptId: true,
+              titleEn: true,
+              titleId: true,
+              videoId: true,
+              bodyEn: true,
+              bodyId: true,
               imageMime: true,
-              config: true,
+              scormPath: true,
+              passPct: true,
+              questions: {
+                orderBy: { rank: "asc" },
+                select: {
+                  id: true,
+                  rank: true,
+                  type: true,
+                  promptEn: true,
+                  promptId: true,
+                  imageMime: true,
+                  config: true,
+                },
+              },
             },
           },
         },
@@ -66,5 +74,12 @@ export default async function CourseEditPage({
     select: { id: true, titleEn: true, titleId: true },
   })) as VideoOption[];
 
-  return <CourseEditClient course={course} videos={videos} />;
+  // The whole library, for the "Add existing" picker — the client filters out
+  // modules already in this course.
+  const libraryModules = (await prisma.module.findMany({
+    orderBy: { titleEn: "asc" },
+    select: { id: true, titleEn: true, titleId: true },
+  })) as LibraryModuleOption[];
+
+  return <CourseEditClient course={course} videos={videos} libraryModules={libraryModules} />;
 }

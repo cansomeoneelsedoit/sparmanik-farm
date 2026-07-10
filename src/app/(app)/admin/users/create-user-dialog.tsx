@@ -31,7 +31,7 @@ import { createUser } from "@/app/(app)/admin/users/actions";
 const schema = z.object({
   name: z.string().min(1),
   email: z.string().email(),
-  role: z.enum(["USER", "SUPERUSER"]),
+  role: z.enum(["USER", "SUPERUSER", "PORTAL"]),
   password: z.string().min(6),
 });
 type Form = z.infer<typeof schema>;
@@ -83,11 +83,12 @@ export function CreateUserDialog() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>Role</Label>
-                <Select value={form.watch("role")} onValueChange={(v) => form.setValue("role", v as "USER" | "SUPERUSER") }>
+                <Select value={form.watch("role")} onValueChange={(v) => form.setValue("role", v as "USER" | "SUPERUSER" | "PORTAL") }>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="USER">User</SelectItem>
                     <SelectItem value="SUPERUSER">Superuser</SelectItem>
+                    <SelectItem value="PORTAL">Portal (education only)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

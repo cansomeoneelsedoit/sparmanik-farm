@@ -21,3 +21,20 @@ export async function requireSuperuser(): Promise<AuthzResult> {
   }
   return { ok: true, userId: session.user.id };
 }
+
+/**
+ * Farm-staff gate: any authenticated user EXCEPT an education-portal
+ * (PORTAL) login, who is an outside learner with no business writing farm
+ * data. Use on actions that field staff (USER) legitimately perform but a
+ * portal outsider must not — e.g. the shared video library. The proxy already
+ * fences PORTAL *navigation*, but server actions are open POST endpoints, so
+ * the gate has to live in the action too.
+ */
+export async function requireStaff(): Promise<AuthzResult> {
+  const session = await auth();
+  if (!session?.user?.id) return { ok: false, error: "Not signed in." };
+  if ((session.user as { role?: string }).role === "PORTAL") {
+    return { ok: false, error: "Your account can't do this." };
+  }
+  return { ok: true, userId: session.user.id };
+}

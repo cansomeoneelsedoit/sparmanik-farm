@@ -25,7 +25,8 @@ const PARAMS = {
   count: 2, shown: 3, total: 9, max: "9", unit: "kg", sub: "kg",
   name: "Contoh", price: "1.000", date: "2026-06-12", supplier: "Toko",
   n: 5, amount: "10.000", remaining: "5",
-  // Training namespace ({done} of {total} lessons; you need {score}% to pass)
+  // Training namespace ({done} of {total} modules; you need {score}% to pass;
+  // certificate "Completed on {date}" / "Average score {score}%")
   done: 1, score: 80,
   // Harvest-dialog namespaces (saleDialog/dispoDialog/labourDialog/assetDialog/checkinDialog)
   qty: 2, rate: "18.000", charge: "1.000", useLabel: "use 1 of 5", noun: "contoh",

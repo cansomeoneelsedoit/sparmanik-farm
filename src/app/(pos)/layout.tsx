@@ -14,5 +14,8 @@ export const dynamic = "force-dynamic";
 export default async function PosLayout({ children }: { children: ReactNode }) {
   const session = await auth();
   if (!session?.user) redirect("/signin");
+  // Education-portal logins never operate the register (belt-and-braces with
+  // the proxy fence, since this route lives outside the (app) layout).
+  if (session.user.role === "PORTAL") redirect("/training");
   return <div className="min-h-screen bg-muted/20">{children}</div>;
 }

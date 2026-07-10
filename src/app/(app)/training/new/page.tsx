@@ -27,8 +27,9 @@ export default async function NewCoursePage() {
         <CardHeader>
           <CardTitle className="text-base">Course details</CardTitle>
           <p className="pt-1 text-xs text-muted-foreground">
-            Create the course first, then add lessons and questions in the
-            builder. Staff only see it once you publish.
+            Create the course first, then add modules and questions in the
+            builder — new or reused from the module library. Staff only see
+            it once you publish.
           </p>
         </CardHeader>
         <CardContent>

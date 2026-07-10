@@ -32,6 +32,9 @@ export default async function ReceiptPage({
 }) {
   const session = await auth();
   if (!session?.user) redirect("/signin");
+  // Education-portal logins never see POS receipts (belt-and-braces with the
+  // proxy fence — this route lives outside the (app) layout).
+  if (session.user.role === "PORTAL") redirect("/training");
   const orgId = await getActiveOrgId();
   if (!orgId) notFound();
 

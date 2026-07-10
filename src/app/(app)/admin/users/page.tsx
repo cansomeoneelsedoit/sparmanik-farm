@@ -74,6 +74,8 @@ export default async function UsersAdminPage() {
                   <TableCell>
                     {u.role === "SUPERUSER" ? (
                       <Badge variant="accent">Superuser</Badge>
+                    ) : u.role === "PORTAL" ? (
+                      <Badge variant="secondary">Portal</Badge>
                     ) : (
                       <Badge variant="outline">User</Badge>
                     )}

@@ -24,23 +24,24 @@ import {
 } from "@/components/ui/select";
 import type { DraftQuestion } from "@/server/quiz-draft";
 
+import { JobProgressBar } from "@/components/shared/job-progress-bar";
 import { createQuestion } from "@/app/(app)/training/actions";
 import { draftQuizAction } from "./draft-actions";
-import { QUESTION_TYPE_LABELS } from "./edit-client";
+import { QUESTION_TYPE_LABELS } from "@/app/(app)/training/module-editor";
 
 /**
- * "AI draft questions" — paste/confirm the lesson material, AI drafts bilingual
+ * "AI draft questions" — paste/confirm the module material, AI drafts bilingual
  * questions, Boyd unticks any he doesn't want, and the keepers are saved
  * through the normal createQuestion validation. Nothing publishes untouched.
  */
 export function AiDraftDialog({
-  lessonId,
+  moduleId,
   seedMaterial,
   open,
   onClose,
 }: {
-  lessonId: string;
-  /** Prefill: the lesson's body text (best quiz source Boyd already wrote). */
+  moduleId: string;
+  /** Prefill: the module's body text (best quiz source Boyd already wrote). */
   seedMaterial: string;
   open: boolean;
   onClose: () => void;
@@ -75,7 +76,7 @@ export function AiDraftDialog({
       let added = 0;
       for (const d of chosen) {
         const r = await createQuestion({
-          lessonId,
+          moduleId,
           type: d.type,
           promptEn: d.promptEn,
           promptId: d.promptId,
@@ -137,7 +138,7 @@ export function AiDraftDialog({
                 value={material}
                 onChange={(e) => setMaterial(e.target.value)}
                 rows={8}
-                placeholder="Paste the lesson text / SOP here — questions are drafted strictly from this."
+                placeholder="Paste the module text / SOP here — questions are drafted strictly from this."
               />
             </div>
             <div className="flex items-end gap-3">
@@ -156,6 +157,13 @@ export function AiDraftDialog({
                 {pending ? "Drafting…" : "Draft with AI"}
               </Button>
             </div>
+            {pending ? (
+              <JobProgressBar
+                jobId={null}
+                active={pending}
+                stages={{ _default: "AI is reading the material and writing questions…" }}
+              />
+            ) : null}
           </div>
         ) : (
           <div className="space-y-3 py-2">

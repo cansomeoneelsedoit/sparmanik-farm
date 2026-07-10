@@ -1,24 +1,22 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import {
   ArrowRight,
   Check,
-  CheckCircle2,
   ExternalLink,
   RotateCcw,
   X,
-  XCircle,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { submitLessonAttempt } from "@/app/(app)/training/actions";
+import { submitModuleAttempt } from "@/app/(app)/training/actions";
 
 export type PlayerVideo = {
   type: "YOUTUBE" | "UPLOAD";
@@ -85,7 +83,7 @@ function detectUrlPlatform(url: string): Platform {
   return "unknown";
 }
 
-function LessonVideo({ video }: { video: PlayerVideo }) {
+function ModuleVideo({ video }: { video: PlayerVideo }) {
   const platform =
     video.type === "UPLOAD" ? "upload" : video.url ? detectUrlPlatform(video.url) : "unknown";
   const ytId = video.url && platform === "youtube" ? parseYoutubeId(video.url) : null;
@@ -93,7 +91,7 @@ function LessonVideo({ video }: { video: PlayerVideo }) {
   const igCode = video.url && platform === "instagram" ? parseInstagramCode(video.url) : null;
 
   return (
-    <div className="aspect-video w-full overflow-hidden rounded-lg bg-black">
+    <div className="aspect-video w-full overflow-hidden rounded-xl bg-black shadow-sm">
       {platform === "upload" && video.path ? (
         <video src={`/api/uploads/${video.path}`} controls className="h-full w-full" />
       ) : ytId ? (
@@ -132,26 +130,109 @@ function LessonVideo({ video }: { video: PlayerVideo }) {
 }
 
 // ---------------------------------------------------------------------------
+// Result-screen dressing — score ring + a one-shot CSS confetti burst.
+// ---------------------------------------------------------------------------
+
+/** Animated SVG score ring: the arc sweeps in on mount via a CSS transition
+ *  on stroke-dashoffset. Emerald when passed, warm amber when not. */
+function ScoreRing({ score, passed, label }: { score: number; passed: boolean; label: string }) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setArmed(true));
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  const r = 52;
+  const c = 2 * Math.PI * r;
+  const offset = c * (1 - Math.max(0, Math.min(100, score)) / 100);
+  return (
+    <div className="relative h-36 w-36">
+      <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90">
+        <circle cx={60} cy={60} r={r} fill="none" strokeWidth={10} className="stroke-muted" />
+        <circle
+          cx={60}
+          cy={60}
+          r={r}
+          fill="none"
+          strokeWidth={10}
+          strokeLinecap="round"
+          className={passed ? "stroke-emerald-500" : "stroke-amber-500"}
+          strokeDasharray={c}
+          strokeDashoffset={armed ? offset : c}
+          style={{ transition: "stroke-dashoffset 900ms cubic-bezier(0.22, 1, 0.36, 1)" }}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-4xl font-semibold tabular-nums">{score}%</span>
+        <span className="mt-0.5 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+          {label}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** Tasteful pure-CSS confetti: a handful of deterministic pieces (no
+ *  Math.random — stable markup) fall and fade once over the result card. */
+const CONFETTI_COLORS = ["#f59e0b", "#10b981", "#f97316", "#3b82f6", "#ec4899", "#a855f7"];
+
+function ConfettiBurst() {
+  const pieces = Array.from({ length: 16 }, (_, i) => ({
+    left: `${(i * 6.3 + 3) % 100}%`,
+    delay: `${(i % 5) * 0.15}s`,
+    duration: `${1.6 + (i % 4) * 0.35}s`,
+    color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+    round: i % 3 === 0,
+  }));
+  return (
+    <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+      <style>{`
+        @keyframes training-confetti-fall {
+          0% { transform: translateY(-16px) rotate(0deg); opacity: 1; }
+          70% { opacity: 1; }
+          100% { transform: translateY(340px) rotate(300deg); opacity: 0; }
+        }
+      `}</style>
+      {pieces.map((p, i) => (
+        <span
+          key={i}
+          className={cn("absolute top-0 block", p.round ? "h-2 w-2 rounded-full" : "h-3 w-1.5 rounded-sm")}
+          style={{
+            left: p.left,
+            backgroundColor: p.color,
+            opacity: 0,
+            animation: `training-confetti-fall ${p.duration} ease-in ${p.delay} forwards`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Player — content first, then questions one at a time, then the result.
 // ---------------------------------------------------------------------------
 
 export function PlayerClient({
-  lessonId,
+  courseId,
+  moduleId,
   courseHref,
-  nextLessonHref,
+  nextModuleHref,
   passPct,
   video,
   hasImage,
   body,
   questions,
 }: {
-  lessonId: string;
+  /** The course this module is being played inside — attempts are marked
+   *  against the {courseId, moduleId} pair on the server. */
+  courseId: string;
+  moduleId: string;
   courseHref: string;
-  nextLessonHref: string | null;
+  nextModuleHref: string | null;
   passPct: number;
   video: PlayerVideo | null;
   hasImage: boolean;
-  /** Lesson body already localized server-side. */
+  /** Module body already localized server-side. */
   body: string | null;
   questions: PlayerQuestion[];
 }) {
@@ -182,7 +263,7 @@ export function PlayerClient({
 
   function handleSubmit() {
     startTransition(async () => {
-      const res = await submitLessonAttempt({ lessonId, answers });
+      const res = await submitModuleAttempt({ courseId, moduleId, answers });
       if (!res.ok) {
         toast.error(res.error);
         return;
@@ -222,18 +303,18 @@ export function PlayerClient({
   if (phase === "content") {
     return (
       <div className="space-y-4">
-        {video ? <LessonVideo video={video} /> : null}
+        {video ? <ModuleVideo video={video} /> : null}
         {hasImage ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={`/api/training/image/lesson/${lessonId}`}
+            src={`/api/training/image/module/${moduleId}`}
             alt=""
-            className="w-full rounded-lg border object-contain"
+            className="w-full rounded-xl border object-contain shadow-sm"
           />
         ) : null}
         {body ? (
           <Card>
-            <CardContent className="space-y-3 p-5 text-base leading-relaxed">
+            <CardContent className="space-y-4 p-6 text-base leading-relaxed">
               {body.split(/\n+/).map((para, i) =>
                 para.trim() ? <p key={i}>{para}</p> : null,
               )}
@@ -242,9 +323,9 @@ export function PlayerClient({
         ) : null}
 
         {questions.length === 0 ? (
-          /* Content-only lesson: no quiz, so completing = viewing. Submitting
+          /* Content-only module: no quiz, so completing = viewing. Submitting
              the empty attempt records a 100% pass server-side and unlocks the
-             next lesson (otherwise this lesson could never pass and would
+             next module (otherwise this module could never pass and would
              permanently lock everything after it — review finding). */
           <Card>
             <CardContent className="space-y-4 p-6 text-center">
@@ -275,43 +356,53 @@ export function PlayerClient({
   // ---- Phase 3: result -----------------------------------------------------
   if (phase === "result" && result) {
     return (
-      <div className="space-y-4">
-        <Card>
-          <CardContent className="flex flex-col items-center gap-2 p-8 text-center">
-            {result.passed ? (
-              <CheckCircle2 className="h-14 w-14 text-emerald-500" />
-            ) : (
-              <XCircle className="h-14 w-14 text-destructive" />
-            )}
-            <h2 className="font-serif text-2xl">
-              {result.passed ? t("passedTitle") : t("failedTitle")}
-            </h2>
-            <p className="text-4xl font-semibold">{result.score}%</p>
-            {!result.passed ? (
-              <p className="text-sm text-muted-foreground">
-                {t("needScore", { score: passPct })}
-              </p>
-            ) : null}
+      <div className="space-y-5">
+        <Card className="relative overflow-hidden">
+          {result.passed ? <ConfettiBurst /> : null}
+          <CardContent className="relative flex flex-col items-center gap-4 p-8 text-center">
+            <ScoreRing score={result.score} passed={result.passed} label={t("yourScore")} />
+            <div className="space-y-1.5">
+              <h2 className="font-serif text-3xl">
+                {result.passed ? t("passedTitle") : t("failedTitle")}
+              </h2>
+              {!result.passed ? (
+                <>
+                  <p className="text-sm text-muted-foreground">{t("failedEncourage")}</p>
+                  <p className="text-sm font-medium text-amber-600 dark:text-amber-400">
+                    {t("needScore", { score: passPct })}
+                  </p>
+                </>
+              ) : null}
+            </div>
           </CardContent>
         </Card>
 
         <div className="space-y-2">
+          <h3 className="font-serif text-xl">{t("reviewAnswers")}</h3>
           {questions.map((q, i) => {
             const ok = result.perQuestion[q.id] === true;
             const given = formatAnswer(q);
             return (
-              <Card key={q.id}>
+              <Card
+                key={q.id}
+                className={cn(
+                  "border-l-4",
+                  ok ? "border-l-emerald-500" : "border-l-amber-500",
+                )}
+              >
                 <CardContent className="flex items-start gap-3 p-4">
                   <span
                     className={cn(
                       "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
-                      ok ? "bg-emerald-100 text-emerald-700" : "bg-destructive/10 text-destructive",
+                      ok
+                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
+                        : "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
                     )}
                   >
                     {ok ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="font-medium">
+                    <p className="font-medium leading-snug">
                       {i + 1}. {q.prompt}
                     </p>
                     <p className="mt-1 text-sm text-muted-foreground">
@@ -320,8 +411,10 @@ export function PlayerClient({
                   </div>
                   <span
                     className={cn(
-                      "shrink-0 text-xs font-medium",
-                      ok ? "text-emerald-600" : "text-destructive",
+                      "shrink-0 text-xs font-semibold uppercase tracking-wide",
+                      ok
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-amber-600 dark:text-amber-400",
                     )}
                   >
                     {ok ? t("correct") : t("wrong")}
@@ -335,17 +428,17 @@ export function PlayerClient({
         <div className="flex flex-col gap-2 sm:flex-row">
           {result.passed ? (
             <>
-              {nextLessonHref ? (
+              {nextModuleHref ? (
                 <Button asChild size="lg" className="h-14 flex-1 text-base">
-                  <Link href={nextLessonHref}>
-                    {t("nextLesson")} <ArrowRight className="h-4 w-4" />
+                  <Link href={nextModuleHref}>
+                    {t("nextModule")} <ArrowRight className="h-4 w-4" />
                   </Link>
                 </Button>
               ) : null}
               <Button
                 asChild
                 size="lg"
-                variant={nextLessonHref ? "outline" : "default"}
+                variant={nextModuleHref ? "outline" : "default"}
                 className="h-14 flex-1 text-base"
               >
                 <Link href={courseHref}>{t("backToCourse")}</Link>
@@ -374,27 +467,37 @@ export function PlayerClient({
 
   return (
     <div className="space-y-4">
-      <div className="space-y-1.5">
-        <p className="text-sm text-muted-foreground">
-          {t("questionOf", { n: qIndex + 1, total: questions.length })}
-        </p>
-        <div className="h-2 overflow-hidden rounded-full bg-muted">
-          <div
-            className="h-full rounded-full bg-accent transition-all"
-            style={{ width: `${((qIndex + 1) / questions.length) * 100}%` }}
-          />
+      {/* Step dots: done = filled, current = elongated pill, ahead = muted. */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {questions.map((_, i) => (
+            <span
+              key={i}
+              className={cn(
+                "h-2.5 rounded-full transition-all duration-300",
+                i < qIndex
+                  ? "w-2.5 bg-accent"
+                  : i === qIndex
+                    ? "w-6 bg-accent shadow-sm"
+                    : "w-2.5 bg-muted-foreground/25",
+              )}
+            />
+          ))}
         </div>
+        <p className="shrink-0 text-sm font-medium tabular-nums text-muted-foreground">
+          {t("stepOf", { n: qIndex + 1, total: questions.length })}
+        </p>
       </div>
 
-      <Card>
-        <CardContent className="space-y-4 p-5">
-          <p className="text-lg font-medium leading-snug">{q.prompt}</p>
+      <Card className="overflow-hidden">
+        <CardContent className="space-y-5 p-6">
+          <p className="font-serif text-2xl leading-snug">{q.prompt}</p>
           {q.hasImage ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={`/api/training/image/question/${q.id}`}
               alt=""
-              className="w-full rounded-lg border object-contain"
+              className="w-full rounded-xl border object-contain"
             />
           ) : null}
 
@@ -410,7 +513,7 @@ export function PlayerClient({
               value={typeof answers[q.id] === "string" ? (answers[q.id] as string) : ""}
               onChange={(e) => setAnswer(q.id, e.target.value)}
               placeholder={t("typeAnswer")}
-              className="h-14 text-lg"
+              className="h-14 rounded-xl text-lg"
               autoFocus
             />
           ) : (
@@ -449,7 +552,14 @@ export function PlayerClient({
   );
 }
 
-/** Tappable multi-select option tiles (multiple choice + photo spot). */
+/** Letter used on option/order tiles — A, B, C… (wraps after Z, which no sane
+ *  quiz will ever reach). */
+function tileLetter(i: number): string {
+  return String.fromCharCode(65 + (i % 26));
+}
+
+/** Tappable multi-select option tiles (multiple choice + photo spot) with
+ *  A/B/C/D letter badges and a clear selected state. */
 function MultiSelect({
   options,
   selected,
@@ -475,21 +585,24 @@ function MultiSelect({
             type="button"
             onClick={() => toggle(i)}
             className={cn(
-              "flex w-full items-center gap-3 rounded-lg border-2 p-4 text-left text-base transition-colors",
+              "group flex w-full items-center gap-3 rounded-xl border-2 p-4 text-left text-base transition-all",
               on
-                ? "border-accent bg-accent/10 font-medium"
-                : "border-border bg-background hover:border-accent/50",
+                ? "border-accent bg-accent/10 font-medium shadow-sm"
+                : "border-border bg-background hover:border-accent/40 hover:bg-muted/40",
             )}
           >
             <span
               className={cn(
-                "flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-2",
-                on ? "border-accent bg-accent text-accent-foreground" : "border-muted-foreground/40",
+                "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border-2 text-sm font-semibold transition-colors",
+                on
+                  ? "border-accent bg-accent text-accent-foreground"
+                  : "border-muted-foreground/30 text-muted-foreground group-hover:border-accent/50",
               )}
             >
-              {on ? <Check className="h-4 w-4" /> : null}
+              {tileLetter(i)}
             </span>
             <span className="min-w-0 flex-1">{label}</span>
+            {on ? <Check className="h-5 w-5 shrink-0 text-accent" /> : null}
           </button>
         );
       })}
@@ -530,15 +643,18 @@ function TapToOrder({
             key={item.tag}
             type="button"
             onClick={() => onChange([...picked, item.tag])}
-            className="flex w-full items-center gap-3 rounded-lg border-2 border-border bg-background p-4 text-left text-base transition-colors hover:border-accent/50"
+            className="group flex w-full items-center gap-3 rounded-xl border-2 border-border bg-background p-4 text-left text-base transition-all hover:border-accent/40 hover:bg-muted/40"
           >
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border-2 border-muted-foreground/30 text-sm font-semibold text-muted-foreground transition-colors group-hover:border-accent/50">
+              {tileLetter(item.tag)}
+            </span>
             <span className="min-w-0 flex-1">{item.label}</span>
           </button>
         ))}
       </div>
 
       {picked.length > 0 ? (
-        <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+        <div className="space-y-2 rounded-xl border bg-muted/30 p-3">
           <div className="flex items-center justify-between">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               {yourAnswerLabel}
@@ -551,16 +667,16 @@ function TapToOrder({
             {picked.map((tag, pos) => (
               <li
                 key={tag}
-                className="flex items-center gap-3 rounded-md border bg-background p-3"
+                className="flex items-center gap-3 rounded-lg border bg-background p-3 shadow-sm transition-all"
               >
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent/15 text-xs font-semibold">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-foreground">
                   {pos + 1}
                 </span>
                 <span className="min-w-0 flex-1">{byTag.get(tag) ?? "?"}</span>
                 <button
                   type="button"
                   onClick={() => onChange(picked.filter((p) => p !== tag))}
-                  className="rounded-full p-1.5 text-muted-foreground hover:bg-muted"
+                  className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >
                   <X className="h-4 w-4" />
                 </button>
