@@ -1029,11 +1029,11 @@ export async function createCustomerQuick(
 
 /** All customers for the active org — drives the Log-sale picker. */
 export async function listCustomers(): Promise<
-  { id: string; name: string; type: string }[]
+  { id: string; name: string; type: string; email: string | null }[]
 > {
   const rows = (await prisma.customer.findMany({
     orderBy: { name: "asc" },
-    select: { id: true, name: true, type: true },
-  })) as { id: string; name: string; type: string }[];
+    select: { id: true, name: true, type: true, email: true },
+  })) as { id: string; name: string; type: string; email: string | null }[];
   return rows;
 }

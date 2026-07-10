@@ -507,6 +507,12 @@
     "saleComplete": "Penjualan selesai",
     "newSale": "Penjualan baru",
     "receipt": "Struk",
+    "emailReceipt": "Kirim struk lewat email",
+    "emailPlaceholder": "pelanggan@email.com",
+    "emailSend": "Kirim",
+    "emailSending": "Mengirim…",
+    "emailSent": "Struk terkirim — salinan ada di folder Sent Gmail farm",
+    "emailSentShort": "Terkirim ✓",
     "noCyclesTitle": "Tidak ada siklus aktif",
     "noCyclesBody": "Mulai siklus rumah kaca dulu sebelum bisa menjual produknya di sini.",
     "goToGreenhouses": "Buka Rumah Kaca"
