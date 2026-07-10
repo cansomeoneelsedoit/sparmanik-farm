@@ -13,6 +13,7 @@ import {
   DollarSign,
   Flag,
   FolderTree,
+  GraduationCap,
   HeartPulse,
   LayoutDashboard,
   Leaf,
@@ -118,6 +119,7 @@ export function SidebarContent({
     { key: "harvest", href: "/harvest", icon: Leaf },
     { key: "inventory", href: "/inventory", icon: Package },
     { key: "staff", href: "/staff", icon: UserCircle2 },
+    { key: "training", href: "/training", fallback: "Training", icon: GraduationCap },
     {
       label: "Operations",
       id: "operations",

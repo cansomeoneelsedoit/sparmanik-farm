@@ -206,6 +206,10 @@ model Organization {
   posPayments     PosPayment[]
   paymentGatewayCredentials PaymentGatewayCredential[]
   mailAccounts    MailAccount[]
+  courses         Course[]
+  lessons         Lesson[]
+  questions       Question[]
+  lessonAttempts  LessonAttempt[]
 
   @@map("organizations")
 }
@@ -977,9 +981,124 @@ model Video {
   createdAt      DateTime  @default(now()) @map("created_at")
 
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lessons      Lesson[]
 
   @@index([organizationId])
   @@map("videos")
+}
+
+// ============================================================================
+// Training — Boyd's in-app learning platform. A Course is an ordered series of
+// Lessons (video / pictures / text) each followed by auto-marked Questions;
+// passing a lesson unlocks the next. Question payloads live in a JSON `config`
+// so the four types (multiple choice, fill-the-blank, ordering, photo-spot)
+// share one table; marking is SERVER-side only (the player never receives the
+// correct answers — see src/server/training.ts).
+// ============================================================================
+
+enum QuestionType {
+  MULTIPLE_CHOICE
+  FILL_BLANK
+  ORDER
+  PHOTO_SPOT
+}
+
+model Course {
+  id             String   @id @default(cuid())
+  organizationId String?  @map("organization_id")
+  titleEn        String   @map("title_en")
+  titleId        String   @map("title_id")
+  description    String?
+  /** Staff only see published courses; drafts are builder-only. */
+  published      Boolean  @default(false)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lessons      Lesson[]
+
+  @@index([organizationId])
+  @@map("courses")
+}
+
+model Lesson {
+  id             String   @id @default(cuid())
+  organizationId String?  @map("organization_id")
+  courseId       String   @map("course_id")
+  /** Order within the course; lesson N+1 unlocks when N is passed. */
+  rank           Int
+  titleEn        String   @map("title_en")
+  titleId        String   @map("title_id")
+  /** Optional teaching video — reuses the Videos library (TikTok/IG/upload). */
+  videoId        String?  @map("video_id")
+  /** Optional teaching text (plain text/markdown-lite), per language. */
+  bodyEn         String?  @map("body_en")
+  bodyId         String?  @map("body_id")
+  /** Optional teaching picture, stored inline (same pattern as Item.photoData). */
+  imageData      Bytes?   @map("image_data")
+  imageMime      String?  @map("image_mime")
+  /** Minimum score (%) to pass and unlock the next lesson. */
+  passPct        Int      @default(80) @map("pass_pct")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  course       Course        @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  video        Video?        @relation(fields: [videoId], references: [id], onDelete: SetNull)
+  questions    Question[]
+  attempts     LessonAttempt[]
+
+  @@index([organizationId])
+  @@index([courseId, rank])
+  @@map("lessons")
+}
+
+model Question {
+  id             String       @id @default(cuid())
+  organizationId String?      @map("organization_id")
+  lessonId       String       @map("lesson_id")
+  rank           Int
+  type           QuestionType
+  promptEn       String       @map("prompt_en")
+  promptId       String       @map("prompt_id")
+  /** Optional picture the question refers to (photo-spot uses this). */
+  imageData      Bytes?       @map("image_data")
+  imageMime      String?      @map("image_mime")
+  /** Type-specific payload INCLUDING the correct answers — server-only:
+   *  MULTIPLE_CHOICE / PHOTO_SPOT: { options: {en,id}[], correct: number[] }
+   *  FILL_BLANK:                   { accept: string[] }  (any language)
+   *  ORDER:                        { items: {en,id}[] }  (config order = correct) */
+  config         Json
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lesson       Lesson        @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([lessonId, rank])
+  @@map("questions")
+}
+
+model LessonAttempt {
+  id             String   @id @default(cuid())
+  organizationId String?  @map("organization_id")
+  lessonId       String   @map("lesson_id")
+  userId         String   @map("user_id")
+  /** 0–100, marked server-side. */
+  score          Int
+  passed         Boolean
+  /** The submitted answers, for review/audit. */
+  answers        Json
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lesson       Lesson        @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([lessonId, userId])
+  @@index([userId])
+  @@map("lesson_attempts")
 }
 
 // Ranked LLM credentials. The ai-chain at src/server/ai-chain.ts walks
