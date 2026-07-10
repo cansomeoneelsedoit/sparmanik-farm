@@ -24,8 +24,17 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Publish on BOTH IPv4 and IPv6. Docker on Windows was binding IPv4 only,
+    # so whenever the browser resolved "localhost" to ::1 first the connection
+    # was refused — the recurring "local 3000 is down" while the container was
+    # actually healthy. Explicit dual host_ip bindings fix it for good.
     ports:
-      - "3000:3000"
+      - target: 3000
+        published: 3000
+        host_ip: "0.0.0.0"
+      - target: 3000
+        published: 3000
+        host_ip: "::"
     # Load credentials (ANTHROPIC_API_KEY, GEMINI_API_KEY, AUTH_SECRET,
     # FARM_API_TOKEN) directly from .env into the container — bypassing the
     # `${VAR:-}` shell-interpolation path that lets an empty host-shell

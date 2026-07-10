@@ -12,9 +12,12 @@ import {
   Wallet,
 } from "lucide-react";
 
+import { getLocale } from "next-intl/server";
+
 import { prisma } from "@/server/prisma";
 import { Decimal } from "@/server/decimal";
 import { cn } from "@/lib/utils";
+import { localizedItemName } from "@/lib/item-name";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -36,11 +39,15 @@ export default async function InventoryPage({
 }) {
   const { q = "", cat = "", sort = "name", view: viewParam } = await searchParams;
   const view: View = viewParam === "list" ? "list" : "grid";
+  // English UI shows the concise AI-generated item name; Indonesian shows the
+  // original (see src/lib/item-name.ts).
+  const locale = await getLocale();
 
   type ItemRow = {
     id: string;
     code: string;
     name: string;
+    nameEn: string | null;
     description: string | null;
     photoPath: string | null;
     unit: string;
@@ -70,6 +77,9 @@ export default async function InventoryPage({
             ? {
                 OR: [
                   { name: { contains: q, mode: "insensitive" as const } },
+                  // English display name too, so searches typed in the
+                  // English UI still find items named in Indonesian.
+                  { nameEn: { contains: q, mode: "insensitive" as const } },
                   { description: { contains: q, mode: "insensitive" as const } },
                   { code: { contains: q, mode: "insensitive" as const } },
                   {
@@ -91,6 +101,7 @@ export default async function InventoryPage({
         id: true,
         code: true,
         name: true,
+        nameEn: true,
         description: true,
         photoPath: true,
         unit: true,
@@ -242,7 +253,7 @@ export default async function InventoryPage({
             return {
               id: r.id,
               code: r.code,
-              name: r.name,
+              name: localizedItemName(r, locale),
               description: r.description,
               photoPath: r.photoPath,
               unit: r.unit,
@@ -271,7 +282,7 @@ export default async function InventoryPage({
             return {
               id: r.id,
               code: r.code,
-              name: r.name,
+              name: localizedItemName(r, locale),
               description: r.description,
               photoPath: r.photoPath,
               unit: r.unit,

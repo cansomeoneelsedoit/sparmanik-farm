@@ -378,6 +378,12 @@ model Item {
   /** Internal short code printed on bins and used in search ("SF00001"). */
   code              String
   name              String
+  /** Concise English display name (AI-generated from `name`, which is usually
+   * an Indonesian Shopee listing title). Shown when the app language is EN;
+   * null = not yet translated → falls back to `name`. Original `name` is
+   * always used on receipts, CSV exports, and the shopping-list copy text
+   * (suppliers/accountants read the original). */
+  nameEn            String?  @map("name_en")
   description       String?
   photoPath         String?  @map("photo_path")
   /** Photo bytes stored INLINE on the row. Travel with the item during

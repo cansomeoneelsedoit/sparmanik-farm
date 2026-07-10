@@ -9,8 +9,11 @@ import {
 } from "lucide-react";
 
 import { computeHealthScore, runHealthChecks } from "@/server/health-checks";
+import { auth } from "@/auth";
+import { prisma } from "@/server/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { HealthCheckCard } from "@/app/(app)/health-check/check-card";
+import { TranslateNamesCard } from "@/app/(app)/health-check/translate-names-card";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +21,10 @@ export const dynamic = "force-dynamic";
 export default async function HealthCheckPage() {
   const checks = await runHealthChecks();
   const { score, cleanCount, totalCount } = computeHealthScore(checks);
+  // English-name backfill card (superuser only — the action spends AI credits).
+  const session = await auth();
+  const isSuperuser = (session?.user as { role?: string } | undefined)?.role === "SUPERUSER";
+  const missingNameEn = isSuperuser ? await prisma.item.count({ where: { nameEn: null } }) : 0;
 
   // Separate clean from dirty so the page leads with what needs attention.
   const issues = checks.filter((c) => !c.clean);
@@ -88,6 +95,9 @@ export default async function HealthCheckPage() {
         </div>
         <ChevronRight className="h-5 w-5 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
       </Link>
+
+      {/* One-click AI backfill of English item names (EN display). */}
+      {missingNameEn > 0 ? <TranslateNamesCard missing={missingNameEn} /> : null}
 
       {/* Critical */}
       {critical.length > 0 ? (

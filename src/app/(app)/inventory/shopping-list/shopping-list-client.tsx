@@ -14,7 +14,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 export type ShoppingRow = {
   id: string;
   code: string;
+  /** Original item name — ALWAYS used in the copy-as-text order, since the
+   *  staff paste it to Indonesian suppliers who know the original names. */
   name: string;
+  /** Localized name (English when the UI is English) — display only. */
+  displayName: string;
   unit: string;
   /** Pre-formatted on-hand quantity in pack units. */
   remaining: string;
@@ -43,7 +47,8 @@ const TIER_STYLE: Record<ShoppingRow["tier"], string> = {
  * The shopping list itself. Pure display + clipboard — all the stock math
  * happened on the server. "Copy list" produces a plain-text order in the
  * current UI language, ready to paste into a WhatsApp chat with the
- * supplier.
+ * supplier — except item names, which stay original (Indonesian) so the
+ * supplier recognises them.
  */
 export function ShoppingListClient({
   groups,
@@ -70,6 +75,7 @@ export function ShoppingListClient({
       date,
     });
     const lines = g.rows.map(
+      // r.name (not r.displayName) on purpose — suppliers get original names.
       (r) =>
         `- ${r.name}: ${r.suggest} ${r.unit} (${t("copyLineStock", { remaining: r.remaining })})`,
     );
@@ -148,7 +154,7 @@ export function ShoppingListClient({
                             href={`/inventory/${r.id}`}
                             className="font-medium hover:underline"
                           >
-                            {r.name}
+                            {r.displayName}
                           </Link>
                           <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                             <span className="rounded bg-muted px-1 py-0.5 font-mono">

@@ -1,9 +1,11 @@
 import { notFound, redirect } from "next/navigation";
+import { getLocale } from "next-intl/server";
 
 import { auth } from "@/auth";
 import { getActiveOrgId } from "@/server/org";
 import { prisma } from "@/server/prisma";
 import { Decimal } from "@/server/decimal";
+import { localizedItemName } from "@/lib/item-name";
 import { listCustomers } from "@/app/(app)/harvest/actions";
 
 import { PosClient } from "./pos-client";
@@ -25,6 +27,9 @@ export default async function PosPage() {
   const orgId = await getActiveOrgId();
   if (!orgId) notFound();
 
+  // English UI shows the concise AI-generated item name in the packaging
+  // picker; Indonesian shows the original (see src/lib/item-name.ts).
+  const locale = await getLocale();
   const [liveHarvests, allProduce, customers, items, setting, recentSales] = await Promise.all([
     prisma.harvest.findMany({
       where: { status: "LIVE" },
@@ -42,6 +47,7 @@ export default async function PosPage() {
       select: {
         id: true,
         name: true,
+        nameEn: true,
         unit: true,
         batches: { select: { qty: true, price: true, consumptions: { select: { qty: true } } } },
       },
@@ -76,7 +82,7 @@ export default async function PosPage() {
   // Packaging picker: in-stock items + their FIFO-next unit cost (Rp), mirroring
   // the log-sale dialog's list.
   type BatchRow = { qty: Decimal; price: Decimal; consumptions: { qty: Decimal }[] };
-  type ItemRow = { id: string; name: string; unit: string; batches: BatchRow[] };
+  type ItemRow = { id: string; name: string; nameEn: string | null; unit: string; batches: BatchRow[] };
   const packagingItems = (items as ItemRow[])
     .map((i) => {
       let remaining = new Decimal(0);
@@ -91,7 +97,7 @@ export default async function PosPage() {
       }
       return {
         id: i.id,
-        name: i.name,
+        name: localizedItemName(i, locale),
         unit: i.unit,
         cost: (nextCost ?? new Decimal(0)).toFixed(2),
         available: Number(remaining),

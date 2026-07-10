@@ -7,6 +7,11 @@ const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Dev-only: Next 16 blocks its own /_next dev resources when the site is
+  // opened via 127.0.0.1 (only "localhost" is trusted by default). Without
+  // this, the page HTML loads but client JS/HMR is refused → forms never
+  // hydrate and the tab looks frozen. Ignored in production builds.
+  allowedDevOrigins: ["127.0.0.1"],
   turbopack: {
     root: __dirname,
   },

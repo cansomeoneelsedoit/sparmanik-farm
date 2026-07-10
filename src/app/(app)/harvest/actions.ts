@@ -399,7 +399,10 @@ async function returnAssetSlicesToInventory(
 
 const checkInSchema = z.object({
   harvestAssetId: z.string().min(1),
-  condition: z.enum(["good", "damaged", "lost"]),
+  /** "used" = consumed in place (foam glued to the tank, weedmat pinned down):
+   *  the whole taken-out amount stays in the greenhouse — charged once, nothing
+   *  returns to stock, nothing is written off as damaged/lost. */
+  condition: z.enum(["good", "damaged", "lost", "used"]),
   /** Quantity actually USED, in PACK units (the dialog converts from the
    *  item's real unit — metres/pcs/grams/kg). When present, the lightweight
    *  path runs: charge only the used amount to the harvest, no stock return. */
@@ -411,12 +414,15 @@ const checkInSchema = z.object({
 });
 
 /**
- * Mid-harvest check-in for a reusable asset.
+ * Mid-harvest return of a taken-out asset.
  *   - good     → return slices to inventory (same code path as end-harvest)
  *   - damaged  → don't return; mark source batches' damagedFromHarvestId so
  *                Financials can attribute the write-off; residual depreciable
  *                value stays on the business books (no recovery)
  *   - lost     → same as damaged
+ *   - used     → consumed in place (foam glued to the tank): the FULL taken-out
+ *                amount is charged once, nothing returns to stock, and nothing
+ *                is written off — it simply lives in the greenhouse now.
  * In all cases `returnCondition` / `returnedAt` / `returnNote` are stamped on
  * the HarvestAsset so endHarvest can skip it.
  */
@@ -478,12 +484,16 @@ export async function checkInHarvestAsset(input: unknown): Promise<ActionResult>
       //    consumptions — so these never enter the harvest P&L either way. The
       //    trim here purely returns the unused stock; the harvest is charged
       //    nothing (the full price stays on Total Business Financials).
-      if (parsed.data.usedQty !== undefined) {
+      if (parsed.data.usedQty !== undefined || parsed.data.condition === "used") {
         const installedPacks = new Decimal(asset.qty);
         // Clamp: staff may type "more than installed" (the dialog allows it with
         // a warning). Never delete more than was consumed or over-scale the
-        // amortised charge.
-        const usedPacks = Decimal.min(new Decimal(parsed.data.usedQty), installedPacks);
+        // amortised charge. "Used up / lives in the greenhouse" always consumes
+        // the FULL taken-out amount — nothing returns to stock.
+        const usedPacks =
+          parsed.data.condition === "used"
+            ? installedPacks
+            : Decimal.min(new Decimal(parsed.data.usedQty as string), installedPacks);
         const remainder = installedPacks.minus(usedPacks);
 
         if (remainder.gt(new Decimal("0.00005"))) {
@@ -528,7 +538,10 @@ export async function checkInHarvestAsset(input: unknown): Promise<ActionResult>
           type: "harvest.checkin_asset",
           entityType: "HarvestAsset",
           entityId: asset.id,
-          description: `Checked in ${parsed.data.usedDisplay || "asset"} used (${parsed.data.condition})`,
+          description:
+            parsed.data.condition === "used"
+              ? `Used up in greenhouse — ${parsed.data.usedDisplay || "asset"}`
+              : `Returned — ${parsed.data.usedDisplay || "asset"} used (${parsed.data.condition})`,
           userId,
           payload: {
             harvestAssetId: asset.id,

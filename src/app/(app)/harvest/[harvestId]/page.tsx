@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { getLocale } from "next-intl/server";
 import { ArrowLeft, Pencil } from "lucide-react";
 
 import { prisma } from "@/server/prisma";
@@ -17,6 +18,7 @@ import {
 } from "@/components/ui/table";
 import { Money, MoneyDual } from "@/components/shared/money";
 import { Decimal } from "@/server/decimal";
+import { localizedItemName } from "@/lib/item-name";
 import { RecordUsageDialog } from "@/app/(app)/harvest/[harvestId]/record-usage-dialog";
 import {
   InstallAssetDialog,
@@ -42,6 +44,10 @@ export const dynamic = "force-dynamic";
 
 export default async function HarvestDetailPage({ params }: { params: Promise<{ harvestId: string }> }) {
   const { harvestId } = await params;
+  // English UI shows the concise AI-generated item name; Indonesian shows the
+  // original. One lookup for every item-name cell/option on this page.
+  const locale = await getLocale();
+  const itemName = (i: { name: string; nameEn?: string | null }) => localizedItemName(i, locale);
   const [harvest, items, produces, greenhouses, staffRows, harvestExpenses, labourTasks, customers] = await Promise.all([
     // findFirst (not findUnique) so the prisma extension can safely append
     // an `organizationId` predicate for org isolation — findUnique rejects
@@ -54,8 +60,8 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
         produces: { include: { produce: true }, orderBy: { createdAt: "asc" } },
         sales: { orderBy: { date: "desc" }, include: { produce: true, customer: true } },
         dispositions: { orderBy: { date: "desc" }, include: { produce: true, staff: true, customer: true } },
-        usages: { orderBy: { date: "desc" }, include: { item: { select: { id: true, name: true, unit: true, subUnit: true, subFactor: true } }, consumptions: true } },
-        assets: { orderBy: { date: "desc" }, include: { item: { select: { id: true, name: true, unit: true, subUnit: true, subFactor: true } }, consumptions: true } },
+        usages: { orderBy: { date: "desc" }, include: { item: { select: { id: true, name: true, nameEn: true, unit: true, subUnit: true, subFactor: true } }, consumptions: true } },
+        assets: { orderBy: { date: "desc" }, include: { item: { select: { id: true, name: true, nameEn: true, unit: true, subUnit: true, subFactor: true } }, consumptions: true } },
       },
     }),
     prisma.item.findMany({
@@ -68,6 +74,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
       select: {
         id: true,
         name: true,
+        nameEn: true,
         unit: true,
         subUnit: true,
         subFactor: true,
@@ -306,6 +313,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
   type ItemWithBatches = {
     id: string;
     name: string;
+    nameEn: string | null;
     unit: string;
     subUnit: string | null;
     subFactor: Decimal | null;
@@ -349,7 +357,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
       }
       return {
         id: i.id,
-        name: i.name,
+        name: itemName(i),
         unit: i.unit,
         subUnit: i.subUnit,
         subFactor: i.subFactor ? Number(i.subFactor) : null,
@@ -377,7 +385,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
       }
       return {
         id: i.id,
-        name: i.name,
+        name: itemName(i),
         unit: i.unit,
         cost: (nextCost ?? new Decimal(0)).toFixed(2),
         available: Number(remaining),
@@ -510,7 +518,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
           />
           <RecordUsageDialog
             harvestId={harvest.id}
-            items={items.map((i: { id: string; name: string; unit: string }) => ({ id: i.id, name: i.name, unit: i.unit }))}
+            items={items.map((i: { id: string; name: string; nameEn: string | null; unit: string }) => ({ id: i.id, name: itemName(i), unit: i.unit }))}
           />
           <LogLabourDialog
             harvestId={harvest.id}
@@ -747,7 +755,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                   return (
                     <TableRow key={u.id}>
                       <TableCell className="text-muted-foreground">{u.date.toISOString().slice(0, 10)}</TableCell>
-                      <TableCell>{u.item.name}</TableCell>
+                      <TableCell>{itemName(u.item)}</TableCell>
                       <TableCell className="text-right">{u.displayQty || `${Number(u.qty)} ${u.item.unit}`}</TableCell>
                       <TableCell className="text-right"><Money value={cost.toFixed(4)} /></TableCell>
                       <TableCell className="p-0"><DeleteUsageButton id={u.id} /></TableCell>
@@ -883,7 +891,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                   return (
                     <TableRow key={a.id}>
                       <TableCell className="text-muted-foreground">{a.date.toISOString().slice(0, 10)}</TableCell>
-                      <TableCell>{a.item.name}</TableCell>
+                      <TableCell>{itemName(a.item)}</TableCell>
                       <TableCell className="text-right">
                         {fmtAssetQty(a)}
                         {(() => {
@@ -902,7 +910,9 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                       <TableCell className="text-right text-muted-foreground"><Money value={a.fifoCost.toFixed(4)} /></TableCell>
                       <TableCell>
                         {a.returnCondition === "good" ? (
-                          <Badge variant="outline">Checked in</Badge>
+                          <Badge variant="outline">Returned</Badge>
+                        ) : a.returnCondition === "used" ? (
+                          <Badge variant="outline">Used up — in greenhouse</Badge>
                         ) : a.returnCondition === "damaged" ? (
                           <Badge variant="destructive">Damaged</Badge>
                         ) : a.returnCondition === "lost" ? (
@@ -917,14 +927,14 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                         {inUse && harvest.status === "LIVE" ? (
                           <CheckInAssetDialog
                             harvestAssetId={a.id}
-                            itemName={a.item.name}
+                            itemName={itemName(a.item)}
                             qty={Number(a.qty)}
                             unit={a.item.unit}
                             subUnit={a.item.subUnit}
                             subFactor={a.item.subFactor ? Number(a.item.subFactor) : null}
                             usesRemaining={usesRemaining}
                             trigger={
-                              <Button size="sm" variant="outline">Check in</Button>
+                              <Button size="sm" variant="outline">Return</Button>
                             }
                           />
                         ) : null}
@@ -968,7 +978,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                 {fixedAssets.map((a) => (
                   <TableRow key={a.id}>
                     <TableCell className="text-muted-foreground">{a.date.toISOString().slice(0, 10)}</TableCell>
-                    <TableCell>{a.item.name}</TableCell>
+                    <TableCell>{itemName(a.item)}</TableCell>
                     <TableCell className="text-right">{fmtAssetQty(a)}</TableCell>
                     <TableCell>{a.reusable ? <Badge variant="outline">Reusable</Badge> : "—"}</TableCell>
                     <TableCell className="text-muted-foreground">{a.condition ?? "—"}</TableCell>
@@ -1012,11 +1022,11 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
           <section>
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Expenses — Usage</h3>
             <ul className="space-y-1">
-              {(harvest.usages as { id: string; date: Date; item: { name: string }; displayQty: string | null; consumptions: { qty: Decimal; unitCost: Decimal }[] }[]).map((u) => {
+              {(harvest.usages as { id: string; date: Date; item: { name: string; nameEn: string | null }; displayQty: string | null; consumptions: { qty: Decimal; unitCost: Decimal }[] }[]).map((u) => {
                 const cost = u.consumptions.reduce((s: Decimal, c) => s.plus(new Decimal(c.qty).times(c.unitCost)), new Decimal(0));
                 return (
                   <li key={u.id} className="flex items-center justify-between">
-                    <span className="text-muted-foreground">{u.date.toISOString().slice(0, 10)} — {u.item.name} ({u.displayQty ?? ""})</span>
+                    <span className="text-muted-foreground">{u.date.toISOString().slice(0, 10)} — {itemName(u.item)} ({u.displayQty ?? ""})</span>
                     <span className="text-red-600"><Money value={cost.toFixed(4)} /></span>
                   </li>
                 );
@@ -1031,7 +1041,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                 {depreciableAssets.map((a) => (
                   <li key={a.id} className="flex items-center justify-between">
                     <span className="text-muted-foreground">
-                      {a.date.toISOString().slice(0, 10)} — {a.item.name} × {fmtAssetQty(a)} (use {a.useCount} of {a.maxUses})
+                      {a.date.toISOString().slice(0, 10)} — {itemName(a.item)} × {fmtAssetQty(a)} (use {a.useCount} of {a.maxUses})
                     </span>
                     <span className="text-red-600"><Money value={(a.amortisedCharge ?? new Decimal(0)).toFixed(4)} /></span>
                   </li>

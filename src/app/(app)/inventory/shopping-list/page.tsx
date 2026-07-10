@@ -1,5 +1,8 @@
+import { getLocale } from "next-intl/server";
+
 import { prisma } from "@/server/prisma";
 import { Decimal } from "@/server/decimal";
+import { localizedItemName } from "@/lib/item-name";
 import {
   ShoppingListClient,
   type SupplierGroup,
@@ -18,6 +21,9 @@ export const dynamic = "force-dynamic";
  * supplier of the most recent purchase batch; otherwise "no supplier".
  */
 export default async function ShoppingListPage() {
+  // English UI shows the concise AI-generated item name on screen; the
+  // copy-as-text order always keeps the original name (see item-name.ts).
+  const locale = await getLocale();
   const items = await prisma.item.findMany({
     where: { reorder: { gt: 0 } },
     orderBy: { name: "asc" },
@@ -25,6 +31,7 @@ export default async function ShoppingListPage() {
       id: true,
       code: true,
       name: true,
+      nameEn: true,
       unit: true,
       reorder: true,
       defaultSupplier: { select: { id: true, name: true, phone: true } },
@@ -44,6 +51,7 @@ export default async function ShoppingListPage() {
     id: string;
     code: string;
     name: string;
+    nameEn: string | null;
     unit: string;
     reorder: Decimal;
     defaultSupplier: Supplier | null;
@@ -102,6 +110,7 @@ export default async function ShoppingListPage() {
       id: it.id,
       code: it.code,
       name: it.name?.trim() || it.code,
+      displayName: localizedItemName(it, locale).trim() || it.code,
       unit: it.unit,
       remaining: fmt(remaining),
       reorder: fmt(reorder),
