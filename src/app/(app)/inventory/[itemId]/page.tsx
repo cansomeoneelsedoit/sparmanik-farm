@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { getLocale } from "next-intl/server";
 import { ArrowLeft } from "lucide-react";
 
 import { prisma } from "@/server/prisma";
 import { Decimal } from "@/server/decimal";
+import { localizedItemName } from "@/lib/item-name";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -31,6 +33,9 @@ export const dynamic = "force-dynamic";
 
 export default async function ItemDetailPage({ params }: { params: Promise<{ itemId: string }> }) {
   const { itemId } = await params;
+  // English UI shows the concise AI-generated item name; Indonesian shows
+  // the original (see src/lib/item-name.ts).
+  const locale = await getLocale();
   const [item, suppliers, categories, familyOptions] = await Promise.all([
     // findFirst (not findUnique) — the prisma extension auto-appends
     // organizationId for org isolation, which findUnique rejects.
@@ -42,6 +47,7 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
         id: true,
         code: true,
         name: true,
+        nameEn: true,
         description: true,
         photoPath: true,
         unit: true,
@@ -185,10 +191,15 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
           </Button>
           <div>
             <h1 className="font-serif text-3xl">
-              {item.name?.trim() || (
+              {localizedItemName(item, locale).trim() || (
                 <span className="italic text-muted-foreground">Untitled item</span>
               )}
             </h1>
+            {/* English UI: keep the original (Indonesian) name visible so the
+                user can still match the physical label / Shopee listing. */}
+            {locale === "en" && item.nameEn && item.nameEn !== item.name && item.name?.trim() ? (
+              <div className="text-sm text-muted-foreground">{item.name}</div>
+            ) : null}
             <div className="mt-1 flex items-center gap-2">
               <span className="rounded bg-muted px-2 py-0.5 font-mono text-xs tracking-wider text-muted-foreground">
                 {item.code}

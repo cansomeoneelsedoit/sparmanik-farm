@@ -1,5 +1,8 @@
+import { getLocale } from "next-intl/server";
+
 import { prisma } from "@/server/prisma";
 import { Decimal } from "@/server/decimal";
+import { localizedItemName } from "@/lib/item-name";
 import { StocktakeClient } from "@/app/(app)/health-check/stocktake/stocktake-client";
 import { type StocktakeItem } from "@/app/(app)/health-check/stocktake/stocktake-row";
 
@@ -31,6 +34,9 @@ export default async function StocktakePage({
   searchParams: Promise<{ focus?: string }>;
 }) {
   const { focus } = await searchParams;
+  // English UI shows the concise AI-generated item name; Indonesian shows
+  // the original (see src/lib/item-name.ts).
+  const locale = await getLocale();
   const [items, categories, doneAudits] = await Promise.all([
     prisma.item.findMany({
       orderBy: { name: "asc" },
@@ -42,6 +48,7 @@ export default async function StocktakePage({
         id: true,
         code: true,
         name: true,
+        nameEn: true,
         unit: true,
         subUnit: true,
         subFactor: true,
@@ -74,6 +81,7 @@ export default async function StocktakePage({
     id: string;
     code: string;
     name: string;
+    nameEn: string | null;
     unit: string;
     subUnit: string | null;
     subFactor: Decimal | null;
@@ -100,11 +108,13 @@ export default async function StocktakePage({
     return {
       id: i.id,
       code: i.code,
-      name: i.name,
+      name: localizedItemName(i, locale),
       unit: i.unit,
       subUnit: i.subUnit,
       subFactor: i.subFactor ? i.subFactor.toString() : null,
       categoryId: i.categoryId ?? null,
+      // The EQUIPMENT regex is Indonesian-keyword-based — always test the
+      // original name, not the localized one.
       packCandidate:
         !i.subFactor && !!i.name?.trim() && !EQUIPMENT.test(i.name),
       photoPath: i.photoPath ?? null,

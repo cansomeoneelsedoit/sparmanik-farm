@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { ArrowLeft } from "lucide-react";
 
 import { prisma } from "@/server/prisma";
 import { Decimal } from "@/server/decimal";
+import { localizedItemName } from "@/lib/item-name";
 import { Button } from "@/components/ui/button";
 import { ReceiveStockClient } from "@/app/(app)/inventory/receive/receive-client";
 
@@ -11,6 +12,9 @@ export const dynamic = "force-dynamic";
 
 export default async function ReceiveStockPage() {
   const t = await getTranslations("receive");
+  // English UI shows the concise AI-generated item name in the picker;
+  // Indonesian shows the original (see src/lib/item-name.ts).
+  const locale = await getLocale();
   // Items + suppliers for the pickers, plus their most recent purchase
   // history so the staff sees prior context instead of staring at an empty
   // search box.
@@ -21,6 +25,7 @@ export default async function ReceiveStockPage() {
         id: true,
         code: true,
         name: true,
+        nameEn: true,
         unit: true,
         subUnit: true,
         subFactor: true,
@@ -71,7 +76,7 @@ export default async function ReceiveStockPage() {
   };
   const supplierHistory: Record<string, SupplierChip[]> = {};
   const itemById = new Map(
-    (items as { id: string; name: string; unit: string; subUnit: string | null; subFactor: Decimal | null }[]).map((i) => [i.id, i]),
+    (items as { id: string; name: string; nameEn: string | null; unit: string; subUnit: string | null; subFactor: Decimal | null }[]).map((i) => [i.id, i]),
   );
   for (const b of batches as BatchRow[]) {
     if (!itemHistory[b.itemId]) {
@@ -88,7 +93,7 @@ export default async function ReceiveStockPage() {
         if (it) {
           list.push({
             itemId: b.itemId,
-            itemName: it.name,
+            itemName: localizedItemName(it, locale),
             unit: it.unit,
             lastPrice: new Decimal(b.price).toFixed(2),
             lastDate: b.date.toISOString().slice(0, 10),
@@ -113,9 +118,9 @@ export default async function ReceiveStockPage() {
       </header>
 
       <ReceiveStockClient
-        items={(items as { id: string; name: string; unit: string; subUnit: string | null; subFactor: Decimal | null }[]).map((i) => ({
+        items={(items as { id: string; name: string; nameEn: string | null; unit: string; subUnit: string | null; subFactor: Decimal | null }[]).map((i) => ({
           id: i.id,
-          name: i.name,
+          name: localizedItemName(i, locale),
           unit: i.unit,
           subUnit: i.subUnit,
           subFactor: i.subFactor ? Number(i.subFactor) : null,

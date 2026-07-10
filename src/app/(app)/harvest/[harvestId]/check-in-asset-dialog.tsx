@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { todayWIB } from "@/lib/date";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { CheckCircle2, PackageX, ShieldOff } from "lucide-react";
+import { CheckCircle2, Home, PackageX, ShieldOff } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
@@ -22,18 +22,23 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { checkInHarvestAsset } from "@/app/(app)/harvest/actions";
 
-type Condition = "good" | "damaged" | "lost";
+type Condition = "good" | "damaged" | "lost" | "used";
 
 const todayStr = () => todayWIB();
 
 /**
- * Per-asset check-in dialog. Staff record HOW MUCH was actually used — in the
- * item's real unit (metres / pcs / grams / kg) — and that quantity is charged
- * to the greenhouse. Condition (good / damaged / lost) tags the line for the
- * audit log.
+ * Per-asset RETURN dialog ("check in" read wrong — staff are giving the item
+ * back). Staff record HOW MUCH was actually used — in the item's real unit
+ * (metres / pcs / grams / kg) — and that quantity is charged to the greenhouse;
+ * the unused remainder goes back to stock.
  *
- * Lightweight build (Boyd's "option 3"): the used quantity is charged; leftover
- * is NOT returned to inventory yet. A proper partial-return version comes later.
+ * Condition:
+ *   good    → remainder returns to stock, used part is charged
+ *   damaged / lost → nothing returns; tagged for the write-off report
+ *   used    → consumed in place (foam glued to the tank, weedmat pinned): the
+ *             WHOLE taken-out amount stays in the greenhouse — charged once,
+ *             nothing back to stock, nothing written off. The used-qty input is
+ *             hidden because the answer is "all of it".
  */
 export function CheckInAssetDialog({
   harvestAssetId,
@@ -84,28 +89,33 @@ export function CheckInAssetDialog({
   }
 
   function submit() {
-    if (!usedValid) {
+    // "Used up" always consumes the full taken-out amount — no qty to validate.
+    const isUsedUp = condition === "used";
+    if (!isUsedUp && !usedValid) {
       toast.error(t("enterUsed", { unit: unitLabel }));
       return;
     }
+    const effectiveUsed = isUsedUp ? installedInUnits : usedNum;
     // Convert the real-unit figure back to pack units for the ledger.
-    const usedPacks = isPack ? usedNum / (subFactor as number) : usedNum;
+    const usedPacks = isPack ? effectiveUsed / (subFactor as number) : effectiveUsed;
     startT(async () => {
       const r = await checkInHarvestAsset({
         harvestAssetId,
         condition,
         usedQty: String(usedPacks),
-        usedDisplay: `${usedNum} ${unitLabel}`,
+        usedDisplay: `${effectiveUsed} ${unitLabel}`,
         date,
         note,
       });
       if (r.ok) {
         toast.success(
           condition === "good"
-            ? t("toastGood", { qty: usedNum, unit: unitLabel })
+            ? t("toastGood", { qty: effectiveUsed, unit: unitLabel })
             : condition === "damaged"
-              ? t("toastDamaged", { qty: usedNum, unit: unitLabel })
-              : t("toastLost", { qty: usedNum, unit: unitLabel }),
+              ? t("toastDamaged", { qty: effectiveUsed, unit: unitLabel })
+              : condition === "lost"
+                ? t("toastLost", { qty: effectiveUsed, unit: unitLabel })
+                : t("toastUsed", { qty: effectiveUsed, unit: unitLabel }),
         );
         setOpen(false);
         reset();
@@ -139,40 +149,8 @@ export function CheckInAssetDialog({
           </div>
 
           <div className="space-y-2">
-            <Label>
-              {t("howManyUsed", { unit: unitLabel })}{" "}
-              <span className="text-xs font-normal text-muted-foreground">
-                {t("tookOutHint", { qty: installedInUnits })}
-              </span>
-            </Label>
-            <div className="flex items-center gap-2">
-              <Input
-                type="number"
-                step="any"
-                min="0"
-                autoFocus
-                value={used}
-                onChange={(e) => setUsed(e.target.value)}
-                placeholder={t("usedPlaceholder", { max: installedInUnits })}
-              />
-              <span className="whitespace-nowrap text-sm text-muted-foreground">
-                {unitLabel}
-              </span>
-            </div>
-            {overInstalled ? (
-              <p className="text-xs text-amber-600 dark:text-amber-400">
-                {t("overWarning")}
-              </p>
-            ) : (
-              <p className="text-[11px] text-muted-foreground">
-                {t("chargeHint")}
-              </p>
-            )}
-          </div>
-
-          <div className="space-y-2">
             <Label>{t("condition")}</Label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               <ConditionOption
                 value="good"
                 current={condition}
@@ -181,6 +159,15 @@ export function CheckInAssetDialog({
                 title={t("good")}
                 subtitle={t("goodSub")}
                 tint="emerald"
+              />
+              <ConditionOption
+                value="used"
+                current={condition}
+                onSelect={setCondition}
+                icon={<Home className="h-4 w-4" />}
+                title={t("used")}
+                subtitle={t("usedSub")}
+                tint="sky"
               />
               <ConditionOption
                 value="damaged"
@@ -203,13 +190,53 @@ export function CheckInAssetDialog({
             </div>
           </div>
 
+          {condition === "used" ? (
+            /* Consumed in place — the whole amount stays in the greenhouse, so
+               there's no "how much was used" question to answer. */
+            <div className="rounded-md border bg-sky-50 px-3 py-2 text-xs text-sky-700 dark:bg-sky-950/40 dark:text-sky-300">
+              {t("usedNote", { qty: installedInUnits, unit: unitLabel })}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label>
+                {t("howManyUsed", { unit: unitLabel })}{" "}
+                <span className="text-xs font-normal text-muted-foreground">
+                  {t("tookOutHint", { qty: installedInUnits })}
+                </span>
+              </Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  step="any"
+                  min="0"
+                  autoFocus
+                  value={used}
+                  onChange={(e) => setUsed(e.target.value)}
+                  placeholder={t("usedPlaceholder", { max: installedInUnits })}
+                />
+                <span className="whitespace-nowrap text-sm text-muted-foreground">
+                  {unitLabel}
+                </span>
+              </div>
+              {overInstalled ? (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  {t("overWarning")}
+                </p>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">
+                  {t("chargeHint")}
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="space-y-2">
             <Label>{t("returnDate")}</Label>
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           </div>
 
           <div className="space-y-2">
-            <Label>{condition !== "good" ? t("noteWhy") : t("noteOptional")}</Label>
+            <Label>{condition === "damaged" || condition === "lost" ? t("noteWhy") : t("noteOptional")}</Label>
             <Textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
@@ -218,7 +245,9 @@ export function CheckInAssetDialog({
                   ? t("placeholderDamaged")
                   : condition === "lost"
                     ? t("placeholderLost")
-                    : t("placeholderGood")
+                    : condition === "used"
+                      ? t("placeholderUsed")
+                      : t("placeholderGood")
               }
               rows={2}
             />
@@ -228,7 +257,7 @@ export function CheckInAssetDialog({
           <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
             {tCommon("cancel")}
           </Button>
-          <Button type="button" onClick={submit} disabled={pending || !usedValid}>
+          <Button type="button" onClick={submit} disabled={pending || (condition !== "used" && !usedValid)}>
             {pending ? t("saving") : t("checkIn")}
           </Button>
         </DialogFooter>
@@ -252,13 +281,14 @@ function ConditionOption({
   icon: React.ReactNode;
   title: string;
   subtitle: string;
-  tint: "emerald" | "amber" | "rose";
+  tint: "emerald" | "amber" | "rose" | "sky";
 }) {
   const active = current === value;
   const tints: Record<string, string> = {
     emerald: "border-emerald-400 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
     amber: "border-amber-400 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300",
     rose: "border-rose-400 bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300",
+    sky: "border-sky-400 bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300",
   };
   return (
     <button
