@@ -17,15 +17,40 @@ function isPublic(pathname: string) {
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
 }
 
+/**
+ * Paths an education-portal (PORTAL) login may reach. Everything else —
+ * dashboard, farm pages, /pos, /print/harvest, /print/receipt — bounces to
+ * /training. This is the ONE place that sees every navigation (server layouts
+ * can't read the pathname), so the portal fence lives here; superuser-only
+ * training subroutes (/training/new, /training/<id>/edit, /training/<id>/access,
+ * /training/modules) additionally 404 at the page level for non-superusers.
+ *  - /print/certificate: portal learners print their own certificates
+ *  - /api/training/image: module/question images the course player loads
+ *  - /api/scorm: SCO assets (HTML/JS/media) the SCORM player iframe fetches
+ */
+const PORTAL_ALLOWED = ["/training", "/print/certificate", "/api/training/image", "/api/scorm"];
+
+function isPortalAllowed(pathname: string) {
+  return PORTAL_ALLOWED.some((p) => pathname === p || pathname.startsWith(p + "/"));
+}
+
 export default auth((req) => {
   const { nextUrl } = req;
   if (isPublic(nextUrl.pathname)) return;
-  if (req.auth) return;
+  if (!req.auth) {
+    const url = nextUrl.clone();
+    url.pathname = "/signin";
+    url.searchParams.set("callbackUrl", nextUrl.pathname + nextUrl.search);
+    return NextResponse.redirect(url);
+  }
 
-  const url = nextUrl.clone();
-  url.pathname = "/signin";
-  url.searchParams.set("callbackUrl", nextUrl.pathname + nextUrl.search);
-  return NextResponse.redirect(url);
+  // PORTAL logins see ONLY the education portal.
+  if (req.auth.user?.role === "PORTAL" && !isPortalAllowed(nextUrl.pathname)) {
+    const url = nextUrl.clone();
+    url.pathname = "/training";
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
 });
 
 export const config = {

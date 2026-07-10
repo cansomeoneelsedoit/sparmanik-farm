@@ -9,17 +9,39 @@ import { prisma } from "@/server/prisma";
 import { recordAction } from "@/server/audit";
 import { requireSuperuser } from "@/server/authz";
 import type { InputJsonValue, TransactionClient } from "@/server/decimal";
+import { ask } from "@/server/ai-chain";
+import { extractJson } from "@/server/json-extract";
 import { markAnswers, type QuestionForMarking } from "@/server/training";
-import { latestAttemptsByLesson } from "@/app/(app)/training/progress";
+import { isEnrolledOrFree } from "@/server/enrollment";
+import { removeScormPackage } from "@/server/scorm";
+import { latestAttemptsByModule } from "@/app/(app)/training/progress";
 
 export type ActionResult<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
-/** Revalidate the training list plus a course's player + builder pages. */
+/** Revalidate the training list + module library, plus a course's player + builder pages. */
 function revalidateTraining(courseId?: string) {
   revalidatePath("/training");
+  revalidatePath("/training/modules");
   if (courseId) {
     revalidatePath(`/training/${courseId}`);
     revalidatePath(`/training/${courseId}/edit`);
+  }
+}
+
+/**
+ * A module can sit in MANY courses — after editing it (or its questions),
+ * every course that uses it must re-render, not just the one the editor
+ * happened to be opened from.
+ */
+async function revalidateModuleCourses(moduleId: string) {
+  const joins = (await prisma.courseModule.findMany({
+    where: { moduleId },
+    select: { courseId: true },
+  })) as { courseId: string }[];
+  revalidateTraining();
+  for (const j of joins) {
+    revalidatePath(`/training/${j.courseId}`);
+    revalidatePath(`/training/${j.courseId}/edit`);
   }
 }
 
@@ -56,6 +78,15 @@ const courseSchema = z.object({
 
 const courseUpdateSchema = courseSchema.extend({
   published: z.boolean().optional(),
+  /** Whole-Rupiah price as a digit string ("150000"), or null = free. Omitted
+   *  entirely → the stored price is left untouched (existing callers like the
+   *  course builder don't send it). */
+  priceIdr: z
+    .string()
+    .trim()
+    .regex(/^\d+$/, "Price must be a whole number of Rupiah")
+    .nullable()
+    .optional(),
 });
 
 export async function createCourse(input: unknown): Promise<ActionResult<{ id: string }>> {
@@ -108,6 +139,8 @@ export async function updateCourse(id: string, input: unknown): Promise<ActionRe
           titleId: parsed.data.titleId,
           description: parsed.data.description || null,
           ...(parsed.data.published === undefined ? {} : { published: parsed.data.published }),
+          // Prisma accepts the digit string directly for the Decimal column.
+          ...(parsed.data.priceIdr === undefined ? {} : { priceIdr: parsed.data.priceIdr }),
         },
       });
       await recordAction(tx, {
@@ -116,7 +149,7 @@ export async function updateCourse(id: string, input: unknown): Promise<ActionRe
         entityId: id,
         description: `Edited course "${parsed.data.titleEn}"`,
         userId: gate.userId,
-        payload: { published: parsed.data.published },
+        payload: { published: parsed.data.published, priceIdr: parsed.data.priceIdr },
       });
     });
     revalidateTraining(id);
@@ -135,7 +168,8 @@ export async function deleteCourse(id: string): Promise<ActionResult> {
   })) as { id: string; titleEn: string } | null;
   if (!existing) return { ok: false, error: "Course not found" };
   try {
-    // Cascade deletes lessons → questions → attempts (schema onDelete: Cascade).
+    // Cascade only removes the CourseModule JOIN rows — the modules themselves
+    // (with their questions and attempts) stay in the library for reuse.
     await prisma.$transaction(async (tx: TransactionClient) => {
       await tx.course.delete({ where: { id } });
       await recordAction(tx, {
@@ -154,21 +188,89 @@ export async function deleteCourse(id: string): Promise<ActionResult> {
 }
 
 // ---------------------------------------------------------------------------
-// Lessons (superuser)
+// Modules (superuser) — the LIBRARY. A module can be in many courses or none.
 // ---------------------------------------------------------------------------
 
-const lessonFieldsSchema = z.object({
-  titleEn: z.string().trim().min(1, "English title is required"),
-  titleId: z.string().trim().min(1, "Indonesian title is required"),
+const moduleFieldsBase = z.object({
+  titleEn: z.string().trim().optional().nullable(),
+  titleId: z.string().trim().optional().nullable(),
   videoId: z.string().optional().nullable(),
   bodyEn: z.string().optional().nullable(),
   bodyId: z.string().optional().nullable(),
   passPct: z.number().int().min(0).max(100).optional(),
 });
 
-const createLessonSchema = lessonFieldsSchema.extend({
-  courseId: z.string().min(1),
+/** At least one title (either language) — the missing one is auto-translated. */
+const hasATitle = (d: { titleEn?: string | null; titleId?: string | null }) =>
+  !!(d.titleEn?.trim() || d.titleId?.trim());
+
+const moduleFieldsSchema = moduleFieldsBase.refine(hasATitle, {
+  message: "A title is required (English or Indonesian)",
 });
+
+const createModuleSchema = moduleFieldsBase
+  .extend({ courseId: z.string().min(1).optional() })
+  .refine(hasATitle, { message: "A title is required (English or Indonesian)" });
+
+type BilingualContent = { titleEn: string; titleId: string; bodyEn: string | null; bodyId: string | null };
+
+/**
+ * Fill whichever language's title/body is blank by AI-translating from the
+ * other language — a SINGLE ask() per save covering every missing field
+ * (json mode, same chain as the item-name translator). A field only counts
+ * as missing when its counterpart language has text. On any AI failure the
+ * source text is copied verbatim instead: the save must never block on AI.
+ */
+async function fillMissingTranslations(input: {
+  titleEn?: string | null;
+  titleId?: string | null;
+  bodyEn?: string | null;
+  bodyId?: string | null;
+}): Promise<BilingualContent> {
+  const out = {
+    titleEn: input.titleEn?.trim() ?? "",
+    titleId: input.titleId?.trim() ?? "",
+    bodyEn: input.bodyEn?.trim() ?? "",
+    bodyId: input.bodyId?.trim() ?? "",
+  };
+  type Key = keyof typeof out;
+  const wants: { key: Key; source: string; to: "Indonesian" | "English"; what: string }[] = [];
+  if (!out.titleId && out.titleEn) wants.push({ key: "titleId", source: out.titleEn, to: "Indonesian", what: "title" });
+  if (!out.titleEn && out.titleId) wants.push({ key: "titleEn", source: out.titleId, to: "English", what: "title" });
+  if (!out.bodyId && out.bodyEn) wants.push({ key: "bodyId", source: out.bodyEn, to: "Indonesian", what: "teaching text" });
+  if (!out.bodyEn && out.bodyId) wants.push({ key: "bodyEn", source: out.bodyId, to: "English", what: "teaching text" });
+
+  if (wants.length > 0) {
+    // Fallback first — copying the source text means an AI outage degrades to
+    // "same text in both languages", never a lost save.
+    for (const w of wants) out[w.key] = w.source;
+    try {
+      const fields = wants
+        .map((w) => `"${w.key}" — translate this ${w.what} to ${w.to}:\n---\n${w.source}\n---`)
+        .join("\n\n");
+      const prompt = `You translate training content for an Indonesian hydroponic melon farm (English ↔ Indonesian).
+Translate naturally for farm staff. Keep numbers, units, chemical/product names and formatting unchanged.
+
+${fields}
+
+Reply with ONLY JSON: {${wants.map((w) => `"${w.key}": "..."`).join(", ")}}`;
+      const raw = await ask({ prompt, json: true, maxTokens: 2000, disableThinking: true });
+      const parsed = extractJson<Record<string, unknown>>(raw);
+      for (const w of wants) {
+        const v = parsed[w.key];
+        if (typeof v === "string" && v.trim()) out[w.key] = v.trim();
+      }
+    } catch {
+      // Keep the verbatim copies set above.
+    }
+  }
+  return {
+    titleEn: out.titleEn,
+    titleId: out.titleId,
+    bodyEn: out.bodyEn || null,
+    bodyId: out.bodyId || null,
+  };
+}
 
 /** Org-scoped existence check — foreign-org ids come back null. */
 async function findVideo(videoId: string): Promise<boolean> {
@@ -176,204 +278,314 @@ async function findVideo(videoId: string): Promise<boolean> {
   return !!v;
 }
 
-export async function createLesson(input: unknown): Promise<ActionResult<{ id: string }>> {
+export async function createModule(input: unknown): Promise<ActionResult<{ id: string }>> {
   const gate = await requireSuperuser();
   if (!gate.ok) return gate;
-  const parsed = createLessonSchema.safeParse(input);
+  const parsed = createModuleSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Validation failed" };
   }
   const d = parsed.data;
-  const course = await prisma.course.findFirst({ where: { id: d.courseId }, select: { id: true } });
-  if (!course) return { ok: false, error: "Course not found" };
+  if (d.courseId) {
+    const course = await prisma.course.findFirst({ where: { id: d.courseId }, select: { id: true } });
+    if (!course) return { ok: false, error: "Course not found" };
+  }
   if (d.videoId && !(await findVideo(d.videoId))) return { ok: false, error: "Video not found" };
+  const content = await fillMissingTranslations(d);
   try {
-    const lesson = await prisma.$transaction(async (tx: TransactionClient) => {
-      const last = await tx.lesson.aggregate({ where: { courseId: d.courseId }, _max: { rank: true } });
-      const l = await tx.lesson.create({
+    const created = await prisma.$transaction(async (tx: TransactionClient) => {
+      const m = await tx.module.create({
         data: {
-          courseId: d.courseId,
-          rank: (last._max.rank ?? 0) + 1,
-          titleEn: d.titleEn,
-          titleId: d.titleId,
+          titleEn: content.titleEn,
+          titleId: content.titleId,
           videoId: d.videoId || null,
-          bodyEn: d.bodyEn || null,
-          bodyId: d.bodyId || null,
+          bodyEn: content.bodyEn,
+          bodyId: content.bodyId,
           passPct: d.passPct ?? 80,
         },
       });
+      if (d.courseId) {
+        const last = await tx.courseModule.aggregate({
+          where: { courseId: d.courseId },
+          _max: { rank: true },
+        });
+        await tx.courseModule.create({
+          data: { courseId: d.courseId, moduleId: m.id, rank: (last._max.rank ?? 0) + 1 },
+        });
+      }
       await recordAction(tx, {
-        type: "training.lesson.create",
-        entityType: "Lesson",
-        entityId: l.id,
-        description: `Added lesson "${d.titleEn}"`,
+        type: "training.module.create",
+        entityType: "Module",
+        entityId: m.id,
+        description: `Created module "${content.titleEn}"`,
         userId: gate.userId,
-        payload: { courseId: d.courseId },
+        payload: d.courseId ? { courseId: d.courseId } : undefined,
       });
-      return l;
+      return m;
     });
     revalidateTraining(d.courseId);
-    return { ok: true, data: { id: lesson.id } };
+    return { ok: true, data: { id: created.id } };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Failed to create lesson" };
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to create module" };
   }
 }
 
-export async function updateLesson(id: string, input: unknown): Promise<ActionResult> {
+export async function updateModule(id: string, input: unknown): Promise<ActionResult> {
   const gate = await requireSuperuser();
   if (!gate.ok) return gate;
-  const parsed = lessonFieldsSchema.safeParse(input);
+  const parsed = moduleFieldsSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Validation failed" };
   }
   const d = parsed.data;
-  const existing = (await prisma.lesson.findFirst({
+  const existing = (await prisma.module.findFirst({
     where: { id },
-    select: { id: true, courseId: true },
-  })) as { id: string; courseId: string } | null;
-  if (!existing) return { ok: false, error: "Lesson not found" };
+    select: { id: true },
+  })) as { id: string } | null;
+  if (!existing) return { ok: false, error: "Module not found" };
   if (d.videoId && !(await findVideo(d.videoId))) return { ok: false, error: "Video not found" };
+  const content = await fillMissingTranslations(d);
   try {
     await prisma.$transaction(async (tx: TransactionClient) => {
-      await tx.lesson.update({
+      await tx.module.update({
         where: { id },
         data: {
-          titleEn: d.titleEn,
-          titleId: d.titleId,
+          titleEn: content.titleEn,
+          titleId: content.titleId,
           videoId: d.videoId || null,
-          bodyEn: d.bodyEn || null,
-          bodyId: d.bodyId || null,
+          bodyEn: content.bodyEn,
+          bodyId: content.bodyId,
           ...(d.passPct === undefined ? {} : { passPct: d.passPct }),
         },
       });
       await recordAction(tx, {
-        type: "training.lesson.update",
-        entityType: "Lesson",
+        type: "training.module.update",
+        entityType: "Module",
         entityId: id,
-        description: `Edited lesson "${d.titleEn}"`,
+        description: `Edited module "${content.titleEn}"`,
         userId: gate.userId,
       });
     });
-    revalidateTraining(existing.courseId);
+    await revalidateModuleCourses(id);
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Couldn't save this lesson" };
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't save this module" };
   }
 }
 
-export async function deleteLesson(id: string): Promise<ActionResult> {
+/**
+ * Delete a module from the LIBRARY. Cascade removes its course joins, its
+ * questions AND every staff attempt — the confirm copy in the UI spells out
+ * that this affects every course using the module.
+ */
+export async function deleteModule(id: string): Promise<ActionResult> {
   const gate = await requireSuperuser();
   if (!gate.ok) return gate;
-  const existing = (await prisma.lesson.findFirst({
+  const existing = (await prisma.module.findFirst({
     where: { id },
-    select: { id: true, courseId: true, titleEn: true },
-  })) as { id: string; courseId: string; titleEn: string } | null;
-  if (!existing) return { ok: false, error: "Lesson not found" };
+    select: { id: true, titleEn: true, scormPath: true },
+  })) as { id: string; titleEn: string; scormPath: string | null } | null;
+  if (!existing) return { ok: false, error: "Module not found" };
+  // Capture the affected courses BEFORE the joins cascade away.
+  const joins = (await prisma.courseModule.findMany({
+    where: { moduleId: id },
+    select: { courseId: true },
+  })) as { courseId: string }[];
   try {
     await prisma.$transaction(async (tx: TransactionClient) => {
-      await tx.lesson.delete({ where: { id } });
+      await tx.module.delete({ where: { id } });
       await recordAction(tx, {
-        type: "training.lesson.delete",
-        entityType: "Lesson",
+        type: "training.module.delete",
+        entityType: "Module",
         entityId: id,
-        description: `Deleted lesson "${existing.titleEn}"`,
+        description: `Deleted module "${existing.titleEn}" from the library`,
         userId: gate.userId,
-        payload: { courseId: existing.courseId },
+        payload: { courseIds: joins.map((j) => j.courseId) },
       });
     });
-    revalidateTraining(existing.courseId);
+    // DB row is gone — now clean the extracted SCORM package off the uploads
+    // volume. Best-effort: the delete already committed, so an fs error must
+    // not flip the result to a failure (it would just leave an orphan dir).
+    if (existing.scormPath) {
+      try {
+        await removeScormPackage(id);
+      } catch {
+        /* orphaned dir — harmless, swept later if ever needed */
+      }
+    }
+    revalidateTraining();
+    for (const j of joins) {
+      revalidatePath(`/training/${j.courseId}`);
+      revalidatePath(`/training/${j.courseId}/edit`);
+    }
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Couldn't delete this lesson" };
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't delete this module" };
   }
 }
 
-export async function moveLesson(id: string, direction: "up" | "down"): Promise<ActionResult> {
-  const gate = await requireSuperuser();
-  if (!gate.ok) return gate;
-  const lesson = (await prisma.lesson.findFirst({
-    where: { id },
-    select: { id: true, courseId: true },
-  })) as { id: string; courseId: string } | null;
-  if (!lesson) return { ok: false, error: "Lesson not found" };
-  // Swap rank with the immediate neighbour (same pattern as reorderAiKey).
-  const all = (await prisma.lesson.findMany({
-    where: { courseId: lesson.courseId },
-    orderBy: [{ rank: "asc" }, { createdAt: "asc" }],
-    select: { id: true, rank: true },
-  })) as { id: string; rank: number }[];
-  const idx = all.findIndex((r) => r.id === id);
-  if (idx === -1) return { ok: false, error: "Lesson not found" };
-  const swapIdx = direction === "up" ? idx - 1 : idx + 1;
-  if (swapIdx < 0 || swapIdx >= all.length) return { ok: true };
-  const here = all[idx];
-  const there = all[swapIdx];
-  await prisma.$transaction([
-    prisma.lesson.update({ where: { id: here.id }, data: { rank: there.rank } }),
-    prisma.lesson.update({ where: { id: there.id }, data: { rank: here.rank } }),
-  ]);
-  revalidateTraining(lesson.courseId);
-  return { ok: true };
-}
-
-export async function setLessonImage(id: string, formData: FormData): Promise<ActionResult> {
+export async function setModuleImage(id: string, formData: FormData): Promise<ActionResult> {
   const gate = await requireSuperuser();
   if (!gate.ok) return gate;
   const file = formData.get("file");
   if (!(file instanceof File)) return { ok: false, error: "No file provided" };
-  const lesson = (await prisma.lesson.findFirst({
+  const mod = (await prisma.module.findFirst({
     where: { id },
-    select: { id: true, courseId: true },
-  })) as { id: string; courseId: string } | null;
-  if (!lesson) return { ok: false, error: "Lesson not found" };
+    select: { id: true },
+  })) as { id: string } | null;
+  if (!mod) return { ok: false, error: "Module not found" };
   try {
     const img = await processTrainingImage(file);
     await prisma.$transaction(async (tx: TransactionClient) => {
       // Node Buffer extends Uint8Array, but Prisma 6's generated types want
       // a strict Uint8Array<ArrayBuffer>. Wrap explicitly (same as Item.photoData).
-      await tx.lesson.update({
+      await tx.module.update({
         where: { id },
         data: { imageData: new Uint8Array(img.data), imageMime: img.mime },
       });
       await recordAction(tx, {
-        type: "training.lesson.image",
-        entityType: "Lesson",
+        type: "training.module.image",
+        entityType: "Module",
         entityId: id,
-        description: "Updated lesson image",
+        description: "Updated module image",
         userId: gate.userId,
       });
     });
-    revalidateTraining(lesson.courseId);
+    await revalidateModuleCourses(id);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Image upload failed" };
   }
 }
 
-export async function clearLessonImage(id: string): Promise<ActionResult> {
+export async function clearModuleImage(id: string): Promise<ActionResult> {
   const gate = await requireSuperuser();
   if (!gate.ok) return gate;
-  const lesson = (await prisma.lesson.findFirst({
+  const mod = (await prisma.module.findFirst({
     where: { id },
-    select: { id: true, courseId: true },
-  })) as { id: string; courseId: string } | null;
-  if (!lesson) return { ok: false, error: "Lesson not found" };
+    select: { id: true },
+  })) as { id: string } | null;
+  if (!mod) return { ok: false, error: "Module not found" };
   try {
     await prisma.$transaction(async (tx: TransactionClient) => {
-      await tx.lesson.update({ where: { id }, data: { imageData: null, imageMime: null } });
+      await tx.module.update({ where: { id }, data: { imageData: null, imageMime: null } });
       await recordAction(tx, {
-        type: "training.lesson.image",
-        entityType: "Lesson",
+        type: "training.module.image",
+        entityType: "Module",
         entityId: id,
-        description: "Removed lesson image",
+        description: "Removed module image",
         userId: gate.userId,
       });
     });
-    revalidateTraining(lesson.courseId);
+    await revalidateModuleCourses(id);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Couldn't remove the image" };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Course composition (superuser) — the CourseModule join rows
+// ---------------------------------------------------------------------------
+
+/** Put an existing library module at the END of a course. */
+export async function addModuleToCourse(courseId: string, moduleId: string): Promise<ActionResult> {
+  const gate = await requireSuperuser();
+  if (!gate.ok) return gate;
+  const course = (await prisma.course.findFirst({
+    where: { id: courseId },
+    select: { id: true, titleEn: true },
+  })) as { id: string; titleEn: string } | null;
+  if (!course) return { ok: false, error: "Course not found" };
+  const mod = (await prisma.module.findFirst({
+    where: { id: moduleId },
+    select: { id: true, titleEn: true },
+  })) as { id: string; titleEn: string } | null;
+  if (!mod) return { ok: false, error: "Module not found" };
+  const dup = await prisma.courseModule.findFirst({
+    where: { courseId, moduleId },
+    select: { id: true },
+  });
+  if (dup) return { ok: false, error: "That module is already in this course" };
+  try {
+    await prisma.$transaction(async (tx: TransactionClient) => {
+      const last = await tx.courseModule.aggregate({ where: { courseId }, _max: { rank: true } });
+      const join = await tx.courseModule.create({
+        data: { courseId, moduleId, rank: (last._max.rank ?? 0) + 1 },
+      });
+      await recordAction(tx, {
+        type: "training.course.add_module",
+        entityType: "CourseModule",
+        entityId: join.id,
+        description: `Added module "${mod.titleEn}" to course "${course.titleEn}"`,
+        userId: gate.userId,
+        payload: { courseId, moduleId },
+      });
+    });
+    revalidateTraining(courseId);
+    return { ok: true };
+  } catch (e) {
+    // The @@unique([courseId, moduleId]) also guards a double-click race.
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't add the module" };
+  }
+}
+
+/** Remove the JOIN only — the module stays in the library (and other courses). */
+export async function removeModuleFromCourse(
+  courseId: string,
+  moduleId: string,
+): Promise<ActionResult> {
+  const gate = await requireSuperuser();
+  if (!gate.ok) return gate;
+  const join = (await prisma.courseModule.findFirst({
+    where: { courseId, moduleId },
+    select: { id: true, module: { select: { titleEn: true } }, course: { select: { titleEn: true } } },
+  })) as { id: string; module: { titleEn: string }; course: { titleEn: string } } | null;
+  if (!join) return { ok: false, error: "Module is not in this course" };
+  try {
+    await prisma.$transaction(async (tx: TransactionClient) => {
+      await tx.courseModule.delete({ where: { id: join.id } });
+      await recordAction(tx, {
+        type: "training.course.remove_module",
+        entityType: "CourseModule",
+        entityId: join.id,
+        description: `Removed module "${join.module.titleEn}" from course "${join.course.titleEn}"`,
+        userId: gate.userId,
+        payload: { courseId, moduleId },
+      });
+    });
+    revalidateTraining(courseId);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't remove the module" };
+  }
+}
+
+export async function moveModuleInCourse(
+  courseId: string,
+  moduleId: string,
+  direction: "up" | "down",
+): Promise<ActionResult> {
+  const gate = await requireSuperuser();
+  if (!gate.ok) return gate;
+  // Swap rank with the immediate neighbour join (same pattern as reorderAiKey).
+  const all = (await prisma.courseModule.findMany({
+    where: { courseId },
+    orderBy: [{ rank: "asc" }, { createdAt: "asc" }],
+    select: { id: true, moduleId: true, rank: true },
+  })) as { id: string; moduleId: string; rank: number }[];
+  const idx = all.findIndex((r) => r.moduleId === moduleId);
+  if (idx === -1) return { ok: false, error: "Module is not in this course" };
+  const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+  if (swapIdx < 0 || swapIdx >= all.length) return { ok: true };
+  const here = all[idx];
+  const there = all[swapIdx];
+  await prisma.$transaction([
+    prisma.courseModule.update({ where: { id: here.id }, data: { rank: there.rank } }),
+    prisma.courseModule.update({ where: { id: there.id }, data: { rank: here.rank } }),
+  ]);
+  revalidateTraining(courseId);
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -431,7 +643,7 @@ function parseQuestionConfig(
 }
 
 const createQuestionSchema = z.object({
-  lessonId: z.string().min(1),
+  moduleId: z.string().min(1),
   type: questionTypeSchema,
   promptEn: z.string().trim().min(1, "English prompt is required"),
   promptId: z.string().trim().min(1, "Indonesian prompt is required"),
@@ -448,17 +660,17 @@ export async function createQuestion(input: unknown): Promise<ActionResult<{ id:
   const d = parsed.data;
   const cfg = parseQuestionConfig(d.type, d.config);
   if (!cfg.ok) return cfg;
-  const lesson = (await prisma.lesson.findFirst({
-    where: { id: d.lessonId },
-    select: { id: true, courseId: true },
-  })) as { id: string; courseId: string } | null;
-  if (!lesson) return { ok: false, error: "Lesson not found" };
+  const mod = (await prisma.module.findFirst({
+    where: { id: d.moduleId },
+    select: { id: true },
+  })) as { id: string } | null;
+  if (!mod) return { ok: false, error: "Module not found" };
   try {
     const question = await prisma.$transaction(async (tx: TransactionClient) => {
-      const last = await tx.question.aggregate({ where: { lessonId: d.lessonId }, _max: { rank: true } });
+      const last = await tx.question.aggregate({ where: { moduleId: d.moduleId }, _max: { rank: true } });
       const q = await tx.question.create({
         data: {
-          lessonId: d.lessonId,
+          moduleId: d.moduleId,
           rank: (last._max.rank ?? 0) + 1,
           type: d.type,
           promptEn: d.promptEn,
@@ -472,11 +684,11 @@ export async function createQuestion(input: unknown): Promise<ActionResult<{ id:
         entityId: q.id,
         description: `Added a ${d.type.toLowerCase().replace("_", " ")} question`,
         userId: gate.userId,
-        payload: { lessonId: d.lessonId },
+        payload: { moduleId: d.moduleId },
       });
       return q;
     });
-    revalidateTraining(lesson.courseId);
+    await revalidateModuleCourses(d.moduleId);
     return { ok: true, data: { id: question.id } };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Failed to create question" };
@@ -498,8 +710,8 @@ export async function updateQuestion(id: string, input: unknown): Promise<Action
   }
   const existing = (await prisma.question.findFirst({
     where: { id },
-    select: { id: true, type: true, lesson: { select: { courseId: true } } },
-  })) as { id: string; type: z.infer<typeof questionTypeSchema>; lesson: { courseId: string } } | null;
+    select: { id: true, type: true, moduleId: true },
+  })) as { id: string; type: z.infer<typeof questionTypeSchema>; moduleId: string } | null;
   if (!existing) return { ok: false, error: "Question not found" };
   // The type is immutable after creation — validate against the stored type.
   const cfg = parseQuestionConfig(existing.type, parsed.data.config);
@@ -518,7 +730,7 @@ export async function updateQuestion(id: string, input: unknown): Promise<Action
         userId: gate.userId,
       });
     });
-    revalidateTraining(existing.lesson.courseId);
+    await revalidateModuleCourses(existing.moduleId);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Couldn't save this question" };
@@ -530,8 +742,8 @@ export async function deleteQuestion(id: string): Promise<ActionResult> {
   if (!gate.ok) return gate;
   const existing = (await prisma.question.findFirst({
     where: { id },
-    select: { id: true, lessonId: true, lesson: { select: { courseId: true } } },
-  })) as { id: string; lessonId: string; lesson: { courseId: string } } | null;
+    select: { id: true, moduleId: true },
+  })) as { id: string; moduleId: string } | null;
   if (!existing) return { ok: false, error: "Question not found" };
   try {
     await prisma.$transaction(async (tx: TransactionClient) => {
@@ -542,10 +754,10 @@ export async function deleteQuestion(id: string): Promise<ActionResult> {
         entityId: id,
         description: "Deleted a question",
         userId: gate.userId,
-        payload: { lessonId: existing.lessonId },
+        payload: { moduleId: existing.moduleId },
       });
     });
-    revalidateTraining(existing.lesson.courseId);
+    await revalidateModuleCourses(existing.moduleId);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Couldn't delete this question" };
@@ -557,11 +769,11 @@ export async function moveQuestion(id: string, direction: "up" | "down"): Promis
   if (!gate.ok) return gate;
   const question = (await prisma.question.findFirst({
     where: { id },
-    select: { id: true, lessonId: true, lesson: { select: { courseId: true } } },
-  })) as { id: string; lessonId: string; lesson: { courseId: string } } | null;
+    select: { id: true, moduleId: true },
+  })) as { id: string; moduleId: string } | null;
   if (!question) return { ok: false, error: "Question not found" };
   const all = (await prisma.question.findMany({
-    where: { lessonId: question.lessonId },
+    where: { moduleId: question.moduleId },
     orderBy: [{ rank: "asc" }, { createdAt: "asc" }],
     select: { id: true, rank: true },
   })) as { id: string; rank: number }[];
@@ -575,7 +787,7 @@ export async function moveQuestion(id: string, direction: "up" | "down"): Promis
     prisma.question.update({ where: { id: here.id }, data: { rank: there.rank } }),
     prisma.question.update({ where: { id: there.id }, data: { rank: here.rank } }),
   ]);
-  revalidateTraining(question.lesson.courseId);
+  await revalidateModuleCourses(question.moduleId);
   return { ok: true };
 }
 
@@ -586,13 +798,13 @@ export async function setQuestionImage(id: string, formData: FormData): Promise<
   if (!(file instanceof File)) return { ok: false, error: "No file provided" };
   const question = (await prisma.question.findFirst({
     where: { id },
-    select: { id: true, lesson: { select: { courseId: true } } },
-  })) as { id: string; lesson: { courseId: string } } | null;
+    select: { id: true, moduleId: true },
+  })) as { id: string; moduleId: string } | null;
   if (!question) return { ok: false, error: "Question not found" };
   try {
     const img = await processTrainingImage(file);
     await prisma.$transaction(async (tx: TransactionClient) => {
-      // Buffer → strict Uint8Array for Prisma 6's Bytes type (see setLessonImage).
+      // Buffer → strict Uint8Array for Prisma 6's Bytes type (see setModuleImage).
       await tx.question.update({
         where: { id },
         data: { imageData: new Uint8Array(img.data), imageMime: img.mime },
@@ -605,7 +817,7 @@ export async function setQuestionImage(id: string, formData: FormData): Promise<
         userId: gate.userId,
       });
     });
-    revalidateTraining(question.lesson.courseId);
+    await revalidateModuleCourses(question.moduleId);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Image upload failed" };
@@ -617,8 +829,8 @@ export async function clearQuestionImage(id: string): Promise<ActionResult> {
   if (!gate.ok) return gate;
   const question = (await prisma.question.findFirst({
     where: { id },
-    select: { id: true, lesson: { select: { courseId: true } } },
-  })) as { id: string; lesson: { courseId: string } } | null;
+    select: { id: true, moduleId: true },
+  })) as { id: string; moduleId: string } | null;
   if (!question) return { ok: false, error: "Question not found" };
   try {
     await prisma.$transaction(async (tx: TransactionClient) => {
@@ -631,7 +843,7 @@ export async function clearQuestionImage(id: string): Promise<ActionResult> {
         userId: gate.userId,
       });
     });
-    revalidateTraining(question.lesson.courseId);
+    await revalidateModuleCourses(question.moduleId);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Couldn't remove the image" };
@@ -643,26 +855,30 @@ export async function clearQuestionImage(id: string): Promise<ActionResult> {
 // ---------------------------------------------------------------------------
 
 const submitAttemptSchema = z.object({
-  lessonId: z.string().min(1),
+  courseId: z.string().min(1),
+  moduleId: z.string().min(1),
   answers: z.record(z.unknown()),
 });
 
 /**
- * Mark a lesson attempt SERVER-side (the client never sees the correct
+ * Mark a module attempt SERVER-side (the client never sees the correct
  * answers — see src/server/training.ts) and record it. No superuser gate:
- * every signed-in staff member takes lessons.
+ * every signed-in staff member takes modules.
  *
  * The course rules are enforced HERE, not just in the page render (a server
  * action is a plain POST endpoint — review finding: without these checks a
- * staff member could submit attempts for locked/draft lessons directly and
- * forge course progress):
- *   - the course must be published (non-superusers)
- *   - every earlier-ranked lesson's latest attempt must have passed
- * A lesson with NO questions is a content-only lesson: submitting marks it
+ * staff member could submit attempts for locked/draft modules directly and
+ * forge course progress). The CourseModule JOIN row is the source of truth:
+ *   - it must exist (the module is actually in the course being taken, which
+ *     also proves the module is reachable through at least one course)
+ *   - that course must be published (non-superusers)
+ *   - within THAT course, every earlier-ranked module's latest attempt must
+ *     have passed
+ * A module with NO questions is a content-only module: submitting marks it
  * complete at 100% (otherwise it could never pass and would permanently lock
  * everything after it).
  */
-export async function submitLessonAttempt(
+export async function submitModuleAttempt(
   input: unknown,
 ): Promise<ActionResult<{ score: number; passed: boolean; perQuestion: Record<string, boolean> }>> {
   const session = await auth();
@@ -673,54 +889,66 @@ export async function submitLessonAttempt(
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Validation failed" };
   }
-  const lesson = (await prisma.lesson.findFirst({
-    where: { id: parsed.data.lessonId },
+  const join = (await prisma.courseModule.findFirst({
+    where: { courseId: parsed.data.courseId, moduleId: parsed.data.moduleId },
     select: {
-      id: true,
-      courseId: true,
       rank: true,
-      passPct: true,
-      course: { select: { published: true } },
-      questions: {
-        orderBy: { rank: "asc" },
-        select: { id: true, type: true, config: true },
+      course: { select: { id: true, published: true } },
+      module: {
+        select: {
+          id: true,
+          passPct: true,
+          scormPath: true,
+          questions: {
+            orderBy: { rank: "asc" },
+            select: { id: true, type: true, config: true },
+          },
+        },
       },
     },
   })) as {
-    id: string;
-    courseId: string;
     rank: number;
-    passPct: number;
-    course: { published: boolean };
-    questions: QuestionForMarking[];
+    course: { id: string; published: boolean };
+    module: { id: string; passPct: number; scormPath: string | null; questions: QuestionForMarking[] };
   } | null;
-  if (!lesson) return { ok: false, error: "Lesson not found" };
+  if (!join) return { ok: false, error: "Module not found" };
+  // A SCORM module has zero questions — it would hit the content-only branch
+  // below and auto-pass at 100%. Its completion MUST come from the SCO via
+  // recordScormCompletion; refuse this quiz endpoint for it (mirror of the
+  // guard in scorm-actions.ts). Otherwise a learner could POST an empty
+  // attempt and skip the SCO entirely.
+  if (join.module.scormPath) return { ok: false, error: "Module not found" };
 
   if (!isSuperuser) {
-    if (!lesson.course.published) return { ok: false, error: "Lesson not found" };
-    // Same lock the player page enforces: all earlier-ranked lessons' LATEST
-    // attempts must have passed.
-    const earlier = (await prisma.lesson.findMany({
-      where: { courseId: lesson.courseId, rank: { lt: lesson.rank } },
-      select: { id: true },
-    })) as { id: string }[];
+    if (!join.course.published) return { ok: false, error: "Module not found" };
+    // Same lock the player page enforces: all earlier-ranked modules' LATEST
+    // attempts (in the course being taken) must have passed.
+    const earlier = (await prisma.courseModule.findMany({
+      where: { courseId: join.course.id, rank: { lt: join.rank } },
+      select: { moduleId: true },
+    })) as { moduleId: string }[];
     if (earlier.length > 0) {
-      const latest = await latestAttemptsByLesson(uid, earlier.map((l) => l.id));
-      const allPassed = earlier.every((l) => latest.get(l.id)?.passed);
-      if (!allPassed) return { ok: false, error: "Finish the earlier lessons first." };
+      const latest = await latestAttemptsByModule(uid, earlier.map((e) => e.moduleId));
+      const allPassed = earlier.every((e) => latest.get(e.moduleId)?.passed);
+      if (!allPassed) return { ok: false, error: "Finish the earlier modules first." };
     }
+    // Priced course → an enrollment (paid or granted) is required. Enforced
+    // HERE, not just in the page render, for the same reason as the checks
+    // above: a server action is a plain POST endpoint.
+    const enrolled = await isEnrolledOrFree(join.course.id, uid, session.user.role);
+    if (!enrolled) return { ok: false, error: "Enroll in this course first." };
   }
 
-  // Content-only lesson (no questions): completing it = viewing it.
+  // Content-only module (no questions): completing it = viewing it.
   const result =
-    lesson.questions.length === 0
+    join.module.questions.length === 0
       ? { score: 100, passed: true, perQuestion: {} as Record<string, boolean> }
-      : markAnswers(lesson.questions, parsed.data.answers, lesson.passPct);
+      : markAnswers(join.module.questions, parsed.data.answers, join.module.passPct);
   try {
     await prisma.$transaction(async (tx: TransactionClient) => {
-      const attempt = await tx.lessonAttempt.create({
+      const attempt = await tx.moduleAttempt.create({
         data: {
-          lessonId: lesson.id,
+          moduleId: join.module.id,
           userId: uid,
           score: result.score,
           passed: result.passed,
@@ -729,16 +957,57 @@ export async function submitLessonAttempt(
       });
       await recordAction(tx, {
         type: "training.attempt",
-        entityType: "LessonAttempt",
+        entityType: "ModuleAttempt",
         entityId: attempt.id,
-        description: `Lesson attempt ${result.score}%`,
+        description: `Module attempt ${result.score}%`,
         userId: uid,
-        payload: { lessonId: lesson.id, score: result.score, passed: result.passed },
+        payload: {
+          moduleId: join.module.id,
+          courseId: join.course.id,
+          score: result.score,
+          passed: result.passed,
+        },
       });
     });
-    revalidateTraining(lesson.courseId);
+    revalidateTraining(join.course.id);
     return { ok: true, data: result };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Couldn't save the attempt" };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Course cover image — shown as the course's thumbnail on the Training
+// dashboard and as the hero banner when opened. Absent → the generated
+// gradient cover (src/lib/cover-art.ts).
+// ---------------------------------------------------------------------------
+
+export async function setCourseImage(id: string, formData: FormData): Promise<ActionResult> {
+  const gate = await requireSuperuser();
+  if (!gate.ok) return gate;
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Pick an image file." };
+  const existing = await prisma.course.findFirst({ where: { id }, select: { id: true } });
+  if (!existing) return { ok: false, error: "Course not found" };
+  try {
+    const { data, mime } = await processTrainingImage(file);
+    await prisma.course.update({
+      where: { id },
+      data: { imageData: new Uint8Array(data), imageMime: mime },
+    });
+    revalidateTraining(id);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't save the image" };
+  }
+}
+
+export async function clearCourseImage(id: string): Promise<ActionResult> {
+  const gate = await requireSuperuser();
+  if (!gate.ok) return gate;
+  const existing = await prisma.course.findFirst({ where: { id }, select: { id: true } });
+  if (!existing) return { ok: false, error: "Course not found" };
+  await prisma.course.update({ where: { id }, data: { imageData: null, imageMime: null } });
+  revalidateTraining(id);
+  return { ok: true };
 }

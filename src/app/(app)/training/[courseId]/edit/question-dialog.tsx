@@ -32,7 +32,7 @@ import {
   QUESTION_TYPE_LABELS,
   type QuestionRow,
   type QuestionType,
-} from "@/app/(app)/training/[courseId]/edit/edit-client";
+} from "@/app/(app)/training/module-editor";
 
 type OptionRow = { en: string; id: string; correct: boolean };
 type ItemRow = { en: string; id: string };
@@ -79,13 +79,14 @@ function initItems(question: QuestionRow | null): ItemRow[] {
  * (updateQuestion only accepts prompts + config). Mounted only while open so
  * state resets each time. On create, the optional image is uploaded in a
  * second call after the row exists (setQuestionImage needs the id).
+ * Used from both the course composer and the module library.
  */
 export function QuestionDialog({
-  lessonId,
+  moduleId,
   question,
   onClose,
 }: {
-  lessonId: string;
+  moduleId: string;
   question: QuestionRow | null;
   onClose: () => void;
 }) {
@@ -149,7 +150,7 @@ export function QuestionDialog({
           return;
         }
       } else {
-        const r = await createQuestion({ lessonId, type, promptEn: pe, promptId: pi, config });
+        const r = await createQuestion({ moduleId, type, promptEn: pe, promptId: pi, config });
         if (!r.ok) {
           toast.error(r.error);
           return;

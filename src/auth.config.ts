@@ -16,7 +16,7 @@ export default {
         // user.role is populated by the Credentials.authorize callback in
         // src/auth.ts. Default to "USER" so middleware never sees undefined.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const r = (user as any).role as "USER" | "SUPERUSER" | undefined;
+        const r = (user as any).role as "USER" | "SUPERUSER" | "PORTAL" | undefined;
         token.role = r ?? "USER";
         // Owner allow-list: any email in OWNER_EMAILS (comma-separated env var)
         // is always treated as a superuser, regardless of how the account was
@@ -36,7 +36,7 @@ export default {
     session: ({ session, token }) => {
       if (session.user) {
         if (token.id) session.user.id = token.id as string;
-        session.user.role = (token.role as "USER" | "SUPERUSER" | undefined) ?? "USER";
+        session.user.role = (token.role as "USER" | "SUPERUSER" | "PORTAL" | undefined) ?? "USER";
       }
       return session;
     },

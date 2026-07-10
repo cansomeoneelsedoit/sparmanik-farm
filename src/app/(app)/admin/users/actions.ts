@@ -21,7 +21,9 @@ async function assertSuperuser(): Promise<{ ok: true; userId: string } | { ok: f
 const createSchema = z.object({
   name: z.string().min(1),
   email: z.string().email(),
-  role: z.enum(["USER", "SUPERUSER"]).default("USER"),
+  // PORTAL = education-only login: same account + org membership as everyone
+  // else, but the proxy fences them into /training*.
+  role: z.enum(["USER", "SUPERUSER", "PORTAL"]).default("USER"),
   password: z.string().min(6),
 });
 
@@ -59,7 +61,7 @@ export async function createUser(input: unknown): Promise<ActionResult<{ id: str
 const updateSchema = z.object({
   name: z.string().min(1),
   email: z.string().email(),
-  role: z.enum(["USER", "SUPERUSER"]),
+  role: z.enum(["USER", "SUPERUSER", "PORTAL"]),
 });
 
 export async function updateUser(id: string, input: unknown): Promise<ActionResult> {
@@ -67,9 +69,9 @@ export async function updateUser(id: string, input: unknown): Promise<ActionResu
   if (!auth.ok) return auth;
   const parsed = updateSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Validation failed" };
-  // Refuse to demote the last remaining superuser — leaves no one to run
-  // /admin/users.
-  if (parsed.data.role === "USER") {
+  // Refuse to demote the last remaining superuser (to USER *or* PORTAL) —
+  // leaves no one to run /admin/users.
+  if (parsed.data.role !== "SUPERUSER") {
     const target = await prisma.user.findUnique({ where: { id }, select: { role: true } });
     if (target?.role === "SUPERUSER") {
       const supers = await prisma.user.count({ where: { role: "SUPERUSER" } });

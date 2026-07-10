@@ -159,6 +159,10 @@ enum AiRole {
 enum UserRole {
   USER
   SUPERUSER
+  /** Education-portal-only login: sees ONLY the Training section (courses,
+   *  player, certificates). Every other page/action redirects away. For
+   *  students/outsiders who must never touch farm operations. */
+  PORTAL
 }
 
 enum OrgRole {
@@ -207,9 +211,11 @@ model Organization {
   paymentGatewayCredentials PaymentGatewayCredential[]
   mailAccounts    MailAccount[]
   courses         Course[]
-  lessons         Lesson[]
+  courseModules   CourseModule[]
+  modules         Module[]
   questions       Question[]
-  lessonAttempts  LessonAttempt[]
+  moduleAttempts  ModuleAttempt[]
+  courseEnrollments CourseEnrollment[]
 
   @@map("organizations")
 }
@@ -981,19 +987,25 @@ model Video {
   createdAt      DateTime  @default(now()) @map("created_at")
 
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  lessons      Lesson[]
+  modules      Module[]
 
   @@index([organizationId])
   @@map("videos")
 }
 
 // ============================================================================
-// Training — Boyd's in-app learning platform. A Course is an ordered series of
-// Lessons (video / pictures / text) each followed by auto-marked Questions;
-// passing a lesson unlocks the next. Question payloads live in a JSON `config`
-// so the four types (multiple choice, fill-the-blank, ordering, photo-spot)
-// share one table; marking is SERVER-side only (the player never receives the
-// correct answers — see src/server/training.ts).
+// Training — Boyd's in-app learning platform. A Course composes reusable
+// MODULES (video / pictures / text, each with auto-marked Questions) through
+// the CourseModule join — the same module can sit in many courses, and modules
+// can exist standalone in the library. Passing a module unlocks the next in
+// that course. Question payloads live in a JSON `config` so the four types
+// (multiple choice, fill-the-blank, ordering, photo-spot) share one table;
+// marking is SERVER-side only (the player never receives the correct answers
+// — see src/server/training.ts).
+//
+// Naming note: the DB tables keep their original names (lessons /
+// lesson_attempts / lesson_id) from before the modules refactor — only the
+// Prisma models and the UI say "module".
 // ============================================================================
 
 enum QuestionType {
@@ -1011,22 +1023,73 @@ model Course {
   description    String?
   /** Staff only see published courses; drafts are builder-only. */
   published      Boolean  @default(false)
+  /** Price in IDR. Null/0 = free. Priced courses need an enrollment (paid or
+   *  granted) before the modules open; everyone can still SEE the course card. */
+  priceIdr       Decimal? @db.Decimal(18, 4) @map("price_idr")
+  /** Optional cover picture shown on the course card + hero (inline WebP, same
+   *  pattern as Module.imageData). Absent → the generated gradient cover
+   *  (src/lib/cover-art.ts) is used instead. */
+  imageData      Bytes?   @map("image_data")
+  imageMime      String?  @map("image_mime")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  lessons      Lesson[]
+  modules      CourseModule[]
+  enrollments  CourseEnrollment[]
 
   @@index([organizationId])
   @@map("courses")
 }
 
-model Lesson {
+/** Access to a priced course: created when the learner pays (recorded manually
+ *  for now — Boyd collects the money however suits) or when the owner grants
+ *  free access. Free courses need no enrollment. */
+model CourseEnrollment {
   id             String   @id @default(cuid())
   organizationId String?  @map("organization_id")
   courseId       String   @map("course_id")
-  /** Order within the course; lesson N+1 unlocks when N is passed. */
+  userId         String   @map("user_id")
+  /** What was actually paid (IDR); null for granted/free enrollments. */
+  paidAmount     Decimal? @db.Decimal(18, 4) @map("paid_amount")
+  /** How it was paid — "cash" / "transfer" / "granted" etc. Free text. */
+  paidVia        String?  @map("paid_via")
+  note           String?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  course       Course        @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, userId])
+  @@index([organizationId])
+  @@index([userId])
+  @@map("course_enrollments")
+}
+
+/** A module's place (and order) inside a course. Deleting a course removes its
+ *  join rows but NOT the modules — they stay in the library for reuse. */
+model CourseModule {
+  id             String   @id @default(cuid())
+  organizationId String?  @map("organization_id")
+  courseId       String   @map("course_id")
+  moduleId       String   @map("module_id")
+  /** Order within the course; module N+1 unlocks when N is passed. */
   rank           Int
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  course       Course        @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  module       Module        @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, moduleId])
+  @@index([organizationId])
+  @@index([courseId, rank])
+  @@map("course_modules")
+}
+
+model Module {
+  id             String   @id @default(cuid())
+  organizationId String?  @map("organization_id")
   titleEn        String   @map("title_en")
   titleId        String   @map("title_id")
   /** Optional teaching video — reuses the Videos library (TikTok/IG/upload). */
@@ -1037,26 +1100,30 @@ model Lesson {
   /** Optional teaching picture, stored inline (same pattern as Item.photoData). */
   imageData      Bytes?   @map("image_data")
   imageMime      String?  @map("image_mime")
-  /** Minimum score (%) to pass and unlock the next lesson. */
+  /** SCORM 1.2 package: directory under uploads/scorm/<id>/ holding the
+   *  extracted zip, plus the launch href from imsmanifest.xml
+   *  ("<dir>|<launchHref>"). Played in an iframe with a window.API shim that
+   *  reports completion/score into ModuleAttempt. Null = not a SCORM module. */
+  scormPath      String?  @map("scorm_path")
+  /** Minimum score (%) to pass and unlock the next module. */
   passPct        Int      @default(80) @map("pass_pct")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  course       Course        @relation(fields: [courseId], references: [id], onDelete: Cascade)
   video        Video?        @relation(fields: [videoId], references: [id], onDelete: SetNull)
+  courses      CourseModule[]
   questions    Question[]
-  attempts     LessonAttempt[]
+  attempts     ModuleAttempt[]
 
   @@index([organizationId])
-  @@index([courseId, rank])
   @@map("lessons")
 }
 
 model Question {
   id             String       @id @default(cuid())
   organizationId String?      @map("organization_id")
-  lessonId       String       @map("lesson_id")
+  moduleId       String       @map("lesson_id")
   rank           Int
   type           QuestionType
   promptEn       String       @map("prompt_en")
@@ -1073,17 +1140,17 @@ model Question {
   updatedAt      DateTime     @updatedAt @map("updated_at")
 
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  lesson       Lesson        @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  module       Module        @relation(fields: [moduleId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
-  @@index([lessonId, rank])
+  @@index([moduleId, rank])
   @@map("questions")
 }
 
-model LessonAttempt {
+model ModuleAttempt {
   id             String   @id @default(cuid())
   organizationId String?  @map("organization_id")
-  lessonId       String   @map("lesson_id")
+  moduleId       String   @map("lesson_id")
   userId         String   @map("user_id")
   /** 0–100, marked server-side. */
   score          Int
@@ -1093,10 +1160,10 @@ model LessonAttempt {
   createdAt      DateTime @default(now()) @map("created_at")
 
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  lesson       Lesson        @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  module       Module        @relation(fields: [moduleId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
-  @@index([lessonId, userId])
+  @@index([moduleId, userId])
   @@index([userId])
   @@map("lesson_attempts")
 }

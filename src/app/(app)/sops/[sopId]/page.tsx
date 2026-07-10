@@ -6,14 +6,18 @@ import { prisma } from "@/server/prisma";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { auth } from "@/auth";
 import { LocalizedText } from "@/components/shared/localized-text";
 import { SopFormDialog } from "@/app/(app)/sops/sop-form-dialog";
 import { SopActions } from "@/app/(app)/sops/[sopId]/sop-actions";
+import { BuildCourseButton } from "@/app/(app)/sops/build-course-button";
 
 export const dynamic = "force-dynamic";
 
 export default async function SopDetailPage({ params }: { params: Promise<{ sopId: string }> }) {
   const { sopId } = await params;
+  const session = await auth();
+  const isSuperuser = session?.user?.role === "SUPERUSER";
   // findFirst — see harvest detail page for the rationale.
   const sop = await prisma.sop.findFirst({
     where: { id: sopId },
@@ -34,6 +38,7 @@ export default async function SopDetailPage({ params }: { params: Promise<{ sopI
           <Badge variant={sop.status === "ACTIVE" ? "accent" : "secondary"}>{sop.status}</Badge>
         </div>
         <div className="flex gap-2">
+          {isSuperuser ? <BuildCourseButton sopId={sop.id} /> : null}
           <SopFormDialog
             existing={{
               id: sop.id,

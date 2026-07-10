@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Youtube } from "lucide-react";
+import { Youtube } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -16,23 +16,29 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { JobProgressBar } from "@/components/shared/job-progress-bar";
 
 import { createCourseFromYouTube } from "./youtube-actions";
 
 /**
  * "Course from YouTube" — paste a link, AI watches the video and drafts the
- * whole course (lessons + bilingual questions). Lands unpublished in the
+ * whole course (modules + bilingual questions). Lands unpublished in the
  * builder for review. Superuser-only surface (the action is gated too).
+ * A live status bar (real stages + elapsed time) replaces the old spinner.
  */
 export function FromYouTubeDialog() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState("");
+  const [jobId, setJobId] = useState<string | null>(null);
   const [pending, startT] = useTransition();
 
   function generate() {
+    const id = crypto.randomUUID();
+    setJobId(id);
     startT(async () => {
-      const r = await createCourseFromYouTube({ url: url.trim() });
+      const r = await createCourseFromYouTube({ url: url.trim(), jobId: id });
+      setJobId(null);
       if (r.ok && r.data) {
         toast.success("Draft course created — review it before publishing.");
         setOpen(false);
@@ -77,11 +83,17 @@ export function FromYouTubeDialog() {
             />
           </div>
           {pending ? (
-            <div className="flex items-center gap-3 rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-              AI is watching the video and writing the course — this can take a
-              couple of minutes for a long video. Keep this open.
-            </div>
+            <JobProgressBar
+              jobId={jobId}
+              active={pending}
+              stages={{
+                _default: "Sending the video to the AI…",
+                watching: "AI is watching the video and writing the course…",
+                saving: "Saving modules",
+                done: "Done!",
+                error: "Something went wrong",
+              }}
+            />
           ) : (
             <p className="text-xs text-muted-foreground">
               The AI watches the video, splits it into lessons in teaching order,

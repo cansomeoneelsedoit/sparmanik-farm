@@ -40,9 +40,11 @@ const ORG_SCOPED_MODELS = new Set([
   "PaymentGatewayCredential",
   "MailAccount",
   "Course",
-  "Lesson",
+  "CourseModule",
+  "Module",
   "Question",
-  "LessonAttempt",
+  "ModuleAttempt",
+  "CourseEnrollment",
 ]);
 
 const READ_OPS = new Set([

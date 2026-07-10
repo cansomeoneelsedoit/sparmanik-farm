@@ -32,7 +32,7 @@ import { updateUser, resetUserPassword, deleteUser } from "@/app/(app)/admin/use
 const editSchema = z.object({
   name: z.string().min(1),
   email: z.string().email(),
-  role: z.enum(["USER", "SUPERUSER"]),
+  role: z.enum(["USER", "SUPERUSER", "PORTAL"]),
 });
 type EditForm = z.infer<typeof editSchema>;
 
@@ -43,7 +43,7 @@ export function UserTableActions({
   user,
   isSelf,
 }: {
-  user: { id: string; name: string; email: string; role: "USER" | "SUPERUSER" };
+  user: { id: string; name: string; email: string; role: "USER" | "SUPERUSER" | "PORTAL" };
   isSelf: boolean;
 }) {
   const router = useRouter();
@@ -112,11 +112,12 @@ export function UserTableActions({
               <div className="space-y-2"><Label>Email</Label><Input type="email" {...editForm.register("email")} /></div>
               <div className="space-y-2">
                 <Label>Role</Label>
-                <Select value={editForm.watch("role")} onValueChange={(v) => editForm.setValue("role", v as "USER" | "SUPERUSER")}>
+                <Select value={editForm.watch("role")} onValueChange={(v) => editForm.setValue("role", v as "USER" | "SUPERUSER" | "PORTAL")}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="USER">User</SelectItem>
                     <SelectItem value="SUPERUSER">Superuser</SelectItem>
+                    <SelectItem value="PORTAL">Portal (education only)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

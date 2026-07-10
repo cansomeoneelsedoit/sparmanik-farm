@@ -15,7 +15,7 @@ const schema = z.object({
 });
 
 /**
- * AI-draft quiz questions from lesson material (superuser-only — spends AI
+ * AI-draft quiz questions from module material (superuser-only — spends AI
  * credits). Returns drafts for REVIEW in the builder; nothing is saved until
  * Boyd ticks the ones he wants and they go through the normal createQuestion
  * validation.

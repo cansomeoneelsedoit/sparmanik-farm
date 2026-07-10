@@ -67,3 +67,4 @@ local-premerge-backup.sql
 use me to upload.txt
 prod-backup-*.sql
 tmp-sync/
+.sop-ingest.pdf
