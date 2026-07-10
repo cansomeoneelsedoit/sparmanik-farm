@@ -29,11 +29,11 @@ import { createCustomerQuick } from "@/app/(app)/harvest/actions";
 
 import { NumpadInput } from "./numpad-input";
 import { PaymentPanel, type PaymentResult } from "./payment-panel";
-import { recordPosSale } from "./actions";
+import { emailPosReceipt, recordPosSale } from "./actions";
 
 type Produce = { id: string; name: string };
 type Cycle = { id: string; label: string; produces: Produce[] };
-type Customer = { id: string; name: string; type: string };
+type Customer = { id: string; name: string; type: string; email?: string | null };
 type PackagingItem = { id: string; name: string; unit: string; cost: string };
 type Grade = "A" | "B" | "C" | "D";
 
@@ -121,6 +121,10 @@ export function PosClient({
   const [phase, setPhase] = useState<"cart" | "pay" | "done">("cart");
   const [pending, startT] = useTransition();
   const [done, setDone] = useState<{ paymentId: string; changeDue?: string } | null>(null);
+  // Email-receipt form on the success screen (prefilled from the customer).
+  const [receiptEmail, setReceiptEmail] = useState("");
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
 
   const [online, setOnline] = useState(true);
   useEffect(() => {
@@ -299,6 +303,9 @@ export function PosClient({
       });
       if (r.ok && r.data) {
         setDone({ paymentId: r.data.paymentId, changeDue: result.changeDue });
+        // Prefill the receipt-email form from the sale's customer.
+        setReceiptEmail(customers.find((c) => c.id === customerId)?.email ?? "");
+        setEmailSent(false);
         setPhase("done");
       } else if (!r.ok) {
         toast.error(r.error);
@@ -315,7 +322,25 @@ export function PosClient({
     setDiscountTouched(false);
     resetEditor();
     setDone(null);
+    setReceiptEmail("");
+    setEmailSent(false);
     setPhase("cart");
+  }
+
+  async function sendReceiptByEmail() {
+    if (!done) return;
+    setEmailSending(true);
+    try {
+      const r = await emailPosReceipt({ paymentId: done.paymentId, to: receiptEmail.trim() });
+      if (r.ok) {
+        setEmailSent(true);
+        toast.success(t("emailSent"));
+      } else {
+        toast.error(r.error);
+      }
+    } finally {
+      setEmailSending(false);
+    }
   }
 
   // ---- No live cycles -------------------------------------------------------
@@ -357,6 +382,30 @@ export function PosClient({
               <Receipt className="mr-1 h-4 w-4" /> {t("receipt")}
             </a>
           </Button>
+        </div>
+
+        {/* Email the receipt (from the farm Gmail — a copy lands in its Sent
+            folder). Prefilled from the sale's customer when known. */}
+        <div className="w-full max-w-sm rounded-xl border bg-card p-4">
+          <Label className="text-xs">{t("emailReceipt")}</Label>
+          <div className="mt-2 flex items-center gap-2">
+            <Input
+              type="email"
+              value={receiptEmail}
+              onChange={(e) => {
+                setReceiptEmail(e.target.value);
+                setEmailSent(false);
+              }}
+              placeholder={t("emailPlaceholder")}
+              disabled={emailSending}
+            />
+            <Button
+              onClick={sendReceiptByEmail}
+              disabled={emailSending || emailSent || !/^\S+@\S+\.\S+$/.test(receiptEmail.trim())}
+            >
+              {emailSending ? t("emailSending") : emailSent ? t("emailSentShort") : t("emailSend")}
+            </Button>
+          </div>
         </div>
       </div>
     );

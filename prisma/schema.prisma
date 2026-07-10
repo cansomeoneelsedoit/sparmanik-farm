@@ -205,6 +205,7 @@ model Organization {
   stockSales      StockSale[]
   posPayments     PosPayment[]
   paymentGatewayCredentials PaymentGatewayCredential[]
+  mailAccounts    MailAccount[]
 
   @@map("organizations")
 }
@@ -680,6 +681,32 @@ model PosPayment {
   @@index([organizationId])
   @@index([status])
   @@map("pos_payments")
+}
+
+// Outgoing-mail account for receipt emails (Gmail via SMTP + App Password).
+// Mirrors the AiProviderKey pattern: the secret is stored server-side and only
+// a masked tail is ever sent to the client. Sending through smtp.gmail.com
+// means every receipt lands in the Gmail account's own Sent folder — the copy
+// Boyd wants. One row per org in practice.
+model MailAccount {
+  id             String    @id @default(cuid())
+  organizationId String?   @map("organization_id")
+  /** The Gmail address mail is sent AS (e.g. sparamanikfarm@gmail.com). */
+  email          String
+  /** Google App Password (NOT the account password — requires 2-Step
+   *  Verification on the account; created at myaccount.google.com/apppasswords). */
+  appPassword    String    @map("app_password")
+  enabled        Boolean   @default(true)
+  lastStatus     String?   @map("last_status")
+  lastUsedAt     DateTime? @map("last_used_at")
+  lastError      String?   @map("last_error")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("mail_accounts")
 }
 
 // Per-org payment-gateway credentials (Phase 2/3). Mirrors AiProviderKey: the

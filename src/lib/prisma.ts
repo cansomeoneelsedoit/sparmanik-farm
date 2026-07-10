@@ -38,6 +38,7 @@ const ORG_SCOPED_MODELS = new Set([
   "StockSale",
   "PosPayment",
   "PaymentGatewayCredential",
+  "MailAccount",
 ]);
 
 const READ_OPS = new Set([

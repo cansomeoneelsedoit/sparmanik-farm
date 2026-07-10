@@ -507,6 +507,12 @@
     "saleComplete": "Sale complete",
     "newSale": "New sale",
     "receipt": "Receipt",
+    "emailReceipt": "Email the receipt",
+    "emailPlaceholder": "customer@email.com",
+    "emailSend": "Send",
+    "emailSending": "Sending…",
+    "emailSent": "Receipt emailed — a copy is in the farm Gmail's Sent folder",
+    "emailSentShort": "Sent ✓",
     "noCyclesTitle": "No live cycles",
     "noCyclesBody": "Start a greenhouse cycle before you can sell its produce here.",
     "goToGreenhouses": "Go to Greenhouses"

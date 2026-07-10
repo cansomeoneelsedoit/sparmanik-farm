@@ -7,6 +7,7 @@ import { prisma } from "@/server/prisma";
 import { auth } from "@/auth";
 import { recordAction } from "@/server/audit";
 import { createSaleTx, distributeCartTotal } from "@/server/sales";
+import { sendReceiptEmail } from "@/server/mailer";
 import { Decimal, type TransactionClient } from "@/server/decimal";
 
 export type ActionResult<T = void> =
@@ -152,4 +153,20 @@ export async function recordPosSale(
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Failed to record sale" };
   }
+}
+
+/**
+ * Email the receipt for a POS payment to a customer address. Any signed-in
+ * staff member can send (it's part of taking a sale); the FROM account is the
+ * org's Gmail configured in Settings → Email. Every send lands a copy in that
+ * Gmail's Sent folder.
+ */
+export async function emailPosReceipt(input: unknown): Promise<ActionResult> {
+  const parsed = z
+    .object({ paymentId: z.string().min(1), to: z.string().email() })
+    .safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Enter a valid email address." };
+  const session = await auth();
+  if (!session?.user) return { ok: false, error: "Not signed in." };
+  return sendReceiptEmail(parsed.data.paymentId, parsed.data.to);
 }
