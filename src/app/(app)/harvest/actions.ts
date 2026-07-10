@@ -9,6 +9,7 @@ import { requireSuperuser } from "@/server/authz";
 import { recordAction } from "@/server/audit";
 import { consumeFifo } from "@/server/fifo";
 import { Decimal, type TransactionClient } from "@/server/decimal";
+import { createSaleTx, hasOverride } from "@/server/sales";
 
 export type ActionResult<T = void> =
   | { ok: true; data?: T }
@@ -197,10 +198,6 @@ const updateSaleSchema = z.object({
   amountOverride: z.string().optional(),
 });
 
-/** True when the override string is a usable number we should apply. */
-function hasOverride(v: string | undefined): v is string {
-  return v !== undefined && v.trim() !== "" && /^[0-9]+(\.[0-9]+)?$/.test(v.trim());
-}
 
 export async function updateSale(id: string, input: unknown): Promise<ActionResult> {
   const parsed = updateSaleSchema.safeParse(input);
@@ -838,86 +835,10 @@ export async function logSale(input: unknown): Promise<ActionResult> {
   if (!parsed.success) return { ok: false, error: "Validation failed" };
   const userId = await uid();
   const d = parsed.data;
-  const hasPackaging = !!(d.packagingItemId && d.packagingQty && Number(d.packagingQty) > 0);
   try {
+    // Single verified sale-creation path, shared with the POS register.
     await prisma.$transaction(async (tx: TransactionClient) => {
-      const weight = new Decimal(d.weight);
-      const price = new Decimal(d.pricePerKg);
-      let amount = weight.times(price);
-
-      // Packaging charged "on top" adds to the sale total (revenue). Track it
-      // separately so discount stats can exclude it — otherwise a boxed sale
-      // reads as a markup and cancels real discounts (app review #15).
-      let packagingCharge = new Decimal(0);
-      if (hasPackaging && d.packagingMode === "ontop") {
-        packagingCharge = new Decimal(d.packagingChargePerUnit || "0").times(d.packagingQty as string);
-        amount = amount.plus(packagingCharge);
-      }
-
-      // Manual total override (discount/markup) wins over the computed total.
-      // weight + price are still stored above so yield/reporting stay honest.
-      // The override is a single figure with no known packaging split, so zero
-      // the stored packagingCharge — otherwise "produce charged = amount −
-      // packaging" could go negative and overstate the discount (review follow-up).
-      if (hasOverride(d.amountOverride)) {
-        amount = new Decimal(d.amountOverride);
-        packagingCharge = new Decimal(0);
-      }
-
-      const sale = await tx.sale.create({
-        data: {
-          harvestId: d.harvestId,
-          produceId: d.produceId,
-          date: new Date(d.date),
-          grade: d.grade,
-          weight,
-          pricePerKg: price,
-          amount,
-          packagingCharge,
-          customerId: d.customerId || null,
-        },
-      });
-      await recordAction(tx, {
-        type: "harvest.log_sale",
-        entityType: "Sale",
-        entityId: sale.id,
-        description: `Logged sale`,
-        userId,
-        payload: { harvestId: d.harvestId, saleId: sale.id, customerId: d.customerId ?? null },
-      });
-
-      // Consume the packaging from inventory onto this cycle's usage (FIFO
-      // cost). This is the real cost; the on-top charge above is the revenue.
-      if (hasPackaging) {
-        const { consumed } = await consumeFifo(tx, d.packagingItemId as string, d.packagingQty as string);
-        const usage = await tx.harvestUsage.create({
-          data: {
-            harvestId: d.harvestId,
-            itemId: d.packagingItemId as string,
-            qty: new Decimal(d.packagingQty as string),
-            displayQty: `${d.packagingQty} for sale packaging`,
-            date: new Date(d.date),
-          },
-        });
-        for (const c of consumed) {
-          await tx.batchConsumption.create({
-            data: {
-              batchId: c.batchId,
-              qty: new Decimal(c.qty),
-              unitCost: new Decimal(c.unitCost),
-              harvestUsageId: usage.id,
-            },
-          });
-        }
-        await recordAction(tx, {
-          type: "harvest.use_stock",
-          entityType: "HarvestUsage",
-          entityId: usage.id,
-          description: `Packaging used for sale`,
-          userId,
-          payload: { harvestId: d.harvestId, usageId: usage.id, viaSale: sale.id },
-        });
-      }
+      await createSaleTx(tx, d, { userId, paymentStatus: "PAID" });
     });
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Failed to log sale" };

@@ -36,6 +36,8 @@ const ORG_SCOPED_MODELS = new Set([
   "LabourTask",
   "AiProviderKey",
   "StockSale",
+  "PosPayment",
+  "PaymentGatewayCredential",
 ]);
 
 const READ_OPS = new Set([

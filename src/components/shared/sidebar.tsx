@@ -9,6 +9,7 @@ import {
   Calendar,
   ChevronDown,
   ClipboardList,
+  CreditCard,
   DollarSign,
   Flag,
   FolderTree,
@@ -113,6 +114,7 @@ export function SidebarContent({
   // section underneath.
   const nav: NavNode[] = [
     { key: "dashboard", href: "/", icon: LayoutDashboard },
+    { key: "pos", href: "/pos", fallback: "Register", icon: CreditCard },
     { key: "harvest", href: "/harvest", icon: Leaf },
     { key: "inventory", href: "/inventory", icon: Package },
     { key: "staff", href: "/staff", icon: UserCircle2 },

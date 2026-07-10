@@ -136,7 +136,31 @@ export function registerAllUndoHandlers() {
     await tx.harvestAsset.delete({ where: { id: action.entityId } });
   });
   registerUndoHandler("harvest.log_sale", async (tx, action) => {
+    // Keep the POS basket invariant (PosPayment.grossAmount == Σ its sale rows).
+    // A single-dialog sale has no paymentId, so this is a no-op there.
+    const sale = await tx.sale.findUnique({
+      where: { id: action.entityId },
+      select: { amount: true, paymentId: true },
+    });
+    if (!sale) return; // already removed (e.g. the whole basket was voided)
     await tx.sale.delete({ where: { id: action.entityId } });
+    if (sale.paymentId) {
+      const remaining = await tx.sale.count({ where: { paymentId: sale.paymentId } });
+      if (remaining === 0) {
+        await tx.posPayment.delete({ where: { id: sale.paymentId } });
+      } else {
+        await tx.posPayment.update({
+          where: { id: sale.paymentId },
+          data: { grossAmount: { decrement: sale.amount } },
+        });
+      }
+    }
+  });
+  // Void a whole POS basket: delete all its sale lines, then the payment. (The
+  // top-level history entry for a register sale.)
+  registerUndoHandler("pos.record_sale", async (tx, action) => {
+    await tx.sale.deleteMany({ where: { paymentId: action.entityId } });
+    await tx.posPayment.delete({ where: { id: action.entityId } });
   });
 
   // ---- Destructive edits/deletes recorded in Batch C (app review #29). ----
