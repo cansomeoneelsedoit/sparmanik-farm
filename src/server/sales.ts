@@ -27,6 +27,11 @@ export type SaleLineInput = {
   packagingChargePerUnit?: string;
   /** Override of the charged total (discount/markup). Wins over weight×price. */
   amountOverride?: string;
+  /** Charity donation — still recorded as income; flagged for the charity
+   *  highlight in reporting. */
+  charity?: boolean;
+  /** Optional: which charity/organisation received the produce. */
+  charityRecipient?: string | null;
 };
 
 /** True when the override string is a usable number we should apply. */
@@ -120,6 +125,8 @@ export async function createSaleTx(
       customerId: d.customerId || null,
       paymentStatus: opts.paymentStatus ?? "PAID",
       paymentId: opts.paymentId ?? null,
+      charity: !!d.charity,
+      charityRecipient: d.charity ? d.charityRecipient?.trim() || null : null,
     },
   });
   await recordAction(tx, {

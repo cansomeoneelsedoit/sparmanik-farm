@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   ArrowUpRight,
   DollarSign,
+  HeartHandshake,
   Leaf,
   Package,
   TrendingUp,
@@ -44,7 +45,7 @@ export default async function DashboardPage() {
     prisma.staff.count(),
     prisma.task.count({ where: { status: { not: "COMPLETED" } } }),
     prisma.sale.findMany({
-      select: { amount: true, date: true, weight: true },
+      select: { amount: true, date: true, weight: true, charity: true },
     }),
     prisma.sale.findMany({
       where: { date: { gte: sinceDate } },
@@ -64,7 +65,7 @@ export default async function DashboardPage() {
     }),
   ]);
 
-  type Sale = { amount: Decimal; date: Date; weight: Decimal };
+  type Sale = { amount: Decimal; date: Date; weight: Decimal; charity: boolean };
   type SaleWithRefs = Sale & {
     harvest: { greenhouse: { name: string } };
     produce: { name: string };
@@ -78,6 +79,11 @@ export default async function DashboardPage() {
     (s: Decimal, x) => s.plus(x.weight),
     new Decimal(0),
   );
+  // Charity donations — a SUBSET of the revenue above (same query, no extra
+  // filter), so income shows in full while the donated portion is called out.
+  const charitySales = (allSales as Sale[]).filter((x) => x.charity);
+  const charityRevenue = charitySales.reduce((s: Decimal, x) => s.plus(x.amount), new Decimal(0));
+  const charityWeight = charitySales.reduce((s: Decimal, x) => s.plus(x.weight), new Decimal(0));
   const windowRevenue = (recentSales as SaleWithRefs[]).reduce(
     (s: Decimal, x) => s.plus(x.amount),
     new Decimal(0),
@@ -277,6 +283,35 @@ export default async function DashboardPage() {
           href="/sales"
         />
       </div>
+
+      {/* Charity highlight — only when there are donations. The Rp figure is
+          part of the revenue above; this calls out how much of it was given
+          to charity. */}
+      {charityRevenue.gt(0) ? (
+        <Link href="/financials" className="block">
+          <Card className="border-emerald-200 bg-emerald-50/40 transition hover:shadow-md dark:border-emerald-500/25 dark:bg-emerald-500/5">
+            <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+                  <HeartHandshake className="h-6 w-6" />
+                </div>
+                <div>
+                  <div className="text-[11px] font-medium uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                    Donated to charity
+                  </div>
+                  <div className="text-2xl font-semibold">
+                    <Money value={charityRevenue.toFixed(4)} />
+                  </div>
+                </div>
+              </div>
+              <div className="text-right text-sm">
+                <div className="font-medium text-foreground">{charityWeight.toFixed(1)} kg given</div>
+                <div className="text-muted-foreground">Included in revenue</div>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+      ) : null}
 
       <SalesCharts trend={trend} byGreenhouse={byGreenhouse} byProduce={byProduce} />
 

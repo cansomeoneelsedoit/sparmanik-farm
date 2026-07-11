@@ -649,6 +649,12 @@ model Sale {
   /// The POS basket this sale line was paid under (many lines → one payment).
   /// Non-unique FK: a multi-grade cart is one payment across several Sale rows.
   paymentId      String?   @map("payment_id")
+  /// Charity donation: this produce was given to charity but still counts as
+  /// income (the owner's company pays for it at a set price, default 50k/kg).
+  /// Reporting keeps it in TOTAL revenue AND highlights the charity portion.
+  charity          Boolean  @default(false)
+  /// Optional: which charity/organisation received the produce.
+  charityRecipient String?  @map("charity_recipient")
   createdAt      DateTime  @default(now()) @map("created_at")
 
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)

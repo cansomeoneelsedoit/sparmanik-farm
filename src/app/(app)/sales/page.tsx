@@ -71,6 +71,7 @@ export default async function SalesPage({
     pricePerKg: Decimal;
     amount: Decimal;
     packagingCharge: Decimal;
+    charity: boolean;
     harvest: { id: string; name: string; greenhouse: { name: string } };
     produce: { id: string; name: string };
   };
@@ -89,6 +90,10 @@ export default async function SalesPage({
   const totalList = rows.reduce((s: Decimal, x) => s.plus(x.weight.times(x.pricePerKg)), new Decimal(0));
   const totalProduceCharged = rows.reduce((s: Decimal, x) => s.plus(produceCharged(x)), new Decimal(0));
   const totalDiscount = totalList.minus(totalProduceCharged);
+  // Charity donations — a subset of the revenue above, called out separately.
+  const charityRows = rows.filter((x) => x.charity);
+  const charityRevenue = charityRows.reduce((s: Decimal, x) => s.plus(x.amount), new Decimal(0));
+  const charityWeight = charityRows.reduce((s: Decimal, x) => s.plus(x.weight), new Decimal(0));
 
   type RollupRow = { name: string; revenue: Decimal; weight: Decimal; list: Decimal; charged: Decimal };
   const byGreenhouse = new Map<string, RollupRow>();
@@ -160,12 +165,13 @@ export default async function SalesPage({
 
       <SalesFilters greenhouses={greenhouses} harvests={harvests} />
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
         <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">Records</div><div className="text-2xl font-semibold">{rows.length}</div>{hasFilters ? <div className="text-[10px] text-muted-foreground">filtered</div> : null}</CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">Total weight</div><div className="text-2xl font-semibold">{totalWeight.toFixed(2)} kg</div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">Total revenue</div><div className="text-2xl font-semibold"><MoneyDual value={totalRevenue.toFixed(4)} align="start" /></div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">Avg price / kg</div><div className="text-2xl font-semibold"><MoneyDual value={avgPrice.toFixed(4)} align="start" /></div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">Discount given</div><div className="text-2xl font-semibold text-amber-600">{totalDiscount.gt(0.005) ? <MoneyDual value={totalDiscount.toFixed(4)} align="start" /> : <span className="text-muted-foreground">—</span>}</div>{totalList.gt(0) ? <div className="text-[10px] text-muted-foreground">{totalDiscount.div(totalList).times(100).toFixed(1)}% off list</div> : null}</CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">To charity</div><div className="text-2xl font-semibold text-emerald-600">{charityRevenue.gt(0) ? <MoneyDual value={charityRevenue.toFixed(4)} align="start" /> : <span className="text-muted-foreground">—</span>}</div>{charityWeight.gt(0) ? <div className="text-[10px] text-muted-foreground">{charityWeight.toFixed(1)} kg given</div> : null}</CardContent></Card>
       </div>
 
       <SalesCharts

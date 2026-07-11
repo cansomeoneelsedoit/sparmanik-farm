@@ -43,13 +43,20 @@ export default async function FinancialsPage() {
 
   // --- Revenue: produce sales (greenhouse cycles) + direct stock sales. ---
   const [sales, stockSales] = await Promise.all([
-    prisma.sale.findMany({ select: { amount: true } }),
+    prisma.sale.findMany({ select: { amount: true, charity: true, weight: true } }),
     prisma.stockSale.findMany({ select: { amount: true, cogs: true } }),
   ]);
   const produceRevenue = sales.reduce(
     (s: Decimal, x: { amount: Decimal }) => s.plus(x.amount),
     new Decimal(0),
   );
+  // Charity donations — part of the produce revenue above, called out as a memo
+  // under Total revenue (income shows in full; the donated portion is flagged).
+  const charitySales = (sales as { amount: Decimal; charity: boolean; weight: Decimal }[]).filter(
+    (x) => x.charity,
+  );
+  const charityRevenue = charitySales.reduce((s: Decimal, x) => s.plus(x.amount), new Decimal(0));
+  const charityWeight = charitySales.reduce((s: Decimal, x) => s.plus(x.weight), new Decimal(0));
   // Direct inventory resales ("10 m of pipe to Pak Budi"). Their COST is
   // already inside cogsConsumed below — sale consumptions live in the same
   // FIFO ledger — so adding the revenue here keeps the accrual math clean
@@ -301,6 +308,14 @@ export default async function FinancialsPage() {
               indent
             />
             <Row label="Total revenue" value={revenue.toFixed(4)} positive bold />
+            {charityRevenue.gt(0) ? (
+              <div className="flex items-center justify-between gap-2 pl-4 text-xs text-emerald-700 dark:text-emerald-300">
+                <span>— of which donated to charity ({charityWeight.toFixed(1)} kg)</span>
+                <span className="font-medium">
+                  <MoneyDual value={charityRevenue.toFixed(4)} align="end" />
+                </span>
+              </div>
+            ) : null}
           </Section>
           <Section title="Cost of stock used">
             <Row
