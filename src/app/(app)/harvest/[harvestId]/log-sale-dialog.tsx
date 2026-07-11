@@ -89,6 +89,20 @@ export function LogSaleDialog({
   const [pkgQty, setPkgQty] = useState("1");
   const [pkgMode, setPkgMode] = useState<"included" | "ontop">("included");
   const [pkgCharge, setPkgCharge] = useState(""); // per-unit charge for "ontop"
+  // Charity donation (create-only): recorded as income at a default 50k/kg,
+  // and highlighted in the charity reporting. Editing a charity sale keeps its
+  // flag (updateSale doesn't touch it), so the checkbox is create-only.
+  const CHARITY_DEFAULT_PRICE = "50000";
+  const [charity, setCharity] = useState(false);
+  const [charityRecipient, setCharityRecipient] = useState("");
+  function toggleCharity(on: boolean) {
+    setCharity(on);
+    // Seed the price with the standard 50k/kg when none has been set yet
+    // (still editable afterwards).
+    if (on && (Number(form.getValues("pricePerKg")) || 0) <= 0) {
+      form.setValue("pricePerKg", CHARITY_DEFAULT_PRICE);
+    }
+  }
 
   const defaults: Form = existing
     ? { produceId: existing.produceId, date: existing.date, grade: existing.grade, weight: existing.weight, pricePerKg: existing.pricePerKg }
@@ -146,6 +160,8 @@ export function LogSaleDialog({
     setPkgQty("1");
     setPkgMode("included");
     setPkgCharge("");
+    setCharity(false);
+    setCharityRecipient("");
     setOverrideOn(overrideWasUsed);
     setOverrideAmount(existing ? existing.amount : "");
   }
@@ -172,6 +188,8 @@ export function LogSaleDialog({
             packagingMode: pkgItemId ? pkgMode : undefined,
             packagingChargePerUnit: pkgItemId && pkgMode === "ontop" ? pkgCharge : undefined,
             amountOverride,
+            charity,
+            charityRecipient: charity ? charityRecipient : undefined,
           });
       if (r.ok) {
         toast.success(isEdit ? t("toastUpdated") : t("toastLogged"));
@@ -265,6 +283,39 @@ export function LogSaleDialog({
                 <Input type="number" step="any" min="0" {...form.register("pricePerKg")} />
               </div>
             </div>
+
+            {/* Charity donation (create-only). Still recorded as income (owner's
+                company pays, default 50k/kg); flagged so reporting can highlight
+                the charity portion. */}
+            {!isEdit ? (
+              <div className="space-y-2 rounded-md border border-emerald-200 bg-emerald-50/50 p-3 dark:border-emerald-500/25 dark:bg-emerald-500/5">
+                <label className="flex items-center gap-2 text-sm font-medium">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-emerald-600"
+                    checked={charity}
+                    onChange={(e) => toggleCharity(e.target.checked)}
+                  />
+                  {t("charityLabel")}
+                </label>
+                {charity ? (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">{t("charityHint")}</p>
+                    <div className="space-y-1">
+                      <Label className="text-xs">
+                        {t("charityRecipient")}{" "}
+                        <span className="font-normal text-muted-foreground">{t("optional")}</span>
+                      </Label>
+                      <Input
+                        value={charityRecipient}
+                        onChange={(e) => setCharityRecipient(e.target.value)}
+                        placeholder={t("charityRecipientPlaceholder")}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             {/* Packaging (optional, create-only) — consume a box/bag onto the
                 cycle's usage. Not editable after the fact. */}

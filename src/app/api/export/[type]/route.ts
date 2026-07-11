@@ -53,11 +53,12 @@ export async function GET(
       },
     });
     csv = toCsv(
-      ["Date", "Greenhouse", "Cycle", "Produce", "Grade", "Customer", "Customer type", "Weight (kg)", "Price/kg (Rp)", "Packaging (Rp)", "Amount (Rp)"],
-      (rows as Array<Record<string, unknown> & { date: Date; produce: { name: string }; customer: { name: string; type: string } | null; harvest: { name: string; greenhouse: { name: string } | null } }>).map((s) => [
+      ["Date", "Greenhouse", "Cycle", "Produce", "Grade", "Customer", "Customer type", "Weight (kg)", "Price/kg (Rp)", "Packaging (Rp)", "Amount (Rp)", "Charity", "Charity recipient"],
+      (rows as Array<Record<string, unknown> & { date: Date; produce: { name: string }; customer: { name: string; type: string } | null; harvest: { name: string; greenhouse: { name: string } | null }; charity: boolean; charityRecipient: string | null }>).map((s) => [
         ymd(s.date), s.harvest.greenhouse?.name ?? "", s.harvest.name, s.produce.name, s.grade,
         s.customer?.name ?? "", s.customer?.type ?? "", num(s.weight as never), num(s.pricePerKg as never),
         num(s.packagingCharge as never), num(s.amount as never),
+        s.charity ? "Yes" : "", s.charityRecipient ?? "",
       ]),
     );
     filename = "sales";

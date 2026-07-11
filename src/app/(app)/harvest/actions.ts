@@ -841,6 +841,10 @@ const saleSchema = z.object({
    *  computed weight×price (+ on-top packaging); weight + price/kg stay
    *  recorded so yield/COGS reporting stays accurate. */
   amountOverride: z.string().optional(),
+  /** Charity donation — recorded as income (owner's company pays, default
+   *  50k/kg) and highlighted in the charity reporting. */
+  charity: z.boolean().optional(),
+  charityRecipient: z.string().max(120).optional(),
 });
 
 export async function logSale(input: unknown): Promise<ActionResult> {
