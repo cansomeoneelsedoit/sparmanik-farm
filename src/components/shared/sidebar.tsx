@@ -126,6 +126,12 @@ export function SidebarContent({
     { key: "inventory", href: "/inventory", icon: Package },
     { key: "staff", href: "/staff", icon: UserCircle2 },
     { key: "training", href: "/training", fallback: "Training", icon: GraduationCap },
+    // Student management — the education portal's admin surface. Superuser-only
+    // (the page 404s for everyone else), sits right under Training so the two
+    // education entries are together.
+    ...(isSuperuser
+      ? [{ key: "students", href: "/students", fallback: "Students", icon: Users } satisfies LeafItem]
+      : []),
     {
       label: "Operations",
       id: "operations",

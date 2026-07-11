@@ -76,6 +76,60 @@ export async function sendMail(opts: {
   }
 }
 
+/**
+ * Send a student their "set your password" invite (bilingual). `link` is the
+ * absolute /accept-invite URL (built by the action from the request host, so
+ * it's right on both localhost and Railway). Best-effort — a failure just means
+ * the admin falls back to the temp password shown in the dashboard.
+ */
+export async function sendStudentInvite(opts: {
+  to: string;
+  name: string;
+  link: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const safeName = opts.name.replace(/[<>]/g, "");
+  // The student login door (separate from the staff sign-in) for future logins.
+  let loginUrl = "";
+  try {
+    loginUrl = `${new URL(opts.link).origin}/learn`;
+  } catch {
+    /* malformed link — omit the future-login line */
+  }
+  const html = `
+  <div style="font-family:Arial,Helvetica,sans-serif;max-width:480px;margin:0 auto;color:#18181b;">
+    <div style="text-align:center;padding:16px 0 8px;">
+      <div style="font-size:20px;font-weight:bold;">Sparmanik Farm</div>
+      <div style="font-size:13px;color:#71717a;">Learning Portal · Portal Pembelajaran</div>
+    </div>
+    <p>Hi ${safeName},</p>
+    <p>You've been invited to the Sparmanik Farm learning portal. Click below to set your password and start your courses.</p>
+    <p><em>Anda diundang ke portal pembelajaran Sparmanik Farm. Klik di bawah untuk membuat kata sandi dan memulai kursus Anda.</em></p>
+    <p style="text-align:center;margin:24px 0;">
+      <a href="${opts.link}" style="background:#2563eb;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold;display:inline-block;">
+        Set my password · Buat kata sandi
+      </a>
+    </p>
+    <p style="font-size:12px;color:#71717a;">This link expires in 14 days. If the button doesn't work, copy this URL:<br/>${opts.link}</p>
+    ${loginUrl ? `<p style="font-size:12px;color:#71717a;">After that, sign in any time at <a href="${loginUrl}">${loginUrl}</a></p>` : ""}
+  </div>`;
+  const text = [
+    `Hi ${safeName},`,
+    "",
+    "You've been invited to the Sparmanik Farm learning portal.",
+    "Set your password to start your courses:",
+    opts.link,
+    "",
+    "This link expires in 14 days.",
+    ...(loginUrl ? ["", `After that, sign in any time at ${loginUrl}`] : []),
+  ].join("\n");
+  return sendMail({
+    to: opts.to,
+    subject: "Your Sparmanik Farm learning portal invite",
+    html,
+    text,
+  });
+}
+
 const rp = (v: { toString(): string }) =>
   "Rp " + Math.round(Number(v.toString())).toLocaleString("id-ID");
 

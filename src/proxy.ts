@@ -11,7 +11,11 @@ import authConfig from "@/auth.config";
  */
 const { auth } = NextAuth(authConfig);
 
-const PUBLIC_PATHS = ["/signin"];
+// /accept-invite: a student clicks the emailed "set your password" link BEFORE
+// they have a session, so it must be reachable while signed out (the token in
+// the URL is the credential — validated server-side).
+// /learn: the dedicated student login door (separate from the staff /signin).
+const PUBLIC_PATHS = ["/signin", "/accept-invite", "/learn"];
 
 function isPublic(pathname: string) {
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
@@ -44,8 +48,29 @@ export default auth((req) => {
     return NextResponse.redirect(url);
   }
 
-  // PORTAL logins see ONLY the education portal.
-  if (req.auth.user?.role === "PORTAL" && !isPortalAllowed(nextUrl.pathname)) {
+  // Forced first-login password change: a temp-password student can reach
+  // NOTHING except /set-password (and the auth endpoints / sign-out) until they
+  // choose their own password. Checked before the PORTAL fence so it applies to
+  // every role. The flag clears when the set-password/accept-invite flow
+  // re-authenticates via signIn(), re-minting the JWT from the fresh DB value.
+  if (
+    req.auth.user?.mustChangePassword &&
+    nextUrl.pathname !== "/set-password" &&
+    !nextUrl.pathname.startsWith("/api/")
+  ) {
+    const url = nextUrl.clone();
+    url.pathname = "/set-password";
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
+
+  // PORTAL logins see ONLY the education portal (plus /set-password while the
+  // forced-change flag is set — handled above).
+  if (
+    req.auth.user?.role === "PORTAL" &&
+    nextUrl.pathname !== "/set-password" &&
+    !isPortalAllowed(nextUrl.pathname)
+  ) {
     const url = nextUrl.clone();
     url.pathname = "/training";
     url.search = "";

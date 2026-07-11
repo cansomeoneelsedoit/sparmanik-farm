@@ -41,6 +41,7 @@
     "simulator": "Simulator",
     "users": "Pengguna",
     "training": "Pelatihan",
+    "students": "Siswa",
     "groups": {
       "operations": "Operasional",
       "financial": "Keuangan",
@@ -560,6 +561,8 @@
     "wrong": "Salah",
     "noAnswer": "Tidak dijawab",
     "completedSection": "Kursus yang sudah saya selesaikan",
+    "yourCourses": "Kursus Anda",
+    "browseAll": "Jelajahi semua kursus",
     "completed": "Selesai",
     "certificate": "Sertifikat",
     "getCertificate": "Ambil sertifikat Anda",

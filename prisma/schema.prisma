@@ -21,6 +21,17 @@ model User {
   // Authorisation tier. SUPERUSER can manage other users (create / edit /
   // reset password / delete) via /admin/users. USER is the default.
   role          UserRole  @default(USER)
+  // Optional contact number (students onboarded to the education portal — used
+  // for the WhatsApp "send login" fallback; never used for auth).
+  phone         String?
+  // Student-portal onboarding. When a student is created with a temporary
+  // password, this is true and the proxy forces them to /set-password before
+  // they can reach any course. Cleared once they choose their own password.
+  mustChangePassword Boolean @default(false) @map("must_change_password")
+  // Emailed "set your password" invite: a random token is hashed here (never
+  // stored in the clear) with an expiry. Consumed on /accept-invite.
+  inviteTokenHash   String?   @map("invite_token_hash")
+  inviteTokenExpiry DateTime? @map("invite_token_expiry")
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
