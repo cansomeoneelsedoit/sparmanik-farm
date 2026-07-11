@@ -10,11 +10,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 /**
- * Student login form (credentials only — no Google). On success it sends the
- * user to "/", and the proxy routes them: a PORTAL student lands on /training,
- * anyone else on their dashboard. The forced-first-login password change (if
- * their account still has the temp password) is enforced by the proxy after
- * they're authenticated.
+ * Student login form (credentials only — no Google). On success everyone lands
+ * in the learning portal (/training) — this IS the portal door, so admins/staff
+ * signing in here go into the portal too (they can still reach admin pages via
+ * the sidebar). A temp-password student is intercepted to /set-password by the
+ * proxy before they get there.
  */
 export function LearnLoginForm() {
   const router = useRouter();
@@ -35,9 +35,9 @@ export function LearnLoginForm() {
         toast.error(msg);
         return;
       }
-      // Send to "/"; the proxy forwards a PORTAL student to /training (or to
-      // /set-password first if they still have a temp password).
-      router.replace("/");
+      // Land in the portal. The proxy sends a temp-password student to
+      // /set-password first; everyone else (students, admins) lands on courses.
+      router.replace("/training");
       router.refresh();
     });
   }

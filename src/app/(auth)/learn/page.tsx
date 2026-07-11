@@ -12,12 +12,19 @@ export const dynamic = "force-dynamic";
  * role fence in the proxy — a portal account can only ever reach /training*
  * regardless of which login page it used; this page is the clean, shareable
  * entry point for it (email + password only, no Google SSO).
+ *
+ * Anyone can use this door — admins/staff sign in here with their own logins
+ * with no issue (superusers bypass the fences) — and everyone who comes through
+ * it lands in the learning portal (/training), so an admin can use the portal
+ * from here too. They can still reach admin pages via the sidebar afterwards.
  */
 export default async function LearnLoginPage() {
   const session = await auth();
-  // Already signed in? Don't show a login form — send them where they belong.
+  // Already signed in? Skip the form — this is the portal door, so send them
+  // straight into the portal (a temp-password student is intercepted to
+  // /set-password by the proxy first).
   if (session?.user) {
-    redirect(session.user.role === "PORTAL" ? "/training" : "/");
+    redirect("/training");
   }
 
   return (
