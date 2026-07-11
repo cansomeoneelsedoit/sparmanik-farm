@@ -1,7 +1,10 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
+import { GraduationCap } from "lucide-react";
 
 import { prisma } from "@/server/prisma";
 import { auth } from "@/auth";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -43,10 +46,22 @@ export default async function UsersAdminPage() {
         <div>
           <h1 className="font-serif text-3xl">Users</h1>
           <p className="text-sm text-muted-foreground">
-            Manage logins. Only superusers see this page.
+            Manage logins. Only superusers see this page. To onboard learners and
+            send them portal logins, use{" "}
+            <Link href="/students" className="underline underline-offset-2 hover:text-foreground">
+              Students
+            </Link>
+            .
           </p>
         </div>
-        <CreateUserDialog />
+        <div className="flex items-center gap-2">
+          <Button asChild variant="outline">
+            <Link href="/students">
+              <GraduationCap className="h-4 w-4" /> Students
+            </Link>
+          </Button>
+          <CreateUserDialog />
+        </div>
       </header>
 
       <Card>

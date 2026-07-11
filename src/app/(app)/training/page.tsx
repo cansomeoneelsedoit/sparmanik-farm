@@ -155,6 +155,94 @@ export default async function TrainingPage({
       course.published && total > 0 && done === total && hasCourseAccess(course),
   );
 
+  // "Assigned first, browse the rest": a learner sees the courses they're
+  // enrolled in up top, then the rest of the catalogue. Only when not
+  // searching and they actually have assignments — otherwise (staff/owner, or
+  // an active search) it's the single flat grid.
+  const enrolledList = withProgress.filter((w) => enrolledCourseIds.has(w.course.id));
+  const browseList = withProgress.filter((w) => !enrolledCourseIds.has(w.course.id));
+  const splitView = !q && enrolledList.length > 0;
+
+  const renderGrid = (items: typeof withProgress) => (
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+      {items.map(({ course, total, done }) => {
+        const pct = total === 0 ? 0 : Math.round((done / total) * 100);
+        const title = pickLocalized({ en: course.titleEn, id: course.titleId }, locale);
+        const price = priceLabel(course.priceIdr);
+        return (
+          <Card
+            key={course.id}
+            className="group overflow-hidden transition hover:-translate-y-0.5 hover:shadow-lg"
+          >
+            <CardContent className="flex h-full flex-col p-0">
+              <Link href={`/training/${course.id}`} className="block">
+                <CoverBanner
+                  courseId={course.id}
+                  title={title}
+                  hasImage={Boolean(course.imageMime)}
+                />
+              </Link>
+              <div className="flex flex-1 flex-col gap-3 p-5">
+                <div className="flex items-start justify-between gap-2">
+                  <Link
+                    href={`/training/${course.id}`}
+                    className="min-w-0 flex-1 font-serif text-xl leading-snug hover:underline"
+                  >
+                    {title}
+                  </Link>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {!course.published ? <Badge variant="secondary">{t("draft")}</Badge> : null}
+                    {isSuperuser ? (
+                      <Button asChild size="icon" variant="ghost" title={t("edit")}>
+                        <Link href={`/training/${course.id}/edit`}>
+                          <Pencil className="h-4 w-4" />
+                        </Link>
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+                {course.description ? (
+                  <p className="line-clamp-2 text-sm text-muted-foreground">{course.description}</p>
+                ) : null}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                    <BookOpen className="h-3 w-3" /> {t("moduleCount", { count: total })}
+                  </span>
+                  {price ? (
+                    <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
+                      {price}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+                      {t("free")}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-auto space-y-1.5 pt-1">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>{t("progress", { done, total })}</span>
+                    <span className="font-medium">{pct}%</span>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-accent transition-all"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </div>
+                <Button asChild variant="outline" className="h-11 w-full">
+                  <Link href={`/training/${course.id}`}>
+                    {done >= total && total > 0 ? t("review") : t("start")}
+                  </Link>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })}
+    </div>
+  );
+
   return (
     <div className="space-y-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
@@ -190,88 +278,21 @@ export default async function TrainingPage({
             {q ? t("noResults") : t("empty")}
           </CardContent>
         </Card>
-      ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {withProgress.map(({ course, total, done }) => {
-            const pct = total === 0 ? 0 : Math.round((done / total) * 100);
-            const title = pickLocalized({ en: course.titleEn, id: course.titleId }, locale);
-            const price = priceLabel(course.priceIdr);
-            return (
-              <Card
-                key={course.id}
-                className="group overflow-hidden transition hover:-translate-y-0.5 hover:shadow-lg"
-              >
-                <CardContent className="flex h-full flex-col p-0">
-                  <Link href={`/training/${course.id}`} className="block">
-                    <CoverBanner
-                      courseId={course.id}
-                      title={title}
-                      hasImage={Boolean(course.imageMime)}
-                    />
-                  </Link>
-                  <div className="flex flex-1 flex-col gap-3 p-5">
-                    <div className="flex items-start justify-between gap-2">
-                      <Link
-                        href={`/training/${course.id}`}
-                        className="min-w-0 flex-1 font-serif text-xl leading-snug hover:underline"
-                      >
-                        {title}
-                      </Link>
-                      <div className="flex shrink-0 items-center gap-1">
-                        {!course.published ? (
-                          <Badge variant="secondary">{t("draft")}</Badge>
-                        ) : null}
-                        {isSuperuser ? (
-                          <Button asChild size="icon" variant="ghost" title={t("edit")}>
-                            <Link href={`/training/${course.id}/edit`}>
-                              <Pencil className="h-4 w-4" />
-                            </Link>
-                          </Button>
-                        ) : null}
-                      </div>
-                    </div>
-                    {course.description ? (
-                      <p className="line-clamp-2 text-sm text-muted-foreground">
-                        {course.description}
-                      </p>
-                    ) : null}
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
-                        <BookOpen className="h-3 w-3" /> {t("moduleCount", { count: total })}
-                      </span>
-                      {price ? (
-                        <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
-                          {price}
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
-                          {t("free")}
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-auto space-y-1.5 pt-1">
-                      <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        <span>{t("progress", { done, total })}</span>
-                        <span className="font-medium">{pct}%</span>
-                      </div>
-                      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                        <div
-                          className="h-full rounded-full bg-accent transition-all"
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </div>
-                    <Button asChild variant="outline" className="h-11 w-full">
-                      <Link href={`/training/${course.id}`}>
-                        {done >= total && total > 0 ? t("review") : t("start")}
-                      </Link>
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
+      ) : splitView ? (
+        <div className="space-y-8">
+          <section className="space-y-3">
+            <h2 className="font-serif text-xl">{t("yourCourses")}</h2>
+            {renderGrid(enrolledList)}
+          </section>
+          {browseList.length > 0 ? (
+            <section className="space-y-3">
+              <h2 className="font-serif text-xl text-muted-foreground">{t("browseAll")}</h2>
+              {renderGrid(browseList)}
+            </section>
+          ) : null}
         </div>
+      ) : (
+        renderGrid(withProgress)
       )}
 
       {completed.length > 0 ? (

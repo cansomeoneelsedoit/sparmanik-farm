@@ -58,7 +58,14 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           email: user.email,
           name: user.name ?? null,
           role: user.role,
-        } as { id: string; email: string; name: string | null; role: "USER" | "SUPERUSER" | "PORTAL" };
+          mustChangePassword: user.mustChangePassword,
+        } as {
+          id: string;
+          email: string;
+          name: string | null;
+          role: "USER" | "SUPERUSER" | "PORTAL";
+          mustChangePassword: boolean;
+        };
       },
     }),
   ],

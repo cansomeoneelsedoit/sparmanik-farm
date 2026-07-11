@@ -41,6 +41,7 @@
     "simulator": "Simulator",
     "users": "Users",
     "training": "Training",
+    "students": "Students",
     "groups": {
       "operations": "Operations",
       "financial": "Financial",
@@ -560,6 +561,8 @@
     "wrong": "Wrong",
     "noAnswer": "No answer",
     "completedSection": "My completed courses",
+    "yourCourses": "Your courses",
+    "browseAll": "Browse all courses",
     "completed": "Completed",
     "certificate": "Certificate",
     "getCertificate": "Get your certificate",
