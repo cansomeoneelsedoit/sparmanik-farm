@@ -46,6 +46,8 @@ export default async function TagsPage({
             id: true,
             code: true,
             label: true,
+            row: true,
+            produce: { select: { id: true, name: true } },
             records: {
               orderBy: { createdAt: "desc" },
               select: {
@@ -86,6 +88,27 @@ export default async function TagsPage({
   const nowMs = new Date().getTime();
   const daysSince = (d: Date) =>
     Math.max(0, Math.floor((nowMs - new Date(d).getTime()) / 86_400_000));
+
+  // A "laid out" greenhouse (tags carry a grid row) gets a compact map/summary
+  // instead of hundreds of cards.
+  type LaidTag = TagRow & {
+    row: string | null;
+    produce: { id: string; name: string } | null;
+    records: { endedAt: Date | null }[];
+  };
+  const laidTags = tags as LaidTag[];
+  const isLaidOut = laidTags.some((t) => t.row != null);
+  const varietyStats = (() => {
+    const m = new Map<string, { name: string; total: number; growing: number }>();
+    for (const t of laidTags) {
+      const name = t.produce?.name ?? "Unassigned";
+      const e = m.get(name) ?? { name, total: 0, growing: 0 };
+      e.total += 1;
+      if (t.records.some((r: { endedAt: Date | null }) => r.endedAt === null)) e.growing += 1;
+      m.set(name, e);
+    }
+    return [...m.values()].sort((a, b) => b.total - a.total);
+  })();
 
   return (
     <div className="space-y-6">
@@ -140,6 +163,34 @@ export default async function TagsPage({
             <QrCode className="mx-auto mb-2 h-8 w-8 opacity-40" />
             No tags in {active.name} yet — hit &quot;Add tags&quot; to mint a batch, then print
             and stake them.
+          </CardContent>
+        </Card>
+      ) : isLaidOut ? (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2">
+            <CardTitle>
+              {active.name} — {(tags as TagRow[]).length} layout tags
+            </CardTitle>
+            <Button asChild>
+              <Link href={`/tags/map/${active.id}`}>Open layout map →</Link>
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-3 text-sm text-muted-foreground">
+              This greenhouse is laid out on a grid (rows × bags × 2 plants). Use the map to see it
+              visually and tap a plant; use Print QR sheet for the stake labels.
+            </p>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              {varietyStats.map((v) => (
+                <div key={v.name} className="rounded-lg border p-3">
+                  <div className="text-sm font-medium">{v.name}</div>
+                  <div className="text-2xl font-semibold leading-tight">{v.total}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {v.growing} growing · {v.total - v.growing} free
+                  </div>
+                </div>
+              ))}
+            </div>
           </CardContent>
         </Card>
       ) : (

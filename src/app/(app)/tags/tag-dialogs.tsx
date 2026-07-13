@@ -334,6 +334,7 @@ export function AssignPlantDialog({
   tagLabel,
   produces,
   current,
+  defaultProduceId,
   trigger,
 }: {
   tagId: string;
@@ -341,12 +342,16 @@ export function AssignPlantDialog({
   produces: { id: string; name: string }[];
   /** The live record's values, when re-staking an occupied tag. */
   current?: { produceId: string | null; seed: string | null; method: string | null } | null;
+  /** Layout variety for this stake — pre-selected when planting a free tag. */
+  defaultProduceId?: string | null;
   trigger?: React.ReactNode;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
-  const [produceId, setProduceId] = useState<string | null>(current?.produceId ?? null);
+  const [produceId, setProduceId] = useState<string | null>(
+    current?.produceId ?? defaultProduceId ?? null,
+  );
   const [plantedAt, setPlantedAt] = useState(today());
   const [seed, setSeed] = useState(current?.seed ?? "");
   const [method, setMethod] = useState(current?.method ?? "");
