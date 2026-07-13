@@ -5,7 +5,12 @@ import { Sprout } from "lucide-react";
 import { prisma } from "@/server/prisma";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AssignPlantDialog, EndAllocationButton, ShowQrDialog } from "@/app/(app)/tags/tag-dialogs";
+import {
+  AssignPlantDialog,
+  EndAllocationButton,
+  PlantNotesPhotoDialog,
+  ShowQrDialog,
+} from "@/app/(app)/tags/tag-dialogs";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +43,8 @@ export default async function TagScanPage({
           seed: true,
           method: true,
           notes: true,
+          // photoMime (small) tells us a photo exists without pulling the blob.
+          photoMime: true,
           produceId: true,
           produce: { select: { name: true } },
           harvest: { select: { id: true, name: true } },
@@ -59,6 +66,7 @@ export default async function TagScanPage({
     seed: string | null;
     method: string | null;
     notes: string | null;
+    photoMime: string | null;
     produceId: string | null;
     produce: { name: string } | null;
     harvest: { id: string; name: string } | null;
@@ -98,6 +106,14 @@ export default async function TagScanPage({
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
+            {current.photoMime ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={`/api/plant-records/${current.id}/photo`}
+                alt={`${current.produce?.name ?? "Plant"} photo`}
+                className="max-h-72 w-full rounded-md border object-contain bg-muted/30"
+              />
+            ) : null}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <div className="text-xs text-muted-foreground">Planted</div>
@@ -162,6 +178,15 @@ export default async function TagScanPage({
               : null
           }
         />
+        {current ? (
+          <PlantNotesPhotoDialog
+            key={`${current.id}:${current.photoMime ?? "none"}`}
+            recordId={current.id}
+            hasPhoto={!!current.photoMime}
+            currentNotes={current.notes}
+            produceName={current.produce?.name ?? "plant"}
+          />
+        ) : null}
         {current ? <EndAllocationButton tagId={tag.id} tagLabel={tag.label} /> : null}
         <Link
           href={`/tags?gh=${tag.greenhouse.id}`}

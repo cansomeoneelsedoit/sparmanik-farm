@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Printer, QrCode, Sprout } from "lucide-react";
+import { Camera, ImagePlus, Printer, QrCode, Sprout } from "lucide-react";
 import { toast } from "sonner";
 
 import { todayWIB } from "@/lib/date";
@@ -25,6 +25,7 @@ import {
   createPlantTags,
   deletePlantTag,
   endPlantAllocation,
+  updatePlantRecord,
 } from "@/app/(app)/tags/actions";
 
 // WIB calendar day — a 6am Jakarta planting is still "today" there even
@@ -100,6 +101,164 @@ export function CreateTagsDialog({
           </Button>
           <Button onClick={save} disabled={pending || !prefix.trim() || !(Number(count) >= 1)}>
             {pending ? "Creating…" : "Create tags"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Add/update a plant's photo + notes on a record. Mobile-first: the photo
+ * input opens the camera in the greenhouse. Photo is resized server-side and
+ * stored on the row. `recordId` is the plant record being edited (current or a
+ * past one). `hasPhoto` seeds the "current photo" preview + a Remove control.
+ */
+export function PlantNotesPhotoDialog({
+  recordId,
+  hasPhoto,
+  currentNotes,
+  produceName,
+  trigger,
+}: {
+  recordId: string;
+  hasPhoto: boolean;
+  currentNotes: string | null;
+  produceName: string;
+  trigger?: React.ReactNode;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [pending, start] = useTransition();
+  const [notes, setNotes] = useState(currentNotes ?? "");
+  const [preview, setPreview] = useState<string | null>(null);
+  const [removePhoto, setRemovePhoto] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  function reset() {
+    setNotes(currentNotes ?? "");
+    setPreview(null);
+    setRemovePhoto(false);
+    if (fileRef.current) fileRef.current.value = "";
+  }
+
+  function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    setPreview(f ? URL.createObjectURL(f) : null);
+    if (f) setRemovePhoto(false);
+  }
+
+  function save() {
+    start(async () => {
+      const fd = new FormData();
+      fd.set("recordId", recordId);
+      fd.set("notes", notes);
+      const f = fileRef.current?.files?.[0];
+      if (f) fd.set("photo", f);
+      else if (removePhoto) fd.set("clearPhoto", "1");
+      const r = await updatePlantRecord(fd);
+      if (r.ok) {
+        toast.success("Saved");
+        setOpen(false);
+        reset();
+        router.refresh();
+      } else {
+        toast.error(r.error);
+      }
+    });
+  }
+
+  const showCurrent = hasPhoto && !preview && !removePhoto;
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (!o) reset();
+      }}
+    >
+      <DialogTrigger asChild>
+        {trigger ?? (
+          <Button size="sm" variant="outline">
+            <ImagePlus className="h-3.5 w-3.5" /> {hasPhoto || currentNotes ? "Photo & notes" : "Add photo & notes"}
+          </Button>
+        )}
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Photo &amp; notes — {produceName}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-2">
+            <Label>Photo</Label>
+            {showCurrent ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={`/api/plant-records/${recordId}/photo`}
+                alt="Current plant photo"
+                className="max-h-52 w-full rounded-md border object-contain bg-muted/30"
+              />
+            ) : preview ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={preview}
+                alt="New plant photo"
+                className="max-h-52 w-full rounded-md border object-contain bg-muted/30"
+              />
+            ) : (
+              <div className="flex h-28 items-center justify-center rounded-md border border-dashed text-xs text-muted-foreground">
+                No photo yet
+              </div>
+            )}
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={onPick}
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => fileRef.current?.click()}>
+                <Camera className="h-3.5 w-3.5" /> {hasPhoto ? "Replace photo" : "Take / choose photo"}
+              </Button>
+              {(hasPhoto || preview) && !removePhoto ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                  onClick={() => {
+                    setPreview(null);
+                    setRemovePhoto(true);
+                    if (fileRef.current) fileRef.current.value = "";
+                  }}
+                >
+                  Remove
+                </Button>
+              ) : null}
+              {removePhoto ? <span className="self-center text-xs text-muted-foreground">Photo will be removed</span> : null}
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <Label htmlFor="pnotes">Notes</Label>
+            <Textarea
+              id="pnotes"
+              rows={4}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="How's it doing? Watering, fertigation, pests, anything worth remembering."
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={pending}>
+            {pending ? "Saving…" : "Save"}
           </Button>
         </DialogFooter>
       </DialogContent>
