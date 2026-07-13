@@ -34,6 +34,7 @@ export default async function TagScanPage({
       id: true,
       label: true,
       greenhouse: { select: { id: true, name: true } },
+      produce: { select: { id: true, name: true, photoMime: true } },
       records: {
         orderBy: { createdAt: "desc" },
         select: {
@@ -74,6 +75,9 @@ export default async function TagScanPage({
   const records = tag.records as RecordRow[];
   const current = records.find((r) => r.endedAt === null) ?? null;
   const history = records.filter((r) => r.endedAt !== null);
+  // Layout variety planned for this stake (from the greenhouse layout).
+  const planned = (tag as { produce: { id: string; name: string; photoMime: string | null } | null })
+    .produce;
   const nowMs = new Date().getTime();
   const fmt = (d: Date) => new Date(d).toISOString().slice(0, 10);
   const daysSince = (d: Date) =>
@@ -154,8 +158,26 @@ export default async function TagScanPage({
         </Card>
       ) : (
         <Card>
-          <CardContent className="p-6 text-center text-sm text-muted-foreground">
-            Nothing staked here right now — assign the next plant when you replant.
+          <CardContent className="space-y-3 p-6 text-center text-sm text-muted-foreground">
+            {planned ? (
+              <>
+                {planned.photoMime ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={`/api/produce/${planned.id}/photo`}
+                    alt={planned.name}
+                    className="mx-auto max-h-44 rounded-md border object-contain bg-muted/30"
+                  />
+                ) : null}
+                <div>
+                  Free stake — laid out for{" "}
+                  <span className="font-medium text-foreground">{planned.name}</span>. Plant it to
+                  start its record.
+                </div>
+              </>
+            ) : (
+              <div>Nothing staked here right now — assign the next plant when you replant.</div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -177,6 +199,7 @@ export default async function TagScanPage({
               ? { produceId: current.produceId, seed: current.seed, method: current.method }
               : null
           }
+          defaultProduceId={planned?.id ?? null}
         />
         {current ? (
           <PlantNotesPhotoDialog

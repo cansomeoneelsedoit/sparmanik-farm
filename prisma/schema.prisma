@@ -297,11 +297,16 @@ model Produce {
   // worldwide; if two orgs happen to scan the same barcode that's the same
   // produce, so we keep one row globally.
   barcode        String?          @unique
+  /// Optional reference photo of the variety (inline DB blob, Item.photoData
+  /// pattern) so it survives local→prod sync. Served via /api/produce/[id]/photo.
+  photoData      Bytes?           @map("photo_data")
+  photoMime      String?          @map("photo_mime")
   harvests       Harvest[]
   sales          Sale[]
   dispositions   HarvestDisposition[]
   inCrops        HarvestProduce[]
   plantRecords   PlantRecord[]
+  plantTags      PlantTag[]
 
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
@@ -1398,16 +1403,26 @@ model PlantTag {
   greenhouseId   String   @map("greenhouse_id")
   /// Short unguessable slug in the QR URL — stable for the stake's whole life.
   code           String   @unique
-  /// Human label printed under the QR, e.g. "GH1-007".
+  /// Human label printed under the QR, e.g. "A01A" (row A, bag 01, plant A).
   label          String
+  /// Greenhouse-layout position (nullable — ad-hoc tags have no grid slot):
+  /// row A–J (south→north), col 1–48 (east→west), plantSlot "A"/"B" (2 per bag).
+  row            String?  @map("row")
+  col            Int?     @map("col")
+  plantSlot      String?  @map("plant_slot")
+  /// Intended/layout variety for this position (what the row is planted with).
+  /// Drives the map colour + the default when a plant is assigned.
+  produceId      String?  @map("produce_id")
   createdAt      DateTime @default(now()) @map("created_at")
 
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   greenhouse   Greenhouse    @relation(fields: [greenhouseId], references: [id], onDelete: Cascade)
+  produce      Produce?      @relation(fields: [produceId], references: [id], onDelete: SetNull)
   records      PlantRecord[]
 
   @@unique([greenhouseId, label])
   @@index([organizationId])
+  @@index([greenhouseId, row, col, plantSlot])
   @@map("plant_tags")
 }
 
