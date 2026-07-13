@@ -1,11 +1,13 @@
 import Link from "next/link";
-import { Printer, QrCode } from "lucide-react";
+import { Map as MapIcon, Printer, QrCode } from "lucide-react";
 
 import { prisma } from "@/server/prisma";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { varietyStyle } from "@/app/(app)/tags/variety-colors";
+import { FindTag } from "@/app/(app)/tags/find-tag";
 import {
   AssignPlantDialog,
   CreateTagsDialog,
@@ -47,7 +49,8 @@ export default async function TagsPage({
             code: true,
             label: true,
             row: true,
-            produce: { select: { id: true, name: true } },
+            col: true,
+            produce: { select: { id: true, name: true, photoMime: true } },
             records: {
               orderBy: { createdAt: "desc" },
               select: {
@@ -89,26 +92,60 @@ export default async function TagsPage({
   const daysSince = (d: Date) =>
     Math.max(0, Math.floor((nowMs - new Date(d).getTime()) / 86_400_000));
 
-  // A "laid out" greenhouse (tags carry a grid row) gets a compact map/summary
+  // A "laid out" greenhouse (tags carry a grid row) gets a visual overview
   // instead of hundreds of cards.
   type LaidTag = TagRow & {
     row: string | null;
-    produce: { id: string; name: string } | null;
+    col: number | null;
+    produce: { id: string; name: string; photoMime: string | null } | null;
     records: { endedAt: Date | null }[];
   };
   const laidTags = tags as LaidTag[];
   const isLaidOut = laidTags.some((t) => t.row != null);
   const varietyStats = (() => {
-    const m = new Map<string, { name: string; total: number; growing: number }>();
+    const m = new Map<
+      string,
+      {
+        name: string;
+        produceId: string | null;
+        photoMime: string | null;
+        rows: Set<string>;
+        bags: Set<string>;
+        total: number;
+        growing: number;
+      }
+    >();
     for (const t of laidTags) {
       const name = t.produce?.name ?? "Unassigned";
-      const e = m.get(name) ?? { name, total: 0, growing: 0 };
+      const e =
+        m.get(name) ??
+        {
+          name,
+          produceId: t.produce?.id ?? null,
+          photoMime: t.produce?.photoMime ?? null,
+          rows: new Set<string>(),
+          bags: new Set<string>(),
+          total: 0,
+          growing: 0,
+        };
+      if (t.row) e.rows.add(t.row);
+      if (t.row && t.col != null) e.bags.add(`${t.row}:${t.col}`);
       e.total += 1;
       if (t.records.some((r: { endedAt: Date | null }) => r.endedAt === null)) e.growing += 1;
       m.set(name, e);
     }
     return [...m.values()].sort((a, b) => b.total - a.total);
   })();
+  const varietyOrder = varietyStats.map((v) => v.name);
+  const totalPlants = laidTags.length;
+  const totalGrowing = varietyStats.reduce((s, v) => s + v.growing, 0);
+  const layoutRows = new Set(laidTags.filter((t) => t.row).map((t) => t.row)).size;
+  const layoutCols = new Set(laidTags.filter((t) => t.col != null).map((t) => t.col)).size;
+  const rowRange = (rows: Set<string>) => {
+    const sorted = [...rows].sort();
+    if (sorted.length === 0) return "";
+    return sorted.length > 1 ? `Rows ${sorted[0]}–${sorted[sorted.length - 1]}` : `Row ${sorted[0]}`;
+  };
 
   return (
     <div className="space-y-6">
@@ -166,33 +203,117 @@ export default async function TagsPage({
           </CardContent>
         </Card>
       ) : isLaidOut ? (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-2">
-            <CardTitle>
-              {active.name} — {(tags as TagRow[]).length} layout tags
-            </CardTitle>
-            <Button asChild>
-              <Link href={`/tags/map/${active.id}`}>Open layout map →</Link>
-            </Button>
-          </CardHeader>
-          <CardContent>
-            <p className="mb-3 text-sm text-muted-foreground">
-              This greenhouse is laid out on a grid (rows × bags × 2 plants). Use the map to see it
-              visually and tap a plant; use Print QR sheet for the stake labels.
-            </p>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-              {varietyStats.map((v) => (
-                <div key={v.name} className="rounded-lg border p-3">
-                  <div className="text-sm font-medium">{v.name}</div>
-                  <div className="text-2xl font-semibold leading-tight">{v.total}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {v.growing} growing · {v.total - v.growing} free
+        <div className="space-y-4">
+          {/* Hero: headline stats + the two things you actually do here. */}
+          <Card className="overflow-hidden">
+            <div className="h-1.5 w-full" style={{ background: "linear-gradient(90deg,#f7d514 50%,#e02424 50% 70%,#f97316 70% 90%,#2563eb 90%)" }} />
+            <CardContent className="space-y-4 p-4 sm:p-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="text-lg font-semibold">{active.name}</div>
+                  <div className="text-sm text-muted-foreground">
+                    {layoutRows} rows × {layoutCols} polybags × 2 plants
                   </div>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button asChild className="h-10">
+                    <Link href={`/tags/map/${active.id}`}>
+                      <MapIcon className="h-4 w-4" /> Open layout map
+                    </Link>
+                  </Button>
+                </div>
+              </div>
+
+              {/* Stat strip */}
+              <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                <div className="rounded-lg border bg-muted/30 p-3 text-center">
+                  <div className="text-2xl font-bold leading-none sm:text-3xl">{totalPlants}</div>
+                  <div className="mt-1 text-[11px] uppercase tracking-wide text-muted-foreground">Plants</div>
+                </div>
+                <div className="rounded-lg border bg-emerald-50 p-3 text-center dark:bg-emerald-950/40">
+                  <div className="text-2xl font-bold leading-none text-emerald-700 dark:text-emerald-400 sm:text-3xl">
+                    {totalGrowing}
+                  </div>
+                  <div className="mt-1 text-[11px] uppercase tracking-wide text-muted-foreground">Growing</div>
+                </div>
+                <div className="rounded-lg border bg-amber-50 p-3 text-center dark:bg-amber-950/40">
+                  <div className="text-2xl font-bold leading-none text-amber-700 dark:text-amber-400 sm:text-3xl">
+                    {totalPlants - totalGrowing}
+                  </div>
+                  <div className="mt-1 text-[11px] uppercase tracking-wide text-muted-foreground">Free stakes</div>
+                </div>
+              </div>
+
+              {/* Overall fill bar */}
+              <div>
+                <div className="mb-1 flex justify-between text-xs text-muted-foreground">
+                  <span>Greenhouse planted</span>
+                  <span>{totalPlants > 0 ? Math.round((totalGrowing / totalPlants) * 100) : 0}%</span>
+                </div>
+                <div className="h-2.5 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full bg-emerald-500 transition-all"
+                    style={{ width: `${totalPlants > 0 ? (totalGrowing / totalPlants) * 100 : 0}%` }}
+                  />
+                </div>
+              </div>
+
+              <FindTag greenhouseId={active.id} />
+            </CardContent>
+          </Card>
+
+          {/* Variety cards — photo, colour, rows, counts. */}
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {varietyStats.map((v) => {
+              const s = varietyStyle(v.name, varietyOrder);
+              const pct = v.total > 0 ? Math.round((v.growing / v.total) * 100) : 0;
+              return (
+                <Card key={v.name} className="overflow-hidden">
+                  <div className="h-1.5 w-full" style={{ background: s.hollow ? s.border : s.fill }} />
+                  {v.produceId && v.photoMime ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={`/api/produce/${v.produceId}/photo`}
+                      alt={v.name}
+                      className="h-36 w-full border-b object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-36 w-full items-center justify-center border-b bg-muted/30">
+                      <span
+                        className="inline-block h-10 w-10 rounded-full"
+                        style={{ border: `3px solid ${s.border}`, background: s.hollow ? "transparent" : s.fill }}
+                      />
+                    </div>
+                  )}
+                  <CardContent className="space-y-2 p-3">
+                    <div>
+                      <div className="truncate font-semibold" title={v.name}>{v.name}</div>
+                      <div className="text-xs font-medium" style={{ color: "#166534" }}>
+                        {rowRange(v.rows)}
+                      </div>
+                    </div>
+                    <div className="flex items-baseline justify-between text-sm">
+                      <span className="text-muted-foreground">{v.bags.size} polybags</span>
+                      <span className="font-semibold">{v.total} plants</span>
+                    </div>
+                    <div>
+                      <div className="mb-1 flex justify-between text-[11px] text-muted-foreground">
+                        <span>{v.growing} growing</span>
+                        <span>{pct}%</span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full"
+                          style={{ width: `${pct}%`, background: s.hollow ? s.border : s.fill }}
+                        />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </div>
       ) : (
         <Card>
           <CardHeader>
