@@ -271,6 +271,25 @@ export async function updatePlantRecord(formData: FormData): Promise<ActionResul
   return { ok: true };
 }
 
+/** Look up a tag by its printed label (e.g. "A012-001") so staff can jump to a
+ *  plant without scanning. Case/whitespace-insensitive. Org-scoped via the
+ *  plantTag query. */
+export async function findTagByLabel(
+  greenhouseId: string,
+  label: string,
+): Promise<ActionResult<{ code: string }>> {
+  const gate = await requireStaff();
+  if (!gate.ok) return { ok: false, error: gate.error };
+  const needle = label.trim().toUpperCase();
+  if (!needle) return { ok: false, error: "Type a tag number" };
+  const tag = await prisma.plantTag.findFirst({
+    where: { greenhouseId, label: { equals: needle, mode: "insensitive" } },
+    select: { code: true },
+  });
+  if (!tag) return { ok: false, error: `No tag "${needle}" in this greenhouse` };
+  return { ok: true, data: { code: tag.code } };
+}
+
 /** Destroy a stake and its whole history — owner only (history is money-adjacent
  *  agronomy data; losing it should be deliberate). */
 export async function deletePlantTag(tagId: string): Promise<ActionResult> {

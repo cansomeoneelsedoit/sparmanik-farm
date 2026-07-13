@@ -5,6 +5,7 @@ import { Printer } from "lucide-react";
 import { prisma } from "@/server/prisma";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { varietyStyle } from "@/app/(app)/tags/variety-colors";
 
 export const dynamic = "force-dynamic";
 
@@ -15,20 +16,6 @@ export const dynamic = "force-dynamic";
  * the right, and legend + statistics cards below. Rendered as a white "document"
  * regardless of app theme. Every dot is a plant — tap it to open its page.
  */
-
-// Variety → diagram colours (fill + border). White Kirin is drawn as a hollow
-// red-outlined circle exactly like the printed legend.
-const STYLE: Record<string, { fill: string; border: string; hollow?: boolean }> = {
-  "Yellow Kirin Kevin": { fill: "#f7d514", border: "#b89b00" },
-  "White Kirin Kevin": { fill: "#ffffff", border: "#e02424", hollow: true },
-  "Sparmanik Manis Candy": { fill: "#f97316", border: "#b45309" },
-  "Yellow Kirin Australia F3": { fill: "#2563eb", border: "#1e40af" },
-};
-const FALLBACK: { fill: string; border: string; hollow?: boolean }[] = [
-  { fill: "#10b981", border: "#047857" },
-  { fill: "#8b5cf6", border: "#6d28d9" },
-  { fill: "#ec4899", border: "#be185d" },
-];
 
 export default async function GreenhouseMapPage({
   params,
@@ -85,11 +72,7 @@ export default async function GreenhouseMapPage({
     const n = t.produce?.name ?? "—";
     if (!varietyOrder.includes(n)) varietyOrder.push(n);
   }
-  const styleFor = (name: string | undefined) => {
-    if (name && STYLE[name]) return STYLE[name];
-    const i = Math.max(0, varietyOrder.indexOf(name ?? "—"));
-    return FALLBACK[i % FALLBACK.length];
-  };
+  const styleFor = (name: string | undefined) => varietyStyle(name, varietyOrder);
 
   const rows = Array.from(new Set(tags.map((t) => t.row!))).sort();
   const cols = Array.from(new Set(tags.map((t) => t.col!))).sort((a, b) => a - b);
