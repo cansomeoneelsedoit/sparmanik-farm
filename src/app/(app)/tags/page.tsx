@@ -11,6 +11,7 @@ import {
   CreateTagsDialog,
   DeleteTagButton,
   EndAllocationButton,
+  PlantNotesPhotoDialog,
   ShowQrDialog,
 } from "@/app/(app)/tags/tag-dialogs";
 
@@ -54,6 +55,7 @@ export default async function TagsPage({
                 seed: true,
                 method: true,
                 notes: true,
+                photoMime: true,
                 produceId: true,
                 produce: { select: { name: true } },
               },
@@ -156,6 +158,7 @@ export default async function TagsPage({
                 seed: string | null;
                 method: string | null;
                 notes: string | null;
+                photoMime: string | null;
                 produceId: string | null;
                 produce: { name: string } | null;
               };
@@ -224,6 +227,15 @@ export default async function TagsPage({
                           : null
                       }
                     />
+                    {current ? (
+                      <PlantNotesPhotoDialog
+                        key={`${current.id}:${current.photoMime ?? "none"}`}
+                        recordId={current.id}
+                        hasPhoto={!!current.photoMime}
+                        currentNotes={current.notes}
+                        produceName={current.produce?.name ?? "plant"}
+                      />
+                    ) : null}
                     {current ? <EndAllocationButton tagId={tag.id} tagLabel={tag.label} /> : null}
                     <DeleteTagButton tagId={tag.id} tagLabel={tag.label} />
                   </div>

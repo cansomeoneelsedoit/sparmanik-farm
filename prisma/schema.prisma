@@ -1423,6 +1423,11 @@ model PlantRecord {
   seed      String?
   method    String?
   notes     String?
+  /// Optional plant photo, stored INLINE on the row (same pattern as
+  /// Item.photoData) so it travels with the record through local→prod sync
+  /// instead of living on the filesystem. Served via /api/plant-records/[id]/photo.
+  photoData Bytes?    @map("photo_data")
+  photoMime String?   @map("photo_mime")
   endedAt   DateTime? @map("ended_at")
   createdAt DateTime  @default(now()) @map("created_at")
 

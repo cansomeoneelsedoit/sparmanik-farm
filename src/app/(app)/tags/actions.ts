@@ -7,6 +7,7 @@ import { z } from "zod";
 import { prisma } from "@/server/prisma";
 import { requireStaff, requireSuperuser } from "@/server/authz";
 import { recordAction } from "@/server/audit";
+import { processImageToBuffer } from "@/server/uploads";
 import type { TransactionClient } from "@/server/decimal";
 
 export type ActionResult<T = void> = { ok: true; data?: T } | { ok: false; error: string };
@@ -186,6 +187,85 @@ export async function endPlantAllocation(tagId: string): Promise<ActionResult> {
     });
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Couldn't free the tag" };
+  }
+  revalidatePath("/tags");
+  return { ok: true };
+}
+
+/**
+ * Update the notes and/or photo on a plant record (the plant currently on a
+ * stake, or a past one). Takes FormData so the photo File comes through. The
+ * photo is resized + re-encoded to WebP and stored inline on the row (survives
+ * local→prod sync). Pass clearPhoto=1 to remove the existing photo.
+ *
+ * PlantRecord is NOT org-scoped (it anchors via its tag), so tenancy is
+ * enforced by resolving the record's tag through the org-scoped plantTag query.
+ */
+export async function updatePlantRecord(formData: FormData): Promise<ActionResult> {
+  const gate = await requireStaff();
+  if (!gate.ok) return { ok: false, error: gate.error };
+
+  const recordId = String(formData.get("recordId") ?? "");
+  if (!recordId) return { ok: false, error: "Missing record" };
+  const notesRaw = formData.get("notes");
+  const notes = typeof notesRaw === "string" ? notesRaw.trim() : undefined;
+  const clearPhoto = formData.get("clearPhoto") === "1";
+  const file = formData.get("photo");
+  const hasFile = file instanceof File && file.size > 0;
+
+  const rec = await prisma.plantRecord.findUnique({
+    where: { id: recordId },
+    select: { id: true, tagId: true },
+  });
+  if (!rec) return { ok: false, error: "Plant record not found" };
+  // Tenancy: the tag query is org-scoped, so a cross-org tag comes back null.
+  const tag = await prisma.plantTag.findFirst({
+    where: { id: rec.tagId },
+    select: { id: true, label: true },
+  });
+  if (!tag) return { ok: false, error: "Plant record not found" };
+
+  const data: {
+    notes?: string | null;
+    photoData?: Uint8Array<ArrayBuffer> | null;
+    photoMime?: string | null;
+  } = {};
+  if (notes !== undefined) data.notes = notes || null;
+  if (hasFile) {
+    try {
+      const processed = await processImageToBuffer(file as File);
+      // Uint8Array.from yields Uint8Array<ArrayBuffer> (a standalone copy),
+      // which satisfies Prisma's Bytes input under strict TS.
+      data.photoData = Uint8Array.from(processed.buffer);
+      data.photoMime = processed.mime;
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : "Couldn't process the photo" };
+    }
+  } else if (clearPhoto) {
+    data.photoData = null;
+    data.photoMime = null;
+  }
+  if (Object.keys(data).length === 0) return { ok: true };
+
+  try {
+    await prisma.$transaction(async (tx: TransactionClient) => {
+      await tx.plantRecord.update({ where: { id: rec.id }, data });
+      await recordAction(tx, {
+        type: "tags.update_record",
+        entityType: "PlantTag",
+        entityId: tag.id,
+        description: `Updated plant notes/photo on ${tag.label}`,
+        userId: gate.userId,
+        payload: {
+          tagId: tag.id,
+          recordId: rec.id,
+          notesChanged: notes !== undefined,
+          photoChanged: hasFile || clearPhoto,
+        },
+      });
+    });
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't save" };
   }
   revalidatePath("/tags");
   return { ok: true };
