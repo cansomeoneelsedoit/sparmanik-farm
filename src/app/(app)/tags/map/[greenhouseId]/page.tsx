@@ -5,30 +5,29 @@ import { Printer } from "lucide-react";
 import { prisma } from "@/server/prisma";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Greenhouse layout map — the on-screen version of the printed layout diagram.
- * Rows run north (top) → south (bottom), columns east (left) → west (right).
- * Each polybag holds 2 plants (A/B); every plant is its own QR tag. Cells are
- * coloured by the row's variety; a filled chip = a plant is growing, an outline
- * = the stake is free. Tap a chip to open that plant.
+ * Greenhouse layout map — styled to match Boyd's printed layout diagram:
+ * green title block, row letters in circles (J north → A south), coloured
+ * variety dots on a faint grid, NORTH/SOUTH arrow, control/seedling rooms on
+ * the right, and legend + statistics cards below. Rendered as a white "document"
+ * regardless of app theme. Every dot is a plant — tap it to open its page.
  */
 
-// Variety → colour, matching the printed legend. Falls back to a palette by
-// order for any variety not in the known set.
-const KNOWN: Record<string, { chip: string; ring: string; dot: string }> = {
-  "Yellow Kirin Kevin": { chip: "bg-yellow-400 text-yellow-950", ring: "ring-yellow-400", dot: "bg-yellow-400" },
-  "White Kirin Kevin": { chip: "bg-zinc-100 text-zinc-700 dark:bg-zinc-200", ring: "ring-zinc-300", dot: "bg-zinc-200 border border-zinc-400" },
-  "Sparmanik Manis Candy": { chip: "bg-orange-400 text-orange-950", ring: "ring-orange-400", dot: "bg-orange-400" },
-  "Yellow Kirin Australia F3": { chip: "bg-blue-500 text-white", ring: "ring-blue-500", dot: "bg-blue-500" },
+// Variety → diagram colours (fill + border). White Kirin is drawn as a hollow
+// red-outlined circle exactly like the printed legend.
+const STYLE: Record<string, { fill: string; border: string; hollow?: boolean }> = {
+  "Yellow Kirin Kevin": { fill: "#f7d514", border: "#b89b00" },
+  "White Kirin Kevin": { fill: "#ffffff", border: "#e02424", hollow: true },
+  "Sparmanik Manis Candy": { fill: "#f97316", border: "#b45309" },
+  "Yellow Kirin Australia F3": { fill: "#2563eb", border: "#1e40af" },
 };
-const FALLBACK = [
-  { chip: "bg-emerald-400 text-emerald-950", ring: "ring-emerald-400", dot: "bg-emerald-400" },
-  { chip: "bg-rose-400 text-rose-950", ring: "ring-rose-400", dot: "bg-rose-400" },
-  { chip: "bg-violet-400 text-violet-950", ring: "ring-violet-400", dot: "bg-violet-400" },
+const FALLBACK: { fill: string; border: string; hollow?: boolean }[] = [
+  { fill: "#10b981", border: "#047857" },
+  { fill: "#8b5cf6", border: "#6d28d9" },
+  { fill: "#ec4899", border: "#be185d" },
 ];
 
 export default async function GreenhouseMapPage({
@@ -40,7 +39,7 @@ export default async function GreenhouseMapPage({
 
   const gh = await prisma.greenhouse.findFirst({
     where: { id: greenhouseId },
-    select: { id: true, name: true },
+    select: { id: true, name: true, organization: { select: { name: true } } },
   });
   if (!gh) notFound();
 
@@ -81,121 +80,255 @@ export default async function GreenhouseMapPage({
     );
   }
 
-  // Distinct varieties (in appearance order) → colour.
   const varietyOrder: string[] = [];
   for (const t of tags) {
     const n = t.produce?.name ?? "—";
     if (!varietyOrder.includes(n)) varietyOrder.push(n);
   }
-  const colourFor = (name: string | undefined) => {
-    if (name && KNOWN[name]) return KNOWN[name];
+  const styleFor = (name: string | undefined) => {
+    if (name && STYLE[name]) return STYLE[name];
     const i = Math.max(0, varietyOrder.indexOf(name ?? "—"));
     return FALLBACK[i % FALLBACK.length];
   };
 
-  // Index by row → col → slot.
   const rows = Array.from(new Set(tags.map((t) => t.row!))).sort();
   const cols = Array.from(new Set(tags.map((t) => t.col!))).sort((a, b) => a - b);
   const byKey = new Map<string, (typeof tags)[number]>();
   for (const t of tags) byKey.set(`${t.row}:${t.col}:${t.plantSlot}`, t);
+  const rowsNorthFirst = [...rows].reverse();
 
-  const rowsNorthFirst = [...rows].reverse(); // J (north) at top → A (south) at bottom
-  const counts = varietyOrder.map((v) => ({
-    name: v,
-    n: tags.filter((t) => (t.produce?.name ?? "—") === v).length,
-    growing: tags.filter((t) => (t.produce?.name ?? "—") === v && t.records.length > 0).length,
-  }));
+  // Per-variety stats + row ranges for the legend.
+  const varietyStats = varietyOrder.map((name) => {
+    const mine = tags.filter((t) => (t.produce?.name ?? "—") === name);
+    const myRows = Array.from(new Set(mine.map((t) => t.row!))).sort();
+    const bags = new Set(mine.map((t) => `${t.row}:${t.col}`)).size;
+    return {
+      name,
+      produceId: mine[0]?.produce?.id ?? null,
+      rows: myRows,
+      rowLabel:
+        myRows.length > 1 ? `Rows ${myRows[0]} to ${myRows[myRows.length - 1]}` : `Row ${myRows[0]}`,
+      bags,
+      plants: mine.length,
+      growing: mine.filter((t) => t.records.length > 0).length,
+    };
+  });
 
-  const Chip = ({ t }: { t: (typeof tags)[number] | undefined }) => {
-    if (!t) return <span className="inline-block h-4 w-4" />;
-    const c = colourFor(t.produce?.name);
+  const Dot = ({ t }: { t: (typeof tags)[number] | undefined }) => {
+    if (!t) return <span style={{ width: 9, height: 9 }} />;
+    const s = styleFor(t.produce?.name);
     const growing = t.records.length > 0;
     return (
       <Link
         href={`/t/${t.code}`}
         title={`${t.label} — ${t.produce?.name ?? ""}${growing ? " (growing)" : " (free)"}`}
-        className={cn(
-          "inline-flex h-4 w-4 items-center justify-center rounded-sm text-[7px] font-bold leading-none transition-transform hover:scale-125",
-          growing ? c.chip : cn("bg-transparent ring-1", c.ring, "text-muted-foreground"),
-        )}
-      >
-        {t.plantSlot}
-      </Link>
+        className="inline-block shrink-0 rounded-full transition-transform hover:scale-150"
+        style={{
+          width: 9,
+          height: 9,
+          border: `1.5px solid ${s.border}`,
+          background: s.hollow ? (growing ? s.border : "#fff") : growing ? s.fill : "#fff",
+        }}
+      />
     );
   };
 
   return (
-    <div className="space-y-5">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="font-serif text-3xl">{gh.name}</h1>
-          <p className="text-sm text-muted-foreground">
-            Layout map · {rows.length} rows × {cols.length} bags × 2 plants = {tags.length} tags ·
-            north ↑, east ←
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button asChild variant="outline">
-            <Link href="/tags">← Tags</Link>
-          </Button>
-          <Button asChild>
-            <Link href={`/print/tags/${gh.id}?auto=1`} target="_blank">
-              <Printer className="h-4 w-4" /> Print tags
-            </Link>
-          </Button>
-        </div>
-      </header>
-
-      {/* Legend */}
-      <div className="flex flex-wrap gap-3 text-xs">
-        {counts.map((c) => {
-          const col = colourFor(c.name);
-          return (
-            <div key={c.name} className="flex items-center gap-1.5">
-              <span className={cn("inline-block h-3 w-3 rounded-sm", col.dot)} />
-              <span className="font-medium">{c.name}</span>
-              <span className="text-muted-foreground">
-                {c.growing}/{c.n} growing
-              </span>
-            </div>
-          );
-        })}
+    <div className="space-y-4">
+      {/* Screen-only toolbar (the document below is theme-independent). */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Button asChild variant="outline" size="sm">
+          <Link href="/tags">← Tags</Link>
+        </Button>
+        <Button asChild size="sm">
+          <Link href={`/print/tags/${gh.id}?auto=1`} target="_blank">
+            <Printer className="h-4 w-4" /> Print tags
+          </Link>
+        </Button>
       </div>
 
-      <Card>
-        <CardContent className="overflow-x-auto p-3">
-          <div className="inline-block min-w-max">
-            {/* column header */}
-            <div className="flex gap-1 pl-6">
-              {cols.map((c) => (
-                <div key={c} className="w-9 text-center text-[8px] text-muted-foreground">
-                  {String(c).padStart(2, "0")}
-                </div>
-              ))}
+      {/* The layout "document" — always white, like the printed diagram. */}
+      <div className="overflow-x-auto rounded-lg border bg-white p-5 text-zinc-900 shadow-sm">
+        <div className="min-w-[1180px]">
+          {/* Title block */}
+          <div className="text-center">
+            <h1
+              className="text-3xl font-extrabold tracking-wide"
+              style={{ color: "#14532d", fontFamily: "Georgia, 'Times New Roman', serif" }}
+            >
+              🌿 {(gh.organization?.name ?? "SPARMANIK FARM").toUpperCase()} GREENHOUSE LAYOUT 🌿
+            </h1>
+            <div className="mt-0.5 text-lg font-bold" style={{ color: "#166534" }}>
+              {gh.name.toUpperCase()} – MAIN PRODUCTION HOUSE
             </div>
-            {rowsNorthFirst.map((r) => (
-              <div key={r} className="flex items-center gap-1 py-0.5">
-                <div className="w-5 text-center text-xs font-semibold text-muted-foreground">{r}</div>
+            <div className="mt-0.5 text-sm font-semibold">ORIENTATION: NORTH ↑</div>
+          </div>
+
+          {/* Grid + side panels */}
+          <div className="mt-4 flex gap-3">
+            {/* NORTH/SOUTH arrow rail */}
+            <div className="flex w-14 shrink-0 flex-col items-center justify-between py-8">
+              <div className="text-xs font-bold">NORTH</div>
+              <div className="relative flex-1">
+                <div className="absolute left-1/2 top-0 h-full w-0.5 -translate-x-1/2" style={{ background: "#15803d" }} />
+                <div
+                  className="absolute -top-1 left-1/2 -translate-x-1/2"
+                  style={{ width: 0, height: 0, borderLeft: "5px solid transparent", borderRight: "5px solid transparent", borderBottom: "8px solid #15803d" }}
+                />
+                <div
+                  className="absolute -bottom-1 left-1/2 -translate-x-1/2"
+                  style={{ width: 0, height: 0, borderLeft: "5px solid transparent", borderRight: "5px solid transparent", borderTop: "8px solid #15803d" }}
+                />
+              </div>
+              <div className="text-xs font-bold">SOUTH</div>
+            </div>
+
+            {/* The planting grid */}
+            <div className="min-w-0 flex-1 border-2 border-zinc-800">
+              {/* direction header */}
+              <div className="flex items-center justify-between border-b border-zinc-300 px-2 py-1 text-[10px] font-bold">
+                <span>EAST (START) ⟶</span>
+                <span>NUMBERING DIRECTION: EAST → WEST</span>
+                <span>WEST (END)</span>
+              </div>
+              {/* column numbers */}
+              <div className="flex items-center gap-[3px] px-1 pt-1">
+                <div className="w-7 shrink-0" />
                 {cols.map((c) => (
-                  <div
-                    key={c}
-                    className="flex w-9 items-center justify-center gap-0.5 rounded border border-border/50 bg-muted/20 py-1"
-                    title={`${r}${String(c).padStart(2, "0")}`}
-                  >
-                    <Chip t={byKey.get(`${r}:${c}:A`)} />
-                    <Chip t={byKey.get(`${r}:${c}:B`)} />
+                  <div key={c} className="w-[21px] shrink-0 text-center text-[7px] font-semibold text-zinc-600">
+                    {String(c).padStart(2, "0")}
                   </div>
                 ))}
               </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+              {/* rows, J (north) at top */}
+              <div
+                className="px-1 pb-1"
+                style={{
+                  backgroundImage:
+                    "linear-gradient(#e4e4e7 1px, transparent 1px), linear-gradient(90deg, #e4e4e7 1px, transparent 1px)",
+                  backgroundSize: "24px 24px",
+                }}
+              >
+                {rowsNorthFirst.map((r) => (
+                  <div key={r} className="flex items-center gap-[3px] py-[5px]">
+                    <div className="flex w-7 shrink-0 items-center justify-center">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-full border-2 border-zinc-800 text-[10px] font-bold">
+                        {r}
+                      </span>
+                    </div>
+                    {cols.map((c) => (
+                      <div key={c} className="flex w-[21px] shrink-0 items-center justify-center gap-[2px]">
+                        <Dot t={byKey.get(`${r}:${c}:A`)} />
+                        <Dot t={byKey.get(`${r}:${c}:B`)} />
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
 
-      <p className="text-xs text-muted-foreground">
-        Each cell is a polybag (2 plants, A + B). A filled chip is a growing plant; an outline is a
-        free stake. Tap a chip to open that plant, add its photo &amp; notes, or re-stake it.
-      </p>
+            {/* Rooms on the west end */}
+            <div className="flex w-32 shrink-0 flex-col border-2 border-zinc-800">
+              <div className="flex flex-1 flex-col items-center justify-center gap-1 border-b-2 border-zinc-800 p-2 text-center">
+                <span className="text-lg">⊕</span>
+                <span className="text-[10px] font-semibold leading-tight">RUANG
+                  <br />KONTROL</span>
+              </div>
+              <div className="flex flex-1 items-center justify-center p-2 text-center">
+                <span className="text-[10px] font-semibold leading-tight">RUANG
+                  <br />SEEDLING</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Legend + stats cards */}
+          <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
+            {/* Legenda varietas */}
+            <div className="overflow-hidden rounded border border-zinc-300">
+              <div className="px-3 py-1.5 text-sm font-bold text-white" style={{ background: "#14532d" }}>
+                LEGENDA VARIETAS
+              </div>
+              <div className="space-y-2 p-3">
+                {varietyStats.map((v) => {
+                  const s = styleFor(v.name);
+                  return (
+                    <div key={v.name} className="flex items-start gap-2">
+                      <span
+                        className="mt-0.5 inline-block h-4 w-4 shrink-0 rounded-full"
+                        style={{ border: `2px solid ${s.border}`, background: s.hollow ? "#fff" : s.fill }}
+                      />
+                      <div className="min-w-0 text-xs leading-tight">
+                        <div className="font-bold uppercase">{v.name}</div>
+                        <div className="font-semibold" style={{ color: "#166534" }}>{v.rowLabel}</div>
+                        <div className="text-zinc-600">
+                          {v.bags} polybags · {v.plants} plants · {v.growing} growing
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Statistics */}
+            <div className="overflow-hidden rounded border border-zinc-300">
+              <div className="px-3 py-1.5 text-sm font-bold text-white" style={{ background: "#14532d" }}>
+                GREENHOUSE STATISTICS
+              </div>
+              <table className="w-full p-1 text-xs">
+                <tbody>
+                  {[
+                    ["Total Rows", String(rows.length)],
+                    ["Polybags per Row", String(cols.length)],
+                    ["Total Polybags", String(rows.length * cols.length)],
+                    ["Plants per Polybag", "2"],
+                    ["Total Plants", String(tags.length)],
+                    ["Direction of Numbering", "East → West"],
+                    ["Row Order", `${rows[0]} (South) to ${rows[rows.length - 1]} (North)`],
+                  ].map(([k, v]) => (
+                    <tr key={k} className="border-b border-zinc-100 last:border-0">
+                      <td className="px-3 py-1 text-zinc-600">{k}</td>
+                      <td className="px-3 py-1 font-semibold">: {v}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Identification system */}
+            <div className="overflow-hidden rounded border border-zinc-300">
+              <div className="px-3 py-1.5 text-sm font-bold text-white" style={{ background: "#14532d" }}>
+                IDENTIFICATION SYSTEM
+              </div>
+              <div className="space-y-1.5 p-3 text-xs leading-snug text-zinc-700">
+                <p>
+                  Each plant is uniquely identified:{" "}
+                  <span className="font-bold">Row + Bag – Plant</span>
+                </p>
+                <p className="font-mono font-bold">A001-001 … J048-002</p>
+                <p>-001 = plant A, -002 = plant B in the same polybag.</p>
+                <p className="rounded bg-emerald-50 p-1.5">
+                  If one plant dies or has disease, replace only that plant — the other keeps its
+                  identity and record.
+                </p>
+              </div>
+            </div>
+
+            {/* Catatan */}
+            <div className="overflow-hidden rounded border border-zinc-300">
+              <div className="px-3 py-1.5 text-sm font-bold text-white" style={{ background: "#14532d" }}>
+                CATATAN
+              </div>
+              <ul className="list-disc space-y-1 p-3 pl-7 text-xs leading-snug text-zinc-700">
+                <li>2 benih ditanam per polybag.</li>
+                <li>Setiap tanaman diberi ID individual untuk pencatatan pertumbuhan, kesehatan, dan produksi.</li>
+                <li>Klik titik pada peta untuk membuka halaman tanaman (foto, catatan, riwayat).</li>
+                <li>Dot terisi = sedang tumbuh · dot kosong = stake bebas.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
