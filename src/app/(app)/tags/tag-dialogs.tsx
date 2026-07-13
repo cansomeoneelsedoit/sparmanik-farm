@@ -180,7 +180,7 @@ export function PlantNotesPhotoDialog({
     >
       <DialogTrigger asChild>
         {trigger ?? (
-          <Button size="sm" variant="outline">
+          <Button size="sm" variant="outline" className="h-10 w-full sm:h-9 sm:w-auto">
             <ImagePlus className="h-3.5 w-3.5" /> {hasPhoto || currentNotes ? "Photo & notes" : "Add photo & notes"}
           </Button>
         )}
@@ -286,7 +286,7 @@ export function ShowQrDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm" variant="outline">
+        <Button size="sm" variant="outline" className="h-10 w-full sm:h-9 sm:w-auto">
           <QrCode className="h-3.5 w-3.5" /> QR
         </Button>
       </DialogTrigger>
@@ -381,7 +381,7 @@ export function AssignPlantDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {trigger ?? (
-          <Button size="sm" variant="outline">
+          <Button size="sm" variant="outline" className="h-10 w-full sm:h-9 sm:w-auto">
             <Sprout className="h-3.5 w-3.5" /> {current ? "Re-stake" : "Assign plant"}
           </Button>
         )}
@@ -465,6 +465,7 @@ export function EndAllocationButton({ tagId, tagLabel }: { tagId: string; tagLab
     <Button
       size="sm"
       variant="ghost"
+      className="h-10 w-full sm:h-9 sm:w-auto"
       disabled={pending}
       onClick={() =>
         start(async () => {
@@ -491,7 +492,7 @@ export function DeleteTagButton({ tagId, tagLabel }: { tagId: string; tagLabel: 
     <Button
       size="sm"
       variant="ghost"
-      className="text-destructive hover:text-destructive"
+      className="h-10 w-full text-destructive hover:text-destructive sm:h-9 sm:w-auto"
       disabled={pending}
       onClick={() => {
         if (!window.confirm(`Delete tag ${tagLabel} and its whole plant history?`)) return;
