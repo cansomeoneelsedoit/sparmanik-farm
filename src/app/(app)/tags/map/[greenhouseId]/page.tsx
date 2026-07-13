@@ -149,7 +149,9 @@ export default async function GreenhouseMapPage({
 
       {/* The layout "document" — always white, like the printed diagram. */}
       <div className="overflow-x-auto rounded-lg border bg-white p-5 text-zinc-900 shadow-sm">
-        <div className="min-w-[1560px]">
+        {/* w-max: the document grows to the grid's natural width, so the dot
+            rows can never spill past the grid border into the rooms panel. */}
+        <div className="w-max min-w-full">
           {/* Title block */}
           <div className="text-center">
             <h1
@@ -183,8 +185,9 @@ export default async function GreenhouseMapPage({
               <div className="text-xs font-bold">SOUTH</div>
             </div>
 
-            {/* The planting grid */}
-            <div className="min-w-0 flex-1 border-2 border-zinc-800">
+            {/* The planting grid — intrinsic width so all 43 columns stay
+                INSIDE the border; the rooms panel sits cleanly after it. */}
+            <div className="shrink-0 border-2 border-zinc-800">
               {/* direction header */}
               <div className="flex items-center justify-between border-b border-zinc-300 px-2 py-1 text-[10px] font-bold">
                 <span>EAST (START) ⟶</span>
