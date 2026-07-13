@@ -11,6 +11,7 @@ import {
   CreateTagsDialog,
   DeleteTagButton,
   EndAllocationButton,
+  ShowQrDialog,
 } from "@/app/(app)/tags/tag-dialogs";
 
 export const dynamic = "force-dynamic";
@@ -200,6 +201,12 @@ export default async function TagsPage({
                     </span>
                   </Link>
                   <div className="flex flex-wrap items-center gap-1.5 border-t px-3 py-2">
+                    <ShowQrDialog
+                      tagId={tag.id}
+                      tagLabel={tag.label}
+                      code={tag.code}
+                      greenhouseName={active.name}
+                    />
                     <AssignPlantDialog
                       // Remount on every allocation change so the form never
                       // shows the previous crop's values.

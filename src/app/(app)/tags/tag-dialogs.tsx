@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { QrCode, Sprout } from "lucide-react";
+import { Printer, QrCode, Sprout } from "lucide-react";
 import { toast } from "sonner";
 
 import { todayWIB } from "@/lib/date";
@@ -100,6 +100,68 @@ export function CreateTagsDialog({
           </Button>
           <Button onClick={save} disabled={pending || !prefix.trim() || !(Number(count) >= 1)}>
             {pending ? "Creating…" : "Create tags"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Drill into a single tag to see its actual QR code on screen, and print a
+ * one-off sticker (QR + number). The QR image is only fetched once the dialog
+ * opens (so a page full of tags doesn't fire a request per tag on load).
+ */
+export function ShowQrDialog({
+  tagId,
+  tagLabel,
+  code,
+  greenhouseName,
+}: {
+  tagId: string;
+  tagLabel: string;
+  code: string;
+  greenhouseName?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline">
+          <QrCode className="h-3.5 w-3.5" /> QR
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{tagLabel}</DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-col items-center gap-3 py-2">
+          {open ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={`/api/tags/${tagId}/qr`}
+              alt={`QR code for ${tagLabel}`}
+              className="h-56 w-56 rounded-md border bg-white p-2"
+            />
+          ) : null}
+          <div className="text-center">
+            <div className="text-lg font-semibold tracking-wide">{tagLabel}</div>
+            {greenhouseName ? (
+              <div className="text-xs uppercase tracking-wider text-muted-foreground">
+                {greenhouseName}
+              </div>
+            ) : null}
+            <div className="mt-1 text-xs text-muted-foreground">/t/{code}</div>
+          </div>
+          <p className="text-center text-xs text-muted-foreground">
+            Scan this in the greenhouse to open the plant, or print it as a sticker for the stake.
+          </p>
+        </div>
+        <DialogFooter>
+          <Button asChild variant="outline">
+            <a href={`/print/tag/${tagId}?auto=1`} target="_blank" rel="noreferrer">
+              <Printer className="h-4 w-4" /> Print sticker
+            </a>
           </Button>
         </DialogFooter>
       </DialogContent>

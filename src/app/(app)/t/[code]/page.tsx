@@ -5,7 +5,7 @@ import { Sprout } from "lucide-react";
 import { prisma } from "@/server/prisma";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AssignPlantDialog, EndAllocationButton } from "@/app/(app)/tags/tag-dialogs";
+import { AssignPlantDialog, EndAllocationButton, ShowQrDialog } from "@/app/(app)/tags/tag-dialogs";
 
 export const dynamic = "force-dynamic";
 
@@ -145,6 +145,12 @@ export default async function TagScanPage({
       )}
 
       <div className="flex flex-wrap gap-2">
+        <ShowQrDialog
+          tagId={tag.id}
+          tagLabel={tag.label}
+          code={code}
+          greenhouseName={tag.greenhouse.name}
+        />
         <AssignPlantDialog
           key={`${tag.id}:${records.length}:${current ? current.id : "free"}`}
           tagId={tag.id}
