@@ -130,11 +130,11 @@ export default async function GreenhouseMapPage({
         </Button>
       </div>
 
-      {/* The layout "document" — always white, like the printed diagram. */}
-      <div className="overflow-x-auto rounded-lg border bg-white p-5 text-zinc-900 shadow-sm">
-        {/* w-max: the document grows to the grid's natural width, so the dot
-            rows can never spill past the grid border into the rooms panel. */}
-        <div className="w-max min-w-full">
+      {/* The layout "document" — always white, like the printed diagram. Only
+          the GRID scrolls sideways; the title and the cards below stay inside
+          the viewport and wrap. */}
+      <div className="rounded-lg border bg-white p-4 text-zinc-900 shadow-sm sm:p-5">
+        <div>
           {/* Title block */}
           <div className="text-center">
             <h1
@@ -149,8 +149,9 @@ export default async function GreenhouseMapPage({
             <div className="mt-0.5 text-sm font-semibold">ORIENTATION: NORTH ↑</div>
           </div>
 
-          {/* Grid + side panels */}
-          <div className="mt-4 flex gap-3">
+          {/* Grid + side panels — the only horizontally-scrolling part. */}
+          <div className="mt-4 overflow-x-auto pb-2">
+          <div className="flex w-max gap-3">
             {/* NORTH/SOUTH arrow rail */}
             <div className="flex w-14 shrink-0 flex-col items-center justify-between py-8">
               <div className="text-xs font-bold">NORTH</div>
@@ -226,9 +227,10 @@ export default async function GreenhouseMapPage({
               </div>
             </div>
           </div>
+          </div>
 
-          {/* Legend + stats cards */}
-          <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
+          {/* Legend + stats cards — normal page width, wrap to the next line. */}
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {/* Legenda varietas */}
             <div className="overflow-hidden rounded border border-zinc-300">
               <div className="px-3 py-1.5 text-sm font-bold text-white" style={{ background: "#14532d" }}>
