@@ -45,6 +45,7 @@ const ORG_SCOPED_MODELS = new Set([
   "Question",
   "ModuleAttempt",
   "CourseEnrollment",
+  "PlantTag",
 ]);
 
 const READ_OPS = new Set([

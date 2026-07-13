@@ -39,10 +39,22 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
   const monthStart = new Date(year, month0, 1);
   const monthEnd = new Date(year, month0 + 1, 0);
 
+  const cells = buildMonthGrid(year, month0);
+  // The visible grid spills into adjacent months — paint spans across the whole
+  // 42-cell window so a cycle doesn't visually stop at a month boundary.
+  const gridStart = cells[0].date;
+  const gridEnd = cells[cells.length - 1].date;
+
   const [harvests, tasks] = await Promise.all([
+    // Every cycle OVERLAPPING the visible window — including past (ended) ones,
+    // so Boyd can page back and see what ran when. A live cycle has no endDate
+    // and runs through today.
     prisma.harvest.findMany({
-      where: { startDate: { gte: monthStart, lte: monthEnd } },
-      select: { id: true, name: true, startDate: true },
+      where: {
+        startDate: { lte: gridEnd },
+        OR: [{ endDate: { gte: gridStart } }, { endDate: null }],
+      },
+      select: { id: true, name: true, startDate: true, endDate: true, status: true },
     }),
     prisma.task.findMany({
       where: { dueDate: { gte: monthStart, lte: monthEnd } },
@@ -50,13 +62,44 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
     }),
   ]);
 
-  const events: Event[] = [
-    ...harvests.map((h: { id: string; name: string; startDate: Date }) => ({
-      date: h.startDate.toISOString().slice(0, 10),
-      text: `Harvest: ${h.name}`,
+  const dayMs = 86_400_000;
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  type HarvestRow = { id: string; name: string; startDate: Date; endDate: Date | null; status: string };
+  const events: Event[] = [];
+  // Continuation bars: date → the cycles running through that day.
+  const spanByDate = new Map<string, { name: string; href: string; live: boolean }[]>();
+  for (const h of harvests as HarvestRow[]) {
+    const start = h.startDate;
+    const effectiveEnd = h.endDate ?? now;
+    const days = Math.max(1, Math.round((effectiveEnd.getTime() - start.getTime()) / dayMs));
+    events.push({
+      date: iso(start),
+      text: `${h.name} — starts`,
       href: `/harvest/${h.id}`,
-      kind: "harvest" as const,
-    })),
+      kind: "harvest",
+    });
+    if (h.endDate) {
+      events.push({
+        date: iso(h.endDate),
+        text: `${h.name} — ends (${days} ${days === 1 ? "day" : "days"})`,
+        href: `/harvest/${h.id}`,
+        kind: "harvest",
+      });
+    }
+    // Paint every in-between day inside the visible window.
+    for (
+      let t = Math.max(start.getTime() + dayMs, gridStart.getTime());
+      t < Math.min(effectiveEnd.getTime(), gridEnd.getTime() + dayMs);
+      t += dayMs
+    ) {
+      const key = iso(new Date(t));
+      if (key === iso(h.endDate ?? new Date(0))) continue; // end day has its marker
+      const arr = spanByDate.get(key) ?? [];
+      arr.push({ name: h.name, href: `/harvest/${h.id}`, live: h.status === "LIVE" });
+      spanByDate.set(key, arr);
+    }
+  }
+  events.push(
     ...tasks.map((t: { id: string; title: string; dueDate: Date; priority: "LOW" | "MEDIUM" | "HIGH" }) => ({
       date: t.dueDate.toISOString().slice(0, 10),
       text: t.title,
@@ -64,7 +107,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
       kind: "task" as const,
       priority: t.priority,
     })),
-  ];
+  );
 
   const byDate = new Map<string, Event[]>();
   for (const e of events) {
@@ -72,8 +115,6 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
     arr.push(e);
     byDate.set(e.date, arr);
   }
-
-  const cells = buildMonthGrid(year, month0);
   const prev = month0 === 0 ? { y: year - 1, m: 12 } : { y: year, m: month0 };
   const next = month0 === 11 ? { y: year + 1, m: 1 } : { y: year, m: month0 + 2 };
 
@@ -98,9 +139,10 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
               <div key={d} className="bg-muted/60 p-2 text-center font-medium">{d}</div>
             ))}
             {cells.map((cell, idx) => {
-              const iso = cell.date.toISOString().slice(0, 10);
-              const cellEvents = byDate.get(iso) ?? [];
-              const isToday = iso === now.toISOString().slice(0, 10);
+              const isoDay = cell.date.toISOString().slice(0, 10);
+              const cellEvents = byDate.get(isoDay) ?? [];
+              const cellSpans = spanByDate.get(isoDay) ?? [];
+              const isToday = isoDay === now.toISOString().slice(0, 10);
               return (
                 <div
                   key={idx}
@@ -111,6 +153,22 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
                   )}
                 >
                   <div className="mb-1 text-right text-xs font-medium">{cell.date.getDate()}</div>
+                  {/* Running-cycle bars — a thin band per cycle spanning this day. */}
+                  {cellSpans.length > 0 ? (
+                    <div className="mb-1 space-y-0.5">
+                      {cellSpans.slice(0, 3).map((s, i) => (
+                        <Link
+                          key={i}
+                          href={s.href}
+                          title={s.name}
+                          className={cn(
+                            "block h-1.5 rounded-full",
+                            s.live ? "bg-accent/60" : "bg-accent/30",
+                          )}
+                        />
+                      ))}
+                    </div>
+                  ) : null}
                   <div className="space-y-1">
                     {cellEvents.slice(0, 3).map((e, i) => (
                       <Link
@@ -138,7 +196,8 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
 
       <Card>
         <CardContent className="space-y-2 p-4 text-xs">
-          <div className="flex items-center gap-2"><span className="inline-block h-2 w-2 rounded-full bg-accent" /> Harvest start</div>
+          <div className="flex items-center gap-2"><span className="inline-block h-2 w-2 rounded-full bg-accent" /> Cycle starts / ends (with total days)</div>
+          <div className="flex items-center gap-2"><span className="inline-block h-1.5 w-6 rounded-full bg-accent/60" /> Cycle running (pale = finished cycle)</div>
           <div className="flex items-center gap-2"><span className="inline-block h-2 w-2 rounded-full bg-destructive" /> High-priority task</div>
           <div className="flex items-center gap-2"><span className="inline-block h-2 w-2 rounded-full bg-yellow-500" /> Medium-priority task</div>
           <div className="flex items-center gap-2"><span className="inline-block h-2 w-2 rounded-full bg-blue-500" /> Low-priority task</div>

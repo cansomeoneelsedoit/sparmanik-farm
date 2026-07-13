@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/table";
 import { Money, MoneyDual } from "@/components/shared/money";
 import { Decimal } from "@/server/decimal";
+import { installDepreciation } from "@/server/depreciation";
 import { localizedItemName } from "@/lib/item-name";
 import { RecordUsageDialog } from "@/app/(app)/harvest/[harvestId]/record-usage-dialog";
 import {
@@ -26,8 +27,11 @@ import {
 } from "@/app/(app)/harvest/[harvestId]/install-asset-dialog";
 import { LogSaleDialog } from "@/app/(app)/harvest/[harvestId]/log-sale-dialog";
 import { LogDispositionDialog } from "@/app/(app)/harvest/[harvestId]/log-disposition-dialog";
+import { SetHarvestedDialog } from "@/app/(app)/harvest/[harvestId]/set-harvested-dialog";
 import { LogLabourDialog } from "@/app/(app)/harvest/[harvestId]/log-labour-dialog";
+import { LabourOverrideDialog } from "@/app/(app)/harvest/[harvestId]/labour-override-dialog";
 import { CheckInAssetDialog } from "@/app/(app)/harvest/[harvestId]/check-in-asset-dialog";
+import { SetDepreciationDialog } from "@/app/(app)/inventory/set-depreciation-dialog";
 import { ExpenseFormDialog } from "@/app/(app)/expenses/expense-form-dialog";
 import { ImportExpenseSheetDialog } from "@/app/(app)/expenses/import-expense-sheet-dialog";
 import { EndHarvestButton } from "@/app/(app)/harvest/[harvestId]/end-harvest-button";
@@ -205,12 +209,17 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
   type AssetRow = {
     id: string;
     date: Date;
-    item: { name: string; unit: string; subUnit: string | null; subFactor: Decimal | null };
+    item: { id: string; name: string; nameEn: string | null; unit: string; subUnit: string | null; subFactor: Decimal | null };
     qty: Decimal;
     reusable: boolean;
     condition: string | null;
     depreciable: boolean;
+    // Depreciation snapshot on the install. depreciationMode is "PER_USE" |
+    // "CALENDAR" | null (legacy rows predate the field → treated as PER_USE).
+    depreciationMode: string | null;
+    usefulLifeMonths: number | null;
     amortisedCharge: Decimal | null;
+    acquisitionCost: Decimal | null;
     maxUses: number;
     useCount: number;
     discarded: boolean;
@@ -231,9 +240,10 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
   }
   /** Per-unit price of an asset line (charge ÷ quantity in real units), so
    *  the table reads "300 metres · Rp X / metre". Null when there's no charge
-   *  or qty to divide. */
-  function assetPerUnit(a: AssetRow): { value: string; label: string } | null {
-    const charge = a.amortisedCharge ? new Decimal(a.amortisedCharge) : null;
+   *  or qty to divide. Uses the LIVE charge so it agrees with the Charge
+   *  column (calendar charges accrue; the stored value can be stale). */
+  function assetPerUnit(a: AssetRow & { displayCharge?: Decimal }): { value: string; label: string } | null {
+    const charge = a.displayCharge ?? (a.amortisedCharge ? new Decimal(a.amortisedCharge) : null);
     if (!charge || charge.lte(0)) return null;
     const subQty =
       a.item.subFactor && a.item.subUnit
@@ -243,12 +253,19 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
     const label = a.item.subFactor && a.item.subUnit ? a.item.subUnit : a.item.unit;
     return { value: charge.div(subQty).toFixed(4), label };
   }
+  /** CALENDAR assets depreciate over time (useCount/maxUses are 0/1 and
+   *  meaningless). Legacy rows with a null mode are treated as PER_USE. */
+  const isCalendarAsset = (a: AssetRow): boolean => a.depreciationMode === "CALENDAR";
   const assetRows = (harvest.assets as AssetRow[]).map((a) => {
     const fifoCost = a.consumptions.reduce(
       (s: Decimal, c) => s.plus(new Decimal(c.qty).times(c.unitCost)),
       new Decimal(0),
     );
-    return { ...a, fifoCost };
+    // The charge this install currently bears. For CALENDAR assets this accrues
+    // over the in-service window (recomputed here); for PER_USE it's the stored
+    // per-use charge. Keeps the table/summary in step with the P&L card.
+    const displayCharge = installDepreciation(a, harvest.endDate);
+    return { ...a, fifoCost, displayCharge };
   });
   const depreciableAssets = assetRows.filter((a) => a.depreciable);
   const fixedAssets = assetRows.filter((a) => !a.depreciable);
@@ -268,6 +285,16 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
     0,
   );
   const labourHoursTotal = labourRows.reduce((s, l) => s + Number(l.hours), 0);
+  // The computed (hours×rate) labour, shown as a reference in the override
+  // dialog. pl.labourCost is the EFFECTIVE figure (the override when one is set).
+  const computedLabour = labourRows.reduce((s, l) => s + Number(l.cost), 0);
+  const labourOverridden = harvest.manualLabourCost !== null && harvest.manualLabourCost !== undefined;
+  // Cycle length in days: start → end (closed) or start → today (live).
+  const cycleEnd = harvest.endDate ?? new Date();
+  const cycleDays = Math.max(
+    0,
+    Math.round((cycleEnd.getTime() - harvest.startDate.getTime()) / 86_400_000),
+  );
   const deprFullTotal = depreciableAssets.reduce((s, a) => s.plus(a.fifoCost), new Decimal(0));
   const fixedFifoTotal = fixedAssets.reduce((s, a) => s.plus(a.fifoCost), new Decimal(0));
 
@@ -300,11 +327,81 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
   const breakageKg = kgSum(breakageRows);
   const staffKg = kgSum(staffEatRows);
   const giveawayKg = kgSum(giveawayRows);
-  // How much this greenhouse actually grew.
+  // How much this greenhouse actually grew (sold + given/waste).
   const totalGrownKg =
     Math.round((salesWeightTotal + breakageKg + staffKg + giveawayKg) * 1000) / 1000;
+
+  // --- Per-produce PRODUCED / UNSOLD -----------------------------------------
+  // harvestedKg (total kg picked off the plant) is stored per produce on the
+  // join row. Unsold-on-hand is derived: harvestedKg − sold − given/waste. A
+  // cycle can be closed for costs while its leftover produce keeps selling —
+  // only income moves. When harvestedKg is unset we treat produced as the
+  // reconstructed sold+disposed and unsold as 0.
+  const round3 = (n: number) => Math.round(n * 1000) / 1000;
+  type ProduceYieldJoin = {
+    produceId: string;
+    produce: { name: string };
+    harvestedKg: Decimal | null;
+    unsoldEstPricePerKg: Decimal | null;
+  };
+  const saleWeightRows = harvest.sales as {
+    produceId: string | null;
+    weight: Decimal;
+    amount: Decimal;
+    packagingCharge: Decimal;
+  }[];
+  const perProduceYield = ((harvest.produces as ProduceYieldJoin[]) ?? []).map((p) => {
+    const mySales = saleWeightRows.filter((s) => s.produceId === p.produceId);
+    const soldKgP = round3(mySales.reduce((s, x) => s + Number(x.weight), 0));
+    // Produce-only takings (exclude the on-top box/bag charge) so the
+    // suggested leftover price reflects the melon, not the packaging.
+    const soldAmtP = mySales.reduce(
+      (s, x) => s + Number(x.amount) - Number(x.packagingCharge),
+      0,
+    );
+    // Recent avg sale price/kg for this produce — a sensible default estimate.
+    const avgPriceP = soldKgP > 0 ? soldAmtP / soldKgP : null;
+    const disposedKgP = round3(
+      dispositionRows
+        .filter((d) => d.produceId === p.produceId)
+        .reduce((s, d) => s + Number(d.weight), 0),
+    );
+    const harvestedKgP = p.harvestedKg != null ? Number(p.harvestedKg) : null;
+    const unsoldKgP =
+      harvestedKgP != null ? Math.max(0, round3(harvestedKgP - soldKgP - disposedKgP)) : 0;
+    // Produced can never be less than what already left the greenhouse. If
+    // leftovers sold for MORE than the recorded total (the unsold estimate was
+    // low), the stored figure is stale — trust sold+given as the floor.
+    const producedKgP =
+      harvestedKgP != null
+        ? round3(Math.max(harvestedKgP, soldKgP + disposedKgP))
+        : round3(soldKgP + disposedKgP);
+    const estPriceP = p.unsoldEstPricePerKg != null ? Number(p.unsoldEstPricePerKg) : null;
+    const estValueP = estPriceP != null ? Math.round(unsoldKgP * estPriceP) : 0;
+    return {
+      produceId: p.produceId,
+      name: p.produce.name,
+      soldKg: soldKgP,
+      disposedKg: disposedKgP,
+      harvestedKg: harvestedKgP,
+      unsoldKg: unsoldKgP,
+      producedKg: producedKgP,
+      // An explicitly recorded total with nothing left = this crop is finished.
+      soldOut: harvestedKgP != null && unsoldKgP === 0,
+      estPrice: estPriceP,
+      estValue: estValueP,
+      suggestedPrice: avgPriceP,
+    };
+  });
+  const unsoldKg = round3(perProduceYield.reduce((s, p) => s + p.unsoldKg, 0));
+  const producedKg = round3(perProduceYield.reduce((s, p) => s + p.producedKg, 0));
+  const unsoldEstValue = perProduceYield.reduce((s, p) => s + p.estValue, 0);
+  const anyHarvestedSet = perProduceYield.some((p) => p.harvestedKg != null);
+
+  // Percentages denominated on total produced (incl. unsold) so they still sum
+  // sensibly. Guard divide-by-zero.
   const yieldPct = (kg: number) =>
-    totalGrownKg > 0 ? Math.round((kg / totalGrownKg) * 1000) / 10 : 0;
+    producedKg > 0 ? Math.round((kg / producedKg) * 1000) / 10 : 0;
 
   // --- Build the item list passed to InstallAssetDialog ---
   // For each item we compute total available stock and surface the FIFO-top
@@ -515,6 +612,9 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
             produces={produces.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }))}
             customers={(customers as { id: string; name: string; type: string }[]).map((c) => ({ id: c.id, name: c.name, type: c.type }))}
             packagingItems={packagingItems}
+            unsoldByProduce={Object.fromEntries(
+              perProduceYield.filter((p) => p.harvestedKg != null).map((p) => [p.produceId, p.unsoldKg]),
+            )}
           />
           <RecordUsageDialog
             harvestId={harvest.id}
@@ -570,22 +670,48 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
         </div>
       </header>
 
-      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-        <span>{harvest.greenhouse.name}</span>
+      {/* Cycle summary strip — farm, dates + day count up top, so a closed
+          cycle reads like a report header. */}
+      <div className="rounded-lg border bg-muted/20 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Farm</div>
+            <div className="font-medium">{harvest.greenhouse.name}</div>
+          </div>
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Started</div>
+            <div className="font-medium">{harvest.startDate.toISOString().slice(0, 10)}</div>
+          </div>
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+              {harvest.endDate ? "Ended" : "Status"}
+            </div>
+            <div className="font-medium">
+              {harvest.endDate ? harvest.endDate.toISOString().slice(0, 10) : "Live (ongoing)"}
+            </div>
+          </div>
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Days</div>
+            <div className="font-medium">
+              {cycleDays} {cycleDays === 1 ? "day" : "days"}
+              {!harvest.endDate ? " so far" : ""}
+            </div>
+          </div>
+          {harvest.variety ? (
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Variety</div>
+              <div className="font-medium">{harvest.variety}</div>
+            </div>
+          ) : null}
+        </div>
         {harvestProduceList.length > 0 ? (
-          <>
-            <span>·</span>
-            <span className="flex flex-wrap gap-1">
-              {harvestProduceList.map((p) => (
-                <Badge key={p.id} variant="outline">{p.name}</Badge>
-              ))}
-            </span>
-          </>
+          <div className="mt-2 flex flex-wrap items-center gap-1 border-t pt-2">
+            <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Produce</span>
+            {harvestProduceList.map((p) => (
+              <Badge key={p.id} variant="outline">{p.name}</Badge>
+            ))}
+          </div>
         ) : null}
-        {harvest.variety ? <><span>·</span><span>{harvest.variety}</span></> : null}
-        <span>·</span>
-        <span>{harvest.startDate.toISOString().slice(0, 10)}</span>
-        {harvest.endDate ? <><span>→</span><span>{harvest.endDate.toISOString().slice(0, 10)}</span></> : null}
       </div>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
@@ -601,26 +727,108 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
         <CardHeader className="flex flex-row items-center justify-between gap-2">
           <CardTitle>Yield — how much this greenhouse grew</CardTitle>
           <div className="text-right">
-            <div className="text-2xl font-semibold leading-none">{totalGrownKg} kg</div>
-            <div className="text-xs text-muted-foreground">total grown</div>
+            <div className="text-2xl font-semibold leading-none">{producedKg} kg</div>
+            <div className="text-xs text-muted-foreground">total produced</div>
           </div>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
             {[
-              { label: "Sold", kg: salesWeightTotal, tone: "text-green-600" },
-              { label: "Breakage / spillage", kg: breakageKg, tone: "text-red-600" },
-              { label: "Staff consumption", kg: staffKg, tone: "text-foreground" },
-              { label: "Giveaways / samples", kg: giveawayKg, tone: "text-foreground" },
+              { label: "Sold", kg: salesWeightTotal, tone: "text-green-600", sub: null as string | null },
+              { label: "Breakage / spillage", kg: breakageKg, tone: "text-red-600", sub: null },
+              { label: "Staff consumption", kg: staffKg, tone: "text-foreground", sub: null },
+              { label: "Giveaways / samples", kg: giveawayKg, tone: "text-foreground", sub: null },
+              {
+                label: "Unsold (ready to sell)",
+                kg: unsoldKg,
+                tone: "text-amber-600",
+                sub:
+                  unsoldEstValue > 0
+                    ? `≈ Rp ${unsoldEstValue.toLocaleString("id-ID")} est.`
+                    : null,
+              },
             ].map((r) => (
               <div key={r.label} className="rounded-lg border p-3">
                 <div className="text-xs text-muted-foreground">{r.label}</div>
                 <div className={`text-lg font-semibold ${r.tone}`}>{r.kg} kg</div>
-                <div className="text-xs text-muted-foreground">{yieldPct(r.kg)}% of yield</div>
+                {r.sub ? (
+                  <div className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                    {r.sub}
+                  </div>
+                ) : (
+                  <div className="text-xs text-muted-foreground">{yieldPct(r.kg)}% of yield</div>
+                )}
               </div>
             ))}
           </div>
-          {totalGrownKg === 0 ? (
+
+          {/* Per-produce produced / unsold breakdown. Lets Boyd enter what's
+              still on the plant per crop so a cycle can be closed for costs
+              while leftovers keep selling (only income moves). */}
+          {perProduceYield.length > 1 || anyHarvestedSet ? (
+            <div className="mt-4 space-y-1.5 border-t pt-3">
+              {perProduceYield.map((p) => (
+                <div key={p.produceId} className="flex items-center justify-between gap-3 text-sm">
+                  <div className="min-w-0">
+                    <span className="font-medium">{p.name}</span>
+                    <span className="text-muted-foreground">
+                      {" "}
+                      — produced {p.producedKg} kg · sold {p.soldKg} kg ·{" "}
+                      {p.soldOut ? (
+                        <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                          ✓ Sold out
+                        </span>
+                      ) : (
+                        <>
+                          unsold{" "}
+                          <span className="font-medium text-amber-600">{p.unsoldKg} kg</span>
+                          {p.estValue > 0 ? (
+                            <span className="font-medium text-emerald-700 dark:text-emerald-400">
+                              {" "}
+                              (≈ Rp {p.estValue.toLocaleString("id-ID")})
+                            </span>
+                          ) : null}
+                        </>
+                      )}
+                    </span>
+                  </div>
+                  <SetHarvestedDialog
+                    // Remount when the underlying figures change so the form
+                    // never shows stale values after new sales land.
+                    key={`${p.produceId}:${p.soldKg}:${p.harvestedKg}:${p.estPrice}`}
+                    harvestId={harvest.id}
+                    produceId={p.produceId}
+                    produceName={p.name}
+                    soldKg={p.soldKg}
+                    disposedKg={p.disposedKg}
+                    currentUnsold={p.harvestedKg != null ? p.unsoldKg : null}
+                    currentEstPrice={p.estPrice}
+                    suggestedPrice={p.suggestedPrice}
+                  />
+                </div>
+              ))}
+            </div>
+          ) : perProduceYield.length === 1 ? (
+            <div className="mt-4 flex items-center justify-between gap-3 border-t pt-3 text-sm">
+              <span className="text-muted-foreground">
+                Record what&apos;s still unsold on hand so you can close this cycle&apos;s costs
+                while the leftovers keep selling.
+              </span>
+              <SetHarvestedDialog
+                key={`${perProduceYield[0].produceId}:${perProduceYield[0].soldKg}:${perProduceYield[0].estPrice}`}
+                harvestId={harvest.id}
+                produceId={perProduceYield[0].produceId}
+                produceName={perProduceYield[0].name}
+                soldKg={perProduceYield[0].soldKg}
+                disposedKg={perProduceYield[0].disposedKg}
+                currentUnsold={null}
+                currentEstPrice={perProduceYield[0].estPrice}
+                suggestedPrice={perProduceYield[0].suggestedPrice}
+              />
+            </div>
+          ) : null}
+
+          {producedKg === 0 ? (
             <p className="mt-3 text-xs text-muted-foreground">
               Nothing recorded yet. Log sales, and use the sections below to record breakage,
               staff consumption, or giveaways — they all add up here.
@@ -818,9 +1026,26 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
       </Card>
 
       <Card>
-        <CardHeader><CardTitle>Labour expenses</CardTitle></CardHeader>
+        <CardHeader className="flex-row items-center justify-between gap-2 space-y-0">
+          <div className="min-w-0">
+            <CardTitle>Labour expenses</CardTitle>
+            {labourOverridden ? (
+              <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                Manual override in use — the P&amp;L uses the amount you set, not the calculated hours.
+                {harvest.manualLabourNote ? ` (${harvest.manualLabourNote})` : ""}
+              </p>
+            ) : null}
+          </div>
+          <LabourOverrideDialog
+            key={`${harvest.manualLabourCost ?? ""}:${computedLabour}`}
+            harvestId={harvest.id}
+            current={labourOverridden ? String(harvest.manualLabourCost) : null}
+            computed={String(computedLabour)}
+            note={harvest.manualLabourNote ?? null}
+          />
+        </CardHeader>
         <CardContent className="p-0">
-          {labourRows.length === 0 ? (
+          {labourRows.length === 0 && !labourOverridden ? (
             <div className="p-12 text-center text-muted-foreground">No labour logged against this harvest.</div>
           ) : (
             <Table>
@@ -877,7 +1102,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                   <TableHead>Date</TableHead>
                   <TableHead>Item</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
-                  <TableHead>Uses remaining</TableHead>
+                  <TableHead>Uses / life</TableHead>
                   <TableHead className="text-right">Charge this harvest</TableHead>
                   <TableHead className="text-right">Full cost</TableHead>
                   <TableHead>Status</TableHead>
@@ -904,9 +1129,13 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                         })()}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        <strong className="text-foreground">{usesRemaining}</strong> of {a.maxUses}
+                        {isCalendarAsset(a) ? (
+                          <><strong className="text-foreground">{a.usefulLifeMonths}</strong> mo life</>
+                        ) : (
+                          <><strong className="text-foreground">{usesRemaining}</strong> of {a.maxUses}</>
+                        )}
                       </TableCell>
-                      <TableCell className="text-right"><Money value={(a.amortisedCharge ?? new Decimal(0)).toFixed(4)} /></TableCell>
+                      <TableCell className="text-right"><Money value={a.displayCharge.toFixed(4)} /></TableCell>
                       <TableCell className="text-right text-muted-foreground"><Money value={a.fifoCost.toFixed(4)} /></TableCell>
                       <TableCell>
                         {a.returnCondition === "good" ? (
@@ -924,20 +1153,37 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        {inUse && harvest.status === "LIVE" ? (
-                          <CheckInAssetDialog
-                            harvestAssetId={a.id}
+                        <div className="flex flex-col items-end gap-1.5">
+                          {inUse && harvest.status === "LIVE" ? (
+                            <CheckInAssetDialog
+                              harvestAssetId={a.id}
+                              itemName={itemName(a.item)}
+                              qty={Number(a.qty)}
+                              unit={a.item.unit}
+                              subUnit={a.item.subUnit}
+                              subFactor={a.item.subFactor ? Number(a.item.subFactor) : null}
+                              usesRemaining={usesRemaining}
+                              isCalendar={isCalendarAsset(a)}
+                              trigger={
+                                <Button size="sm" variant="outline">Return</Button>
+                              }
+                            />
+                          ) : null}
+                          <SetDepreciationDialog
+                            itemId={a.item.id}
                             itemName={itemName(a.item)}
-                            qty={Number(a.qty)}
-                            unit={a.item.unit}
-                            subUnit={a.item.subUnit}
-                            subFactor={a.item.subFactor ? Number(a.item.subFactor) : null}
-                            usesRemaining={usesRemaining}
+                            current={{
+                              mode: (a.depreciationMode ?? "PER_USE") as "NONE" | "PER_USE" | "CALENDAR",
+                              uses: a.maxUses,
+                              months: a.usefulLifeMonths,
+                            }}
                             trigger={
-                              <Button size="sm" variant="outline">Return</Button>
+                              <Button size="sm" variant="ghost" className="text-xs text-muted-foreground">
+                                Set lifespan
+                              </Button>
                             }
                           />
-                        ) : null}
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
@@ -972,6 +1218,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                   <TableHead>Reusable</TableHead>
                   <TableHead>Condition</TableHead>
                   <TableHead className="text-right">FIFO cost</TableHead>
+                  <TableHead className="w-28" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -983,11 +1230,28 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                     <TableCell>{a.reusable ? <Badge variant="outline">Reusable</Badge> : "—"}</TableCell>
                     <TableCell className="text-muted-foreground">{a.condition ?? "—"}</TableCell>
                     <TableCell className="text-right text-muted-foreground"><Money value={a.fifoCost.toFixed(4)} /></TableCell>
+                    <TableCell className="text-right">
+                      <SetDepreciationDialog
+                        itemId={a.item.id}
+                        itemName={itemName(a.item)}
+                        current={{
+                          mode: (a.depreciationMode ?? "NONE") as "NONE" | "PER_USE" | "CALENDAR",
+                          uses: a.maxUses,
+                          months: a.usefulLifeMonths,
+                        }}
+                        trigger={
+                          <Button size="sm" variant="ghost" className="text-xs text-muted-foreground">
+                            Set lifespan
+                          </Button>
+                        }
+                      />
+                    </TableCell>
                   </TableRow>
                 ))}
                 <TableRow className="border-t-2 bg-muted/20 font-semibold hover:bg-muted/20">
                   <TableCell colSpan={5}>Total</TableCell>
                   <TableCell className="text-right text-muted-foreground"><Money value={fixedFifoTotal.toFixed(4)} /></TableCell>
+                  <TableCell />
                 </TableRow>
               </TableBody>
             </Table>
@@ -1041,9 +1305,10 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
                 {depreciableAssets.map((a) => (
                   <li key={a.id} className="flex items-center justify-between">
                     <span className="text-muted-foreground">
-                      {a.date.toISOString().slice(0, 10)} — {itemName(a.item)} × {fmtAssetQty(a)} (use {a.useCount} of {a.maxUses})
+                      {a.date.toISOString().slice(0, 10)} — {itemName(a.item)} × {fmtAssetQty(a)}{" "}
+                      ({isCalendarAsset(a) ? `over ${a.usefulLifeMonths} mo` : `use ${a.useCount} of ${a.maxUses}`})
                     </span>
-                    <span className="text-red-600"><Money value={(a.amortisedCharge ?? new Decimal(0)).toFixed(4)} /></span>
+                    <span className="text-red-600"><Money value={a.displayCharge.toFixed(4)} /></span>
                   </li>
                 ))}
               </ul>

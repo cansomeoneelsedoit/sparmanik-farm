@@ -514,6 +514,46 @@ const receiveStockSchema = z.object({
   maxUses: z.coerce.number().int().min(1).default(1),
 });
 
+/**
+ * Depreciation stamp for a NEW batch. An explicit maxUses>1 typed on the
+ * receive form wins (existing behaviour); otherwise the batch inherits the
+ * ITEM's depreciation policy, so a re-purchase of twine (4 uses) or a meter
+ * (24 months) arrives pre-scheduled instead of silently non-depreciable.
+ */
+async function batchDepreciationStamp(
+  tx: TransactionClient,
+  itemId: string,
+  formMaxUses: number,
+  price: Decimal,
+): Promise<{ maxUses: number; amortisedCostPerUse: Decimal | null; usefulLifeMonths: number | null }> {
+  if (formMaxUses > 1) {
+    return {
+      maxUses: formMaxUses,
+      amortisedCostPerUse: price.div(formMaxUses).toDecimalPlaces(4),
+      usefulLifeMonths: null,
+    };
+  }
+  const item = (await tx.item.findUnique({
+    where: { id: itemId },
+    select: { depreciationMode: true, depreciationUses: true, depreciationMonths: true },
+  })) as {
+    depreciationMode: string | null;
+    depreciationUses: number | null;
+    depreciationMonths: number | null;
+  } | null;
+  if (item?.depreciationMode === "PER_USE" && (item.depreciationUses ?? 0) > 1) {
+    return {
+      maxUses: item.depreciationUses!,
+      amortisedCostPerUse: price.div(item.depreciationUses!).toDecimalPlaces(4),
+      usefulLifeMonths: null,
+    };
+  }
+  if (item?.depreciationMode === "CALENDAR" && (item.depreciationMonths ?? 0) > 0) {
+    return { maxUses: 1, amortisedCostPerUse: null, usefulLifeMonths: item.depreciationMonths! };
+  }
+  return { maxUses: 1, amortisedCostPerUse: null, usefulLifeMonths: null };
+}
+
 export async function receiveStock(input: unknown): Promise<ActionResult<{ batchId: string }>> {
   const parsed = receiveStockSchema.safeParse(input);
   if (!parsed.success) {
@@ -521,9 +561,8 @@ export async function receiveStock(input: unknown): Promise<ActionResult<{ batch
   }
   const uid = await userId();
   const price = new Decimal(parsed.data.price);
-  const amortisedCostPerUse =
-    parsed.data.maxUses > 1 ? price.div(parsed.data.maxUses) : null;
   const result = await prisma.$transaction(async (tx: TransactionClient) => {
+    const stamp = await batchDepreciationStamp(tx, parsed.data.itemId, parsed.data.maxUses, price);
     const batch = await tx.batch.create({
       data: {
         itemId: parsed.data.itemId,
@@ -532,9 +571,10 @@ export async function receiveStock(input: unknown): Promise<ActionResult<{ batch
         qty: new Decimal(parsed.data.qty),
         price,
         exchangeRate: new Decimal(parsed.data.exchangeRate),
-        maxUses: parsed.data.maxUses,
+        maxUses: stamp.maxUses,
         useCount: 0,
-        amortisedCostPerUse: amortisedCostPerUse,
+        amortisedCostPerUse: stamp.amortisedCostPerUse,
+        usefulLifeMonths: stamp.usefulLifeMonths,
       },
       include: { item: { select: { name: true } } },
     });
@@ -596,7 +636,7 @@ export async function receiveStockBulk(
       const itemIdsToRevalidate = new Set<string>();
       for (const l of parsed.data.lines) {
         const price = new Decimal(l.price);
-        const amortisedCostPerUse = l.maxUses > 1 ? price.div(l.maxUses) : null;
+        const stamp = await batchDepreciationStamp(tx, l.itemId, l.maxUses, price);
         const batch = await tx.batch.create({
           data: {
             itemId: l.itemId,
@@ -605,9 +645,10 @@ export async function receiveStockBulk(
             qty: new Decimal(l.qty),
             price,
             exchangeRate,
-            maxUses: l.maxUses,
+            maxUses: stamp.maxUses,
             useCount: 0,
-            amortisedCostPerUse,
+            amortisedCostPerUse: stamp.amortisedCostPerUse,
+            usefulLifeMonths: stamp.usefulLifeMonths,
           },
           include: { item: { select: { name: true } } },
         });

@@ -13,6 +13,10 @@ export type FifoConsumption = {
   batchMaxUses: number;
   batchUseCountBefore: number;
   amortisedCostPerUse: string | null;
+  // CALENDAR depreciation: the batch's useful life in months (null = not a
+  // calendar-depreciated asset). When set, the install charges the cycle's
+  // straight-line share instead of a per-use fraction.
+  batchUsefulLifeMonths: number | null;
 };
 
 export type FifoResult = {
@@ -80,6 +84,7 @@ export async function consumeFifo(
       amortisedCostPerUse: batch.amortisedCostPerUse
         ? new Decimal(batch.amortisedCostPerUse).toFixed(4)
         : null,
+      batchUsefulLifeMonths: batch.usefulLifeMonths ?? null,
     });
     totalCost = totalCost.plus(lineCost);
     remainingNeeded = remainingNeeded.minus(take);

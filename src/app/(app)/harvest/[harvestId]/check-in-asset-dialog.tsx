@@ -48,6 +48,7 @@ export function CheckInAssetDialog({
   subUnit,
   subFactor,
   usesRemaining,
+  isCalendar = false,
   trigger,
 }: {
   harvestAssetId: string;
@@ -60,6 +61,10 @@ export function CheckInAssetDialog({
   subFactor?: number | null;
   /** maxUses - useCount on the source batch (per unit), for the residual-value preview. */
   usesRemaining: number | null;
+  /** CALENDAR equipment (meters, pumps) comes back whole — the "how much was
+   *  used" question doesn't apply, and the server must take the
+   *  return-to-stock path so the asset's schedule survives to the next cycle. */
+  isCalendar?: boolean;
   trigger: React.ReactNode;
 }) {
   const t = useTranslations("checkinDialog");
@@ -91,19 +96,23 @@ export function CheckInAssetDialog({
   function submit() {
     // "Used up" always consumes the full taken-out amount — no qty to validate.
     const isUsedUp = condition === "used";
-    if (!isUsedUp && !usedValid) {
+    // CALENDAR equipment (not consumed in place) returns whole: omit usedQty so
+    // the server takes the return-to-stock path and the schedule carries over.
+    const wholeReturn = isCalendar && !isUsedUp;
+    if (!isUsedUp && !wholeReturn && !usedValid) {
       toast.error(t("enterUsed", { unit: unitLabel }));
       return;
     }
-    const effectiveUsed = isUsedUp ? installedInUnits : usedNum;
+    const effectiveUsed = isUsedUp || wholeReturn ? installedInUnits : usedNum;
     // Convert the real-unit figure back to pack units for the ledger.
     const usedPacks = isPack ? effectiveUsed / (subFactor as number) : effectiveUsed;
     startT(async () => {
       const r = await checkInHarvestAsset({
         harvestAssetId,
         condition,
-        usedQty: String(usedPacks),
-        usedDisplay: `${effectiveUsed} ${unitLabel}`,
+        ...(wholeReturn
+          ? {}
+          : { usedQty: String(usedPacks), usedDisplay: `${effectiveUsed} ${unitLabel}` }),
         date,
         note,
       });
@@ -196,6 +205,14 @@ export function CheckInAssetDialog({
             <div className="rounded-md border bg-sky-50 px-3 py-2 text-xs text-sky-700 dark:bg-sky-950/40 dark:text-sky-300">
               {t("usedNote", { qty: installedInUnits, unit: unitLabel })}
             </div>
+          ) : isCalendar ? (
+            /* Time-depreciated equipment returns whole — no used-qty question. */
+            <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              {t("tookOut")}{" "}
+              <strong className="text-foreground">
+                {installedInUnits} {unitLabel}
+              </strong>
+            </div>
           ) : (
             <div className="space-y-2">
               <Label>
@@ -257,7 +274,11 @@ export function CheckInAssetDialog({
           <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
             {tCommon("cancel")}
           </Button>
-          <Button type="button" onClick={submit} disabled={pending || (condition !== "used" && !usedValid)}>
+          <Button
+            type="button"
+            onClick={submit}
+            disabled={pending || (condition !== "used" && !isCalendar && !usedValid)}
+          >
             {pending ? t("saving") : t("checkIn")}
           </Button>
         </DialogFooter>

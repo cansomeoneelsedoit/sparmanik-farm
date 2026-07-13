@@ -30,6 +30,8 @@ const PARAMS = {
   done: 1, score: 80,
   // Harvest-dialog namespaces (saleDialog/dispoDialog/labourDialog/assetDialog/checkinDialog)
   qty: 2, rate: "18.000", charge: "1.000", useLabel: "use 1 of 5", noun: "contoh",
+  // saleDialog unsold-pool prompt ("{kg} kg left")
+  kg: "30.7",
 };
 
 function* walk(dir) {

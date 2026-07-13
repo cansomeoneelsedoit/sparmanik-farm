@@ -68,3 +68,8 @@ use me to upload.txt
 prod-backup-*.sql
 tmp-sync/
 .sop-ingest.pdf
+
+# Local machine launch helpers (personal, not for the repo)
+start-local.cmd
+start-local.ps1
+make-startup-permanent.cmd

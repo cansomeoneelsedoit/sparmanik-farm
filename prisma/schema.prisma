@@ -227,6 +227,7 @@ model Organization {
   questions       Question[]
   moduleAttempts  ModuleAttempt[]
   courseEnrollments CourseEnrollment[]
+  plantTags       PlantTag[]
 
   @@map("organizations")
 }
@@ -300,6 +301,7 @@ model Produce {
   sales          Sale[]
   dispositions   HarvestDisposition[]
   inCrops        HarvestProduce[]
+  plantRecords   PlantRecord[]
 
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
@@ -314,6 +316,15 @@ model Produce {
 model HarvestProduce {
   harvestId String   @map("harvest_id")
   produceId String   @map("produce_id")
+  /// Total kg picked off the plant for this produce in this cycle (harvested).
+  /// Unsold-on-hand = harvestedKg − sold − given/waste, so a cycle can be
+  /// closed for costs while its leftover produce is still sold off later (only
+  /// income moves). Null = not set (falls back to sold+disposed as produced).
+  harvestedKg Decimal? @db.Decimal(18, 4) @map("harvested_kg")
+  /// Estimated sale price per kg for the UNSOLD leftover, so the harvest can
+  /// show the leftover's estimated value (unsold kg × this). Estimate only —
+  /// real income lands when the leftover is actually sold.
+  unsoldEstPricePerKg Decimal? @db.Decimal(18, 4) @map("unsold_est_price_per_kg")
   createdAt DateTime @default(now()) @map("created_at")
 
   harvest Harvest @relation(fields: [harvestId], references: [id], onDelete: Cascade)
@@ -333,6 +344,7 @@ model Greenhouse {
   notes          String?
   harvests       Harvest[]
   wageEntries    WageEntryLine[]
+  plantTags      PlantTag[]
 
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
@@ -394,6 +406,16 @@ model Customer {
 
 // ---------- Inventory ----------
 
+/// How a reusable asset's cost is spread over its life.
+///  NONE     = charge the full cost (or ledger-only for a durable tool).
+///  PER_USE  = spread over a number of uses (consumables like twine: cost/uses).
+///  CALENDAR = straight-line over a number of months (equipment: meters, pumps).
+enum DepreciationMode {
+  NONE
+  PER_USE
+  CALENDAR
+}
+
 model Item {
   id                String   @id @default(cuid())
   organizationId    String?   @map("organization_id")
@@ -428,6 +450,14 @@ model Item {
   productFamily     String?  @map("product_family")
   location          String?
   reusable          Boolean  @default(false)
+  /// Depreciation policy for this asset, inherited by its batches + installs.
+  /// Set once (e.g. twine → PER_USE 4, a TDS meter → CALENDAR 24). Changing it
+  /// re-spreads existing harvest charges. See src/server/depreciation.ts.
+  depreciationMode   DepreciationMode @default(NONE) @map("depreciation_mode")
+  /// PER_USE: how many uses/harvests the asset lasts (cost ÷ uses per harvest).
+  depreciationUses   Int?             @map("depreciation_uses")
+  /// CALENDAR: useful life in months (straight-line; a cycle charges its share).
+  depreciationMonths Int?             @map("depreciation_months")
   reorder           Decimal  @default(0) @db.Decimal(18, 4)
   shopeeUrl         String?  @map("shopee_url")
   defaultSupplierId String?  @map("default_supplier_id")
@@ -466,6 +496,10 @@ model Batch {
   maxUses               Int      @default(1) @map("max_uses")
   useCount              Int      @default(0) @map("use_count")
   amortisedCostPerUse   Decimal? @db.Decimal(18, 4) @map("amortised_cost_per_use")
+  // CALENDAR depreciation: useful life in months. When set, the batch
+  // depreciates straight-line over this many months (maxUses stays 1); a
+  // harvest cycle is charged the depreciation accrued over its own duration.
+  usefulLifeMonths      Int?     @map("useful_life_months")
   // Returned batches were created at end-harvest with price=0 because the
   // original purchase cost is already on Business P&L. The amortised charge
   // still follows the batch via amortisedCostPerUse.
@@ -553,6 +587,11 @@ model Harvest {
   startDate      DateTime      @db.Date @map("start_date")
   endDate        DateTime?     @db.Date @map("end_date")
   status         HarvestStatus @default(LIVE)
+  /// Manual labour-cost override for this cycle. When set, it REPLACES the
+  /// computed hours×rate labour in the P&L — for when reality differs from the
+  /// logged hours (you just type what you actually paid). Null = use computed.
+  manualLabourCost Decimal? @db.Decimal(18, 4) @map("manual_labour_cost")
+  manualLabourNote String?  @map("manual_labour_note")
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
 
@@ -568,6 +607,7 @@ model Harvest {
   tasks            Task[]
   damagedBatches   Batch[]           @relation("BatchDamagedFromHarvest")
   expenses         Expense[]
+  plantRecords     PlantRecord[]
 
   @@index([organizationId])
   @@index([status, startDate])
@@ -585,8 +625,16 @@ model HarvestAsset {
   condition       String?
   depreciable     Boolean  @default(false)
   amortisedCharge Decimal? @db.Decimal(18, 4) @map("amortised_charge")
+  // The FULL acquisition cost of this install (before amortisation), captured
+  // so the amortised charge can be re-derived idempotently when the item's
+  // depreciation policy changes. amortisedCharge is always a function of this.
+  acquisitionCost Decimal? @db.Decimal(18, 4) @map("acquisition_cost")
   maxUses         Int      @default(1) @map("max_uses")
   useCount        Int      @default(0) @map("use_count")
+  // Snapshot of how amortisedCharge was computed, for display + recompute.
+  // "PER_USE" (uses cost/maxUses) or "CALENDAR" (straight-line over months).
+  depreciationMode String? @map("depreciation_mode")
+  usefulLifeMonths Int?    @map("useful_life_months")
   discarded       Boolean  @default(false)
   // Check-in state when the asset comes back to inventory mid-harvest or at
   // end-harvest. "good" returns to inventory; "damaged"/"lost" stay with the
@@ -655,6 +703,11 @@ model Sale {
   charity          Boolean  @default(false)
   /// Optional: which charity/organisation received the produce.
   charityRecipient String?  @map("charity_recipient")
+  /// Where the produce came from when the crop tracks an unsold pool:
+  /// true = the unsold-on-hand pile, false = freshly picked (grew the
+  /// harvested total on save). Stored so deleting/editing the sale can
+  /// reverse the pool bookkeeping. Null = untracked (legacy, POS).
+  fromUnsold       Boolean? @map("from_unsold")
   createdAt      DateTime  @default(now()) @map("created_at")
 
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -1331,4 +1384,52 @@ model FarmDocument {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("farm_document")
+}
+
+// ---------- Plant tags (QR stakes) ----------
+
+/// A physical QR stake. It belongs to ONE greenhouse for life and is recycled
+/// there: each crop it's staked with gets a PlantRecord; reallocating ends the
+/// current record and starts the next, so the tag keeps its full history.
+/// The QR encodes /t/<code>.
+model PlantTag {
+  id             String   @id @default(cuid())
+  organizationId String?  @map("organization_id")
+  greenhouseId   String   @map("greenhouse_id")
+  /// Short unguessable slug in the QR URL — stable for the stake's whole life.
+  code           String   @unique
+  /// Human label printed under the QR, e.g. "GH1-007".
+  label          String
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  greenhouse   Greenhouse    @relation(fields: [greenhouseId], references: [id], onDelete: Cascade)
+  records      PlantRecord[]
+
+  @@unique([greenhouseId, label])
+  @@index([organizationId])
+  @@map("plant_tags")
+}
+
+/// One crop's stay on a tag: what's planted, when, seed/method/notes. The
+/// current record has endedAt = null; reallocation ends it and creates the
+/// next, so scanning always shows the live plant plus its predecessors.
+model PlantRecord {
+  id        String    @id @default(cuid())
+  tagId     String    @map("tag_id")
+  harvestId String?   @map("harvest_id")
+  produceId String?   @map("produce_id")
+  plantedAt DateTime  @db.Date @map("planted_at")
+  seed      String?
+  method    String?
+  notes     String?
+  endedAt   DateTime? @map("ended_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  tag     PlantTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  harvest Harvest? @relation(fields: [harvestId], references: [id], onDelete: SetNull)
+  produce Produce? @relation(fields: [produceId], references: [id], onDelete: SetNull)
+
+  @@index([tagId, endedAt])
+  @@map("plant_records")
 }

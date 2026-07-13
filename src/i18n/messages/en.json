@@ -19,6 +19,7 @@
   "nav": {
     "dashboard": "Dashboard",
     "calendar": "Calendar",
+    "plantTags": "Plant tags",
     "sales": "Sales",
     "harvest": "Greenhouses",
     "pos": "Register",
@@ -290,6 +291,12 @@
     "log": "Log",
     "save": "Save",
     "saving": "Saving…",
+    "sourceQuestion": "Where is this melon from?",
+    "sourceUnsold": "Unsold stock on hand ({kg} kg left)",
+    "sourceUnsoldSub": "Reduces the unsold pile — total produced stays the same",
+    "sourceFresh": "Freshly picked",
+    "sourceFreshSub": "Adds to total produced — the unsold pile stays the same",
+    "sourceOverWarning": "More than the {kg} kg recorded unsold — the total produced will be bumped up to match.",
     "toastLogged": "Sale logged",
     "toastUpdated": "Sale updated"
   },

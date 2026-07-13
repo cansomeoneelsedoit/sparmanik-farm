@@ -21,6 +21,7 @@ import {
   MessageSquare,
   Package,
   PlayCircle,
+  QrCode,
   Settings,
   ShoppingCart,
   Sparkles,
@@ -138,6 +139,7 @@ export function SidebarContent({
       icon: ClipboardList,
       children: [
         { key: "calendar", href: "/calendar", icon: Calendar },
+        { key: "plantTags", href: "/tags", fallback: "Plant tags", icon: QrCode },
         {
           key: "tasks",
           href: "/tasks",
