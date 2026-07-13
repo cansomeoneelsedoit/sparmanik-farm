@@ -55,6 +55,7 @@ export function LogSaleDialog({
   produces,
   customers: initialCustomers = [],
   packagingItems = [],
+  unsoldByProduce = {},
   existing,
   trigger,
 }: {
@@ -63,6 +64,10 @@ export function LogSaleDialog({
   customers?: Customer[];
   /** In-stock items usable as packaging (boxes, bags, containers…) + cost. */
   packagingItems?: PackagingItem[];
+  /** Unsold-on-hand kg per produce that has a recorded harvested total. When
+   *  the picked produce is here, the dialog asks whether this sale comes from
+   *  that pool (pool shrinks) or is freshly picked (total produced grows). */
+  unsoldByProduce?: Record<string, number>;
   /** When set, the dialog edits this sale instead of creating a new one. */
   existing?: EditableSale;
   /** Custom trigger (e.g. an edit pencil). Defaults to a "Log sale" button. */
@@ -95,6 +100,11 @@ export function LogSaleDialog({
   const CHARITY_DEFAULT_PRICE = "50000";
   const [charity, setCharity] = useState(false);
   const [charityRecipient, setCharityRecipient] = useState("");
+  // Where the melon comes from when the produce tracks an unsold pool:
+  // true = from the pool (pool shrinks), false = freshly picked (total
+  // produced grows so the pool stays put). Create-only. null = the user
+  // hasn't chosen — default to the pool while it has stock, else fresh.
+  const [fromUnsoldChoice, setFromUnsoldChoice] = useState<boolean | null>(null);
   function toggleCharity(on: boolean) {
     setCharity(on);
     // Seed the price with the standard 50k/kg when none has been set yet
@@ -128,6 +138,11 @@ export function LogSaleDialog({
   }
   const weightNum = Number(form.watch("weight")) || 0;
   const priceNum = Number(form.watch("pricePerKg")) || 0;
+  // Effective source: the user's explicit pick, else pool-while-it-has-stock
+  // (a sold-out crop's new pick sensibly defaults to "freshly picked").
+  const watchedProduceId = form.watch("produceId");
+  const watchedPool = unsoldByProduce[watchedProduceId];
+  const fromUnsold = fromUnsoldChoice ?? (watchedPool ?? 0) > 0;
   const pkgQtyNum = Number(pkgQty) || 0;
   const onTopExtra = !isEdit && pkgItem && pkgMode === "ontop" ? (Number(pkgCharge) || 0) * pkgQtyNum : 0;
   const autoTotal = weightNum * priceNum + onTopExtra;
@@ -162,6 +177,7 @@ export function LogSaleDialog({
     setPkgCharge("");
     setCharity(false);
     setCharityRecipient("");
+    setFromUnsoldChoice(null);
     setOverrideOn(overrideWasUsed);
     setOverrideAmount(existing ? existing.amount : "");
   }
@@ -190,6 +206,8 @@ export function LogSaleDialog({
             amountOverride,
             charity,
             charityRecipient: charity ? charityRecipient : undefined,
+            // Only ask the server to adjust the pool when this produce has one.
+            fromUnsold: unsoldByProduce[v.produceId] !== undefined ? fromUnsold : undefined,
           });
       if (r.ok) {
         toast.success(isEdit ? t("toastUpdated") : t("toastLogged"));
@@ -283,6 +301,52 @@ export function LogSaleDialog({
                 <Input type="number" step="any" min="0" {...form.register("pricePerKg")} />
               </div>
             </div>
+
+            {/* Source of the melon (create-only, shown once the produce has a
+                recorded harvested total): from the unsold pool (pool shrinks)
+                or freshly picked (total produced grows, pool untouched). */}
+            {!isEdit && unsoldByProduce[form.watch("produceId")] !== undefined ? (
+              <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50/50 p-3 dark:border-amber-500/25 dark:bg-amber-500/5">
+                <p className="text-sm font-medium">{t("sourceQuestion")}</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setFromUnsoldChoice(true)}
+                    className={`rounded-md border p-2 text-left text-xs transition-colors ${
+                      fromUnsold
+                        ? "border-amber-400 bg-amber-100/70 dark:bg-amber-500/15"
+                        : "border-input bg-background hover:bg-muted/40"
+                    }`}
+                  >
+                    <span className="block font-medium">
+                      {t("sourceUnsold", {
+                        kg: unsoldByProduce[form.watch("produceId")] ?? 0,
+                      })}
+                    </span>
+                    <span className="text-muted-foreground">{t("sourceUnsoldSub")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFromUnsoldChoice(false)}
+                    className={`rounded-md border p-2 text-left text-xs transition-colors ${
+                      !fromUnsold
+                        ? "border-amber-400 bg-amber-100/70 dark:bg-amber-500/15"
+                        : "border-input bg-background hover:bg-muted/40"
+                    }`}
+                  >
+                    <span className="block font-medium">{t("sourceFresh")}</span>
+                    <span className="text-muted-foreground">{t("sourceFreshSub")}</span>
+                  </button>
+                </div>
+                {fromUnsold && weightNum > (unsoldByProduce[form.watch("produceId")] ?? 0) ? (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    {t("sourceOverWarning", {
+                      kg: unsoldByProduce[form.watch("produceId")] ?? 0,
+                    })}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
 
             {/* Charity donation (create-only). Still recorded as income (owner's
                 company pays, default 50k/kg); flagged so reporting can highlight

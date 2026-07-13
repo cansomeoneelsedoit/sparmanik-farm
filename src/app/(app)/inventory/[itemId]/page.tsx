@@ -26,7 +26,8 @@ import { DeleteItemButton } from "@/app/(app)/inventory/[itemId]/item-actions";
 import { DeleteBatchButton } from "@/app/(app)/inventory/[itemId]/batch-actions";
 import { IdentifyItemPanel } from "@/app/(app)/inventory/[itemId]/identify-item-panel";
 import { MergeItemDialog } from "@/app/(app)/inventory/merge-item-dialog";
-import { Combine, Boxes } from "lucide-react";
+import { SetDepreciationDialog } from "@/app/(app)/inventory/set-depreciation-dialog";
+import { Combine, Boxes, Pencil } from "lucide-react";
 import { getProductFamilyRollup } from "@/app/(app)/inventory/actions";
 
 export const dynamic = "force-dynamic";
@@ -56,6 +57,9 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
         productFamily: true,
         location: true,
         reusable: true,
+        depreciationMode: true,
+        depreciationUses: true,
+        depreciationMonths: true,
         reorder: true,
         shopeeUrl: true,
         categoryId: true,
@@ -433,6 +437,43 @@ export default async function ItemDetailPage({ params }: { params: Promise<{ ite
           <Detail label="Reorder at" value={`${item.reorder.toString()} ${item.unit}`} />
         </CardContent>
       </Card>
+
+      {(() => {
+        const deprMode = (item.depreciationMode ?? "NONE") as "NONE" | "PER_USE" | "CALENDAR";
+        const deprLabel =
+          deprMode === "PER_USE"
+            ? `Consumable · lasts ${item.depreciationUses} uses`
+            : deprMode === "CALENDAR"
+              ? `Equipment · lasts ${item.depreciationMonths} months`
+              : "Full cost (not depreciated)";
+        return (
+          <Card>
+            <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+              <div>
+                <div className="text-xs text-muted-foreground">Depreciation</div>
+                <div className="font-medium">{deprLabel}</div>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  How each harvest install of this item is charged.
+                </p>
+              </div>
+              <SetDepreciationDialog
+                itemId={item.id}
+                itemName={localizedItemName(item, locale).trim() || item.code}
+                current={{
+                  mode: deprMode,
+                  uses: item.depreciationUses,
+                  months: item.depreciationMonths,
+                }}
+                trigger={
+                  <Button variant="outline" size="sm">
+                    <Pencil className="h-4 w-4" /> Edit
+                  </Button>
+                }
+              />
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {supplierRows.length > 0 ? (
         <Card>

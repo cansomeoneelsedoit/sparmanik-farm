@@ -6,7 +6,7 @@ import { z } from "zod";
 import { prisma } from "@/server/prisma";
 import { auth } from "@/auth";
 import { recordAction } from "@/server/audit";
-import { createSaleTx, distributeCartTotal } from "@/server/sales";
+import { adjustHarvestedTotal, createSaleTx, distributeCartTotal } from "@/server/sales";
 import { sendReceiptEmail } from "@/server/mailer";
 import { Decimal, type TransactionClient } from "@/server/decimal";
 
@@ -118,9 +118,15 @@ export async function recordPosSale(
             packagingMode: l.packagingMode,
             packagingChargePerUnit: l.packagingChargePerUnit,
             amountOverride: overrides[i],
+            // Register sales come off the picked pile on the table — they
+            // draw from the unsold pool, never grow the harvested total.
+            fromUnsold: true,
           },
           { userId, paymentStatus: "PAID", paymentId: payment.id },
         );
+        // Clamp the pool so a register day that outsells the recorded
+        // leftover bumps the harvested total instead of going negative.
+        await adjustHarvestedTotal(tx, c.harvestId, l.produceId, new Decimal(0));
       }
 
       await recordAction(tx, {

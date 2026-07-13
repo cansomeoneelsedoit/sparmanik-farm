@@ -6,6 +6,7 @@ import { getActiveOrgId } from "@/server/org";
 import { prisma } from "@/server/prisma";
 import { getHarvestPL } from "@/server/pl";
 import { Decimal } from "@/server/decimal";
+import { installDepreciation } from "@/server/depreciation";
 import { Money } from "@/components/shared/money";
 import { ReportToolbar } from "@/app/print/harvest/[harvestId]/report-toolbar";
 
@@ -98,12 +99,19 @@ export default async function HarvestReportPage({
     item: { name: string; unit: string; subUnit: string | null; subFactor: Decimal | null };
     qty: Decimal;
     depreciable: boolean;
+    depreciationMode: string | null;
     amortisedCharge: Decimal | null;
+    acquisitionCost: Decimal | null;
+    usefulLifeMonths: number | null;
+    returnedAt: Date | null;
     consumptions: { qty: Decimal; unitCost: Decimal }[];
   };
   const assetRows = (harvest.assets as AssetRow[]).map((a) => ({
     ...a,
     fifoCost: a.consumptions.reduce((s: Decimal, c) => s.plus(new Decimal(c.qty).times(c.unitCost)), new Decimal(0)),
+    // CALENDAR depreciation accrues over the in-service window — recompute so
+    // the printed charge matches the on-screen P&L (installDepreciation).
+    displayCharge: installDepreciation(a, harvest.endDate),
   }));
   const depreciable = assetRows.filter((a) => a.depreciable);
   const fixed = assetRows.filter((a) => !a.depreciable);
@@ -381,7 +389,7 @@ export default async function HarvestReportPage({
                   <Td>{d(a.date)}</Td>
                   <Td>{a.item.name}</Td>
                   <Td r>{fmtAssetQty(a)}</Td>
-                  <Td r><Money value={(a.amortisedCharge ?? new Decimal(0)).toFixed(4)} /></Td>
+                  <Td r><Money value={a.displayCharge.toFixed(4)} /></Td>
                   <Td r><Money value={a.fifoCost.toFixed(4)} /></Td>
                 </tr>
               ))}

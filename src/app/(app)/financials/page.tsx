@@ -3,6 +3,7 @@ import Link from "next/link";
 import { prisma } from "@/server/prisma";
 import { Decimal } from "@/server/decimal";
 import { getHarvestPL } from "@/server/pl";
+import { installDepreciation, type InstallChargeRow } from "@/server/depreciation";
 import { requireActiveOrgId } from "@/server/org";
 import { DownloadCsvButton } from "@/components/shared/download-csv-button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -152,13 +153,25 @@ export default async function FinancialsPage() {
   }
   const unallocatedWages = totalWages.minus(harvestAllocatedWages);
 
-  // --- Depreciation: amortised charges on depreciable HarvestAssets. ---
+  // --- Depreciation: amortised charges on depreciable HarvestAssets. PER_USE
+  // charges are stored; CALENDAR charges accrue over time, so recompute each
+  // install's current charge from its in-service window (installDepreciation). ---
   const assets = await prisma.harvestAsset.findMany({
     where: { depreciable: true },
-    select: { amortisedCharge: true },
+    select: {
+      depreciationMode: true,
+      amortisedCharge: true,
+      acquisitionCost: true,
+      usefulLifeMonths: true,
+      date: true,
+      returnedAt: true,
+      harvest: { select: { endDate: true } },
+    },
   });
-  const depreciation = (assets as { amortisedCharge: Decimal | null }[]).reduce(
-    (s: Decimal, a) => (a.amortisedCharge ? s.plus(a.amortisedCharge) : s),
+  const depreciation = (
+    assets as (InstallChargeRow & { harvest: { endDate: Date | null } })[]
+  ).reduce(
+    (s: Decimal, a) => s.plus(installDepreciation(a, a.harvest.endDate)),
     new Decimal(0),
   );
 
@@ -189,6 +202,9 @@ export default async function FinancialsPage() {
     qty: Decimal;
     maxUses: number;
     useCount: number;
+    depreciationMode: string | null;
+    amortisedCharge: Decimal | null;
+    acquisitionCost: Decimal | null;
     returnCondition: string | null;
     returnNote: string | null;
     item: { name: string };
@@ -202,6 +218,9 @@ export default async function FinancialsPage() {
       qty: true,
       maxUses: true,
       useCount: true,
+      depreciationMode: true,
+      amortisedCharge: true,
+      acquisitionCost: true,
       returnCondition: true,
       returnNote: true,
       item: { select: { name: true } },
@@ -210,6 +229,14 @@ export default async function FinancialsPage() {
     },
   })) as DamagedAsset[];
   const damageRows = damagedAssets.map((a) => {
+    // CALENDAR equipment has no per-use schedule — its residual is what's
+    // left of the purchase after the in-service accrual frozen on the harvest.
+    if (a.depreciationMode === "CALENDAR") {
+      const full = a.acquisitionCost ? new Decimal(a.acquisitionCost) : new Decimal(0);
+      const accrued = a.amortisedCharge ? new Decimal(a.amortisedCharge) : new Decimal(0);
+      const residual = Decimal.max(new Decimal(0), full.minus(accrued));
+      return { ...a, residual };
+    }
     const perUse = a.consumptions[0]?.batch.amortisedCostPerUse
       ? new Decimal(a.consumptions[0].batch.amortisedCostPerUse)
       : new Decimal(0);
@@ -221,14 +248,6 @@ export default async function FinancialsPage() {
     (s: Decimal, r) => s.plus(r.residual),
     new Decimal(0),
   );
-
-  // --- Net (accrual, no double count).
-  const totalCosts = cogsConsumed
-    .plus(totalWages)
-    .plus(depreciation)
-    .plus(damageLosses)
-    .plus(totalExpenses);
-  const net = revenue.minus(totalCosts);
 
   // --- Per-harvest P&L roll-up ---
   const harvests = await prisma.harvest.findMany({
@@ -255,10 +274,24 @@ export default async function FinancialsPage() {
   const sumHarvestExpense = sumD(harvestPls.map((h) => h.pl.expenseCost));
   const sumHarvestNet = sumD(harvestPls.map((h) => h.pl.netProfit));
 
+  // --- Effective wages: per-cycle labour respects the manual override (the
+  // per-harvest P&Ls already do via getHarvestPL), plus the computed
+  // unallocated lines. Using raw hours×rate here would make the business net
+  // disagree with the sum of the cycle P&Ls whenever an override is set.
+  const effectiveWages = sumHarvestLabour.plus(unallocatedWages);
+
+  // --- Net (accrual, no double count).
+  const totalCosts = cogsConsumed
+    .plus(effectiveWages)
+    .plus(depreciation)
+    .plus(damageLosses)
+    .plus(totalExpenses);
+  const net = revenue.minus(totalCosts);
+
   // Reconciliation deltas (accrual basis — clean tie-out).
   const otherRevenue = revenue.minus(sumHarvestRevenue);            // sales without a cycle
   const adhocUsage = cogsConsumed.minus(sumHarvestUsage);           // consumption not via a cycle
-  const generalFarmWages = totalWages.minus(sumHarvestLabour);     // wages not allocated to a cycle
+  const generalFarmWages = unallocatedWages;                        // wages not allocated to a cycle
   const depreciationDelta = depreciation.minus(sumHarvestDepr);    // sanity, should be ~0
 
   return (
@@ -276,7 +309,7 @@ export default async function FinancialsPage() {
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         <Stat label="Revenue" value={revenue.toFixed(4)} colour="green" />
         <Stat label="Cost of stock used" value={cogsConsumed.toFixed(4)} colour="red" />
-        <Stat label="Wages" value={totalWages.toFixed(4)} colour="red" />
+        <Stat label="Wages" value={effectiveWages.toFixed(4)} colour="red" />
         <Stat label="Equipment (per-use)" value={depreciation.toFixed(4)} colour="red" />
         <Stat
           label="Net profit / loss"
@@ -327,7 +360,7 @@ export default async function FinancialsPage() {
           <Section title="Wages">
             <Row
               label="Allocated to harvests"
-              value={harvestAllocatedWages.toFixed(4)}
+              value={sumHarvestLabour.toFixed(4)}
               negative
               indent
             />
@@ -337,7 +370,7 @@ export default async function FinancialsPage() {
               negative
               indent
             />
-            <Row label="Total wages" value={totalWages.toFixed(4)} negative bold />
+            <Row label="Total wages" value={effectiveWages.toFixed(4)} negative bold />
           </Section>
           <Section title="Reusable equipment">
             <Row

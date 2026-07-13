@@ -8,8 +8,15 @@ import { auth } from "@/auth";
 import { requireSuperuser } from "@/server/authz";
 import { recordAction } from "@/server/audit";
 import { consumeFifo } from "@/server/fifo";
+import {
+  amortisedCharge as computeAmortised,
+  cycleMonths,
+  installDepreciation,
+  type InstallChargeRow,
+} from "@/server/depreciation";
 import { Decimal, type TransactionClient } from "@/server/decimal";
-import { createSaleTx, hasOverride } from "@/server/sales";
+import { adjustHarvestedTotal, createSaleTx, hasOverride } from "@/server/sales";
+import { todayWIB } from "@/lib/date";
 
 export type ActionResult<T = void> =
   | { ok: true; data?: T }
@@ -168,6 +175,17 @@ export async function deleteSale(id: string): Promise<ActionResult> {
     if (!sale) return { ok: false, error: "Sale not found" };
     await prisma.$transaction(async (tx: TransactionClient) => {
       await tx.sale.delete({ where: { id } });
+      // Reverse the pool bookkeeping: a freshly-picked sale grew the harvested
+      // total when logged, so deleting it shrinks the total back. A from-unsold
+      // sale needs no delta — the pool restores by itself once sold drops.
+      if (sale.harvestId && sale.produceId) {
+        await adjustHarvestedTotal(
+          tx,
+          sale.harvestId,
+          sale.produceId,
+          sale.fromUnsold === false ? new Decimal(sale.weight).negated() : new Decimal(0),
+        );
+      }
       await recordAction(tx, {
         type: "harvest.delete_sale",
         entityType: "Sale",
@@ -211,6 +229,7 @@ export async function updateSale(id: string, input: unknown): Promise<ActionResu
   try {
     const before = await prisma.sale.findUnique({ where: { id } });
     if (!before) return { ok: false, error: "Sale not found" };
+    const produceChanged = before.produceId !== parsed.data.produceId;
     const sale = await prisma.$transaction(async (tx: TransactionClient) => {
       const updated = await tx.sale.update({
         where: { id },
@@ -222,8 +241,38 @@ export async function updateSale(id: string, input: unknown): Promise<ActionResu
           pricePerKg: price,
           amount,
           customerId: parsed.data.customerId || null,
+          // Moving the sale to another produce breaks the origin link — the
+          // new produce's pool never saw this sale, so it becomes untracked.
+          ...(produceChanged ? { fromUnsold: null } : {}),
         },
       });
+      // Keep the pool bookkeeping in step with the edit. A freshly-picked
+      // sale's weight change shifts the harvested total by the difference; a
+      // produce change takes the whole weight off the old produce's total.
+      if (before.harvestId) {
+        if (produceChanged) {
+          if (before.produceId) {
+            await adjustHarvestedTotal(
+              tx,
+              before.harvestId,
+              before.produceId,
+              before.fromUnsold === false ? new Decimal(before.weight).negated() : new Decimal(0),
+            );
+          }
+          // Clamp the receiving produce's pool in case the moved weight
+          // overshoots what it had recorded as unsold.
+          await adjustHarvestedTotal(tx, before.harvestId, parsed.data.produceId, new Decimal(0));
+        } else if (before.fromUnsold !== null) {
+          await adjustHarvestedTotal(
+            tx,
+            before.harvestId,
+            parsed.data.produceId,
+            before.fromUnsold === false
+              ? weight.minus(new Decimal(before.weight))
+              : new Decimal(0),
+          );
+        }
+      }
       await recordAction(tx, {
         type: "harvest.update_sale",
         entityType: "Sale",
@@ -339,15 +388,23 @@ type ConsumptionWithBatch = {
     id: string;
     itemId: string;
     supplierId: string | null;
+    price: Decimal;
     exchangeRate: Decimal;
     maxUses: number;
     useCount: number;
     amortisedCostPerUse: Decimal | null;
+    usefulLifeMonths: number | null;
   };
 };
 type AssetRowForReturn = {
   id: string;
   depreciable: boolean;
+  depreciationMode: string | null;
+  amortisedCharge: Decimal | null;
+  acquisitionCost: Decimal | null;
+  usefulLifeMonths: number | null;
+  date: Date;
+  returnedAt: Date | null;
   consumptions: ConsumptionWithBatch[];
 };
 
@@ -368,17 +425,25 @@ async function returnAssetSlicesToInventory(
   for (const c of asset.consumptions) {
     const b = c.batch;
     if (b.useCount < b.maxUses) {
+      // CALENDAR equipment carries its schedule on the batch: keep the ORIGINAL
+      // unit price (the cost basis the next cycle's straight-line charge needs)
+      // and the useful life. PER_USE keeps price=0 by design — its remaining
+      // value rides in amortisedCostPerUse instead. Without these carriers a
+      // returned calendar asset re-installs at cost 0 and its remaining book
+      // value vanishes from every report.
+      const isCalendar = b.usefulLifeMonths != null && b.usefulLifeMonths > 0;
       await tx.batch.create({
         data: {
           itemId: b.itemId,
           supplierId: b.supplierId,
           date: whenDate,
+          price: isCalendar ? new Decimal(b.price) : new Decimal(0),
           qty: new Decimal(c.qty),
-          price: new Decimal(0),
           exchangeRate: b.exchangeRate,
           maxUses: b.maxUses,
           useCount: b.useCount,
           amortisedCostPerUse: b.amortisedCostPerUse,
+          usefulLifeMonths: b.usefulLifeMonths,
           returned: true,
         },
       });
@@ -445,10 +510,12 @@ export async function checkInHarvestAsset(input: unknown): Promise<ActionResult>
                   id: true,
                   itemId: true,
                   supplierId: true,
+                  price: true,
                   exchangeRate: true,
                   maxUses: true,
                   useCount: true,
                   amortisedCostPerUse: true,
+                  usefulLifeMonths: true,
                 },
               },
             },
@@ -459,7 +526,12 @@ export async function checkInHarvestAsset(input: unknown): Promise<ActionResult>
             harvestId: string;
             returnCondition: string | null;
             qty: Decimal;
+            date: Date;
+            depreciable: boolean;
+            depreciationMode: string | null;
             amortisedCharge: Decimal | null;
+            acquisitionCost: Decimal | null;
+            usefulLifeMonths: number | null;
           })
         | null;
       if (!asset) throw new Error("Asset not found");
@@ -516,15 +588,41 @@ export async function checkInHarvestAsset(input: unknown): Promise<ActionResult>
           }
         }
 
-        const origCharge = asset.amortisedCharge ? new Decimal(asset.amortisedCharge) : new Decimal(0);
-        const perPack = installedPacks.gt(0) ? origCharge.div(installedPacks) : new Decimal(0);
-        const newCharge = asset.depreciable ? usedPacks.times(perPack) : null;
+        const usedFraction = installedPacks.gt(0)
+          ? usedPacks.div(installedPacks)
+          : new Decimal(0);
+        // CALENDAR: the stored charge is an install-time placeholder (~0 at
+        // cycle start) — freeze the real in-service accrual (install date →
+        // check-in) instead, scaled to the kept fraction. PER_USE: scale the
+        // stored per-use charge as before.
+        let newCharge: Decimal | null = null;
+        if (asset.depreciable) {
+          newCharge =
+            asset.depreciationMode === "CALENDAR"
+              ? installDepreciation(
+                  { ...(asset as unknown as InstallChargeRow), returnedAt: when },
+                  null,
+                  when,
+                )
+                  .times(usedFraction)
+                  .toDecimalPlaces(4)
+              : (asset.amortisedCharge ? new Decimal(asset.amortisedCharge) : new Decimal(0))
+                  .times(usedFraction)
+                  .toDecimalPlaces(4);
+        }
+        // The returned remainder leaves this install — its captured full cost
+        // shrinks with it, so a later policy re-spread stays proportional.
+        const newAcquisition =
+          asset.acquisitionCost != null
+            ? new Decimal(asset.acquisitionCost).times(usedFraction).toDecimalPlaces(4)
+            : null;
 
         await tx.harvestAsset.update({
           where: { id: asset.id },
           data: {
             qty: usedPacks,
             amortisedCharge: newCharge,
+            acquisitionCost: newAcquisition,
             returnCondition: parsed.data.condition,
             returnedAt: when,
             returnNote:
@@ -570,12 +668,26 @@ export async function checkInHarvestAsset(input: unknown): Promise<ActionResult>
         }
       }
 
+      // Freeze the charge for the in-service window (install → check-in). A
+      // CALENDAR asset returned/damaged/lost mid-cycle must bear the
+      // depreciation accrued while it was in service — its install-time charge
+      // was ~0 (cycleMonths≈0 at cycle start). The residual (remaining book
+      // value) stays on the business books by design. No-op for PER_USE, and
+      // non-depreciable assets keep their null charge.
+      const frozenCharge = asset.depreciable
+        ? installDepreciation(
+            { ...(asset as unknown as InstallChargeRow), returnedAt: when },
+            null,
+            when,
+          )
+        : null;
       await tx.harvestAsset.update({
         where: { id: asset.id },
         data: {
           returnCondition: parsed.data.condition,
           returnedAt: when,
           returnNote: parsed.data.note || null,
+          ...(frozenCharge !== null ? { amortisedCharge: frozenCharge } : {}),
         },
       });
 
@@ -618,6 +730,9 @@ export async function endHarvest(harvestId: string): Promise<ActionResult> {
   await prisma.$transaction(async (tx: TransactionClient) => {
     const h = await tx.harvest.findUnique({ where: { id: harvestId } });
     if (!h) throw new Error("Harvest not found");
+    // Re-closing a CLOSED cycle would silently move its endDate to today,
+    // rewriting cycle-days and every frozen calendar charge.
+    if (h.status !== "LIVE") throw new Error("This cycle is already closed");
 
     // Auto-good every depreciable HarvestAsset that hasn't already been
     // checked in manually. Anything with returnCondition set (good/damaged
@@ -632,10 +747,12 @@ export async function endHarvest(harvestId: string): Promise<ActionResult> {
                 id: true,
                 itemId: true,
                 supplierId: true,
+                price: true,
                 exchangeRate: true,
                 maxUses: true,
                 useCount: true,
                 amortisedCostPerUse: true,
+                usefulLifeMonths: true,
               },
             },
           },
@@ -644,17 +761,31 @@ export async function endHarvest(harvestId: string): Promise<ActionResult> {
     })) as AssetRowForReturn[];
 
     const today = new Date();
+    // The cycle's end DATE is Boyd's calendar day in WIB — a 6am Jakarta close
+    // is still "today" there even though UTC is on the previous date.
+    const endDay = new Date(`${todayWIB()}T00:00:00.000Z`);
     for (const asset of assets) {
       await returnAssetSlicesToInventory(tx, asset, today, summary);
+      // Freeze the final depreciation for the closed cycle. CALENDAR assets
+      // accrue over time, so their install-time charge (~0 at cycle start) must
+      // be recomputed for the full in-service window now that the cycle ends;
+      // PER_USE charges are time-independent, so this is a no-op for them.
+      const frozen = asset.depreciable
+        ? installDepreciation(asset as unknown as InstallChargeRow, today, today)
+        : null;
       await tx.harvestAsset.update({
         where: { id: asset.id },
-        data: { returnCondition: "good", returnedAt: today },
+        data: {
+          returnCondition: "good",
+          returnedAt: today,
+          ...(frozen !== null ? { amortisedCharge: frozen } : {}),
+        },
       });
     }
 
     await tx.harvest.update({
       where: { id: harvestId },
-      data: { status: "CLOSED", endDate: today },
+      data: { status: "CLOSED", endDate: endDay },
     });
     await recordAction(tx, {
       type: "harvest.end",
@@ -742,28 +873,62 @@ export async function installHarvestAsset(input: unknown): Promise<ActionResult>
   const userId = await uid();
   try {
     await prisma.$transaction(async (tx: TransactionClient) => {
-      const { consumed } = await consumeFifo(tx, parsed.data.itemId, parsed.data.qty);
+      const { consumed, totalCost } = await consumeFifo(tx, parsed.data.itemId, parsed.data.qty);
+      const fullCost = new Decimal(totalCost);
 
       // --- Depreciation snapshot ---
-      // depreciable = true if ANY consumed slice came from a maxUses>1 batch.
-      // amortisedCharge sums the per-slice contribution (qty * batch.amortisedCostPerUse).
-      // useCount/maxUses snapshot from the most-used source batch for display ("use N of M").
+      // CALENDAR (batch has a useful life in months) wins: charge the cycle's
+      // straight-line share. Else PER_USE (maxUses>1): charge Σ(qty × per-use).
+      // Else non-depreciable (full cost already on Business P&L at purchase).
+      const hasCalendar = consumed.some((c) => c.batchUsefulLifeMonths && c.batchUsefulLifeMonths > 0);
+      const hasPerUse = consumed.some((c) => c.batchMaxUses > 1 && c.amortisedCostPerUse);
       let depreciable = false;
-      let amortisedCharge = new Decimal(0);
+      let charge: Decimal | null = null;
       let snapshotUseCount = 0;
       let snapshotMaxUses = 1;
-      for (const c of consumed) {
-        if (c.batchMaxUses > 1 && c.amortisedCostPerUse) {
-          depreciable = true;
-          amortisedCharge = amortisedCharge.plus(
-            new Decimal(c.qty).times(c.amortisedCostPerUse),
-          );
-          const next = c.batchUseCountBefore + 1;
-          if (next > snapshotUseCount) {
-            snapshotUseCount = next;
-            snapshotMaxUses = c.batchMaxUses;
+      let depMode: "PER_USE" | "CALENDAR" | null = null;
+      let usefulLifeMonths: number | null = null;
+
+      // The install's captured full cost. FIFO totalCost is 0 when the goods
+      // came from returned price-0 batches (PER_USE value rides in
+      // amortisedCostPerUse) — recover the implied full so later re-spreads
+      // don't zero this install's charge.
+      let capturedFullCost = fullCost;
+
+      if (hasCalendar) {
+        depreciable = true;
+        depMode = "CALENDAR";
+        usefulLifeMonths = consumed.find((c) => c.batchUsefulLifeMonths)!.batchUsefulLifeMonths!;
+        const h = (await tx.harvest.findUnique({
+          where: { id: parsed.data.harvestId },
+          select: { endDate: true },
+        })) as { endDate: Date | null } | null;
+        // Accrue from the INSTALL date, not the cycle start — an asset added
+        // mid-cycle must not bear months it wasn't in service. This is a
+        // placeholder anyway: every P&L read recomputes live via
+        // installDepreciation over the same window.
+        const cyc = cycleMonths(new Date(parsed.data.date), h?.endDate ?? null);
+        charge = computeAmortised({ mode: "CALENDAR", fullCost, lifeMonths: usefulLifeMonths, cycleMonths: cyc });
+      } else if (hasPerUse) {
+        depreciable = true;
+        depMode = "PER_USE";
+        let acc = new Decimal(0);
+        let implied = new Decimal(0);
+        for (const c of consumed) {
+          if (c.batchMaxUses > 1 && c.amortisedCostPerUse) {
+            acc = acc.plus(new Decimal(c.qty).times(c.amortisedCostPerUse));
+            implied = implied.plus(
+              new Decimal(c.qty).times(c.amortisedCostPerUse).times(c.batchMaxUses),
+            );
+            const next = c.batchUseCountBefore + 1;
+            if (next > snapshotUseCount) {
+              snapshotUseCount = next;
+              snapshotMaxUses = c.batchMaxUses;
+            }
           }
         }
+        charge = acc.toDecimalPlaces(4);
+        if (capturedFullCost.lte(0) && implied.gt(0)) capturedFullCost = implied;
       }
 
       const asset = await tx.harvestAsset.create({
@@ -775,9 +940,12 @@ export async function installHarvestAsset(input: unknown): Promise<ActionResult>
           reusable: parsed.data.reusable,
           condition: parsed.data.condition || null,
           depreciable,
-          amortisedCharge: depreciable ? amortisedCharge : null,
+          amortisedCharge: depreciable ? charge : null,
+          acquisitionCost: capturedFullCost.toDecimalPlaces(4),
           useCount: snapshotUseCount,
           maxUses: snapshotMaxUses,
+          depreciationMode: depMode,
+          usefulLifeMonths,
         },
       });
       const consumptionIds: string[] = [];
@@ -844,6 +1012,13 @@ const saleSchema = z.object({
   /** Charity donation — recorded as income (owner's company pays, default
    *  50k/kg) and highlighted in the charity reporting. */
   charity: z.boolean().optional(),
+  /** Only meaningful once the produce has a recorded harvested total.
+   *  true  → sale comes from the unsold-on-hand pool: total stays put, the
+   *          derived unsold shrinks (clamped so it never goes negative).
+   *  false → freshly picked: the harvested total grows by the sale weight so
+   *          the unsold pool is untouched.
+   *  undefined → legacy behaviour (no adjustment). */
+  fromUnsold: z.boolean().optional(),
   charityRecipient: z.string().max(120).optional(),
 });
 
@@ -856,6 +1031,16 @@ export async function logSale(input: unknown): Promise<ActionResult> {
     // Single verified sale-creation path, shared with the POS register.
     await prisma.$transaction(async (tx: TransactionClient) => {
       await createSaleTx(tx, d, { userId, paymentStatus: "PAID" });
+      if (d.fromUnsold !== undefined) {
+        // "Freshly picked" grows the total by the sale weight; "from unsold"
+        // leaves it (the derived pool shrinks by itself) but still clamps.
+        await adjustHarvestedTotal(
+          tx,
+          d.harvestId,
+          d.produceId,
+          d.fromUnsold === false ? new Decimal(d.weight) : new Decimal(0),
+        );
+      }
     });
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Failed to log sale" };
@@ -864,6 +1049,7 @@ export async function logSale(input: unknown): Promise<ActionResult> {
   revalidatePath("/sales");
   return { ok: true };
 }
+
 
 // ============================================================================
 // Dispositions — non-sale fates of harvested produce (breakage/spillage, staff
@@ -1029,6 +1215,62 @@ export async function createCustomerQuick(
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Failed to create customer" };
   }
+}
+
+const labourOverrideSchema = z.object({
+  harvestId: z.string().min(1),
+  /** Manual labour cost in IDR. Empty/null clears the override (back to
+   *  computed hours×rate). Digits only (whole rupiah). */
+  amount: z.string().regex(/^\d+(\.\d+)?$/).optional().nullable(),
+  note: z.string().max(200).optional().nullable(),
+});
+
+/**
+ * Set (or clear) the manual labour-cost override on a harvest. When an amount
+ * is given it REPLACES the computed hours×rate labour in the P&L; passing
+ * null/empty clears it back to the computed figure.
+ */
+export async function setHarvestLabourOverride(input: unknown): Promise<ActionResult> {
+  // Overriding labour rewrites the cycle's P&L — owner only, same rule as
+  // every other money-changing action (authz.ts).
+  const gate = await requireSuperuser();
+  if (!gate.ok) return { ok: false, error: gate.error };
+  const parsed = labourOverrideSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Validation failed" };
+  const userId = gate.userId;
+  // Org-scoped existence check (findFirst goes through the tenancy extension),
+  // so a cross-org harvest id can't be targeted.
+  const owned = await prisma.harvest.findFirst({
+    where: { id: parsed.data.harvestId },
+    select: { id: true },
+  });
+  if (!owned) return { ok: false, error: "Cycle not found" };
+  const amount =
+    parsed.data.amount && parsed.data.amount.trim() !== "" ? parsed.data.amount.trim() : null;
+  try {
+    await prisma.$transaction(async (tx: TransactionClient) => {
+      await tx.harvest.update({
+        where: { id: parsed.data.harvestId },
+        data: {
+          manualLabourCost: amount,
+          manualLabourNote: amount ? parsed.data.note?.trim() || null : null,
+        },
+      });
+      await recordAction(tx, {
+        type: "harvest.labour_override",
+        entityType: "Harvest",
+        entityId: parsed.data.harvestId,
+        description: amount ? `Set manual labour cost to ${amount}` : "Cleared manual labour cost",
+        userId,
+        payload: { amount, note: parsed.data.note ?? null },
+      });
+    });
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't save the labour override" };
+  }
+  revalidatePath(`/harvest/${parsed.data.harvestId}`);
+  revalidatePath("/financials");
+  return { ok: true };
 }
 
 /** All customers for the active org — drives the Log-sale picker. */

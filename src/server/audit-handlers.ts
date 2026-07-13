@@ -4,6 +4,8 @@
  * every authenticated request.
  */
 import { registerUndoHandler } from "@/server/audit";
+import { adjustHarvestedTotal } from "@/server/sales";
+import { Decimal } from "@/server/decimal";
 
 let registered = false;
 
@@ -140,10 +142,28 @@ export function registerAllUndoHandlers() {
     // A single-dialog sale has no paymentId, so this is a no-op there.
     const sale = await tx.sale.findUnique({
       where: { id: action.entityId },
-      select: { amount: true, paymentId: true },
+      select: {
+        amount: true,
+        paymentId: true,
+        harvestId: true,
+        produceId: true,
+        weight: true,
+        fromUnsold: true,
+      },
     });
     if (!sale) return; // already removed (e.g. the whole basket was voided)
     await tx.sale.delete({ where: { id: action.entityId } });
+    // Reverse the unsold-pool bookkeeping the same way deleteSale does: a
+    // freshly-picked sale grew the harvested total, so undoing it shrinks the
+    // total back; a from-unsold sale restores its pool by itself.
+    if (sale.harvestId && sale.produceId) {
+      await adjustHarvestedTotal(
+        tx,
+        sale.harvestId,
+        sale.produceId,
+        sale.fromUnsold === false ? new Decimal(sale.weight).negated() : new Decimal(0),
+      );
+    }
     if (sale.paymentId) {
       const remaining = await tx.sale.count({ where: { paymentId: sale.paymentId } });
       if (remaining === 0) {

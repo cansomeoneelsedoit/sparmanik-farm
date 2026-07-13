@@ -2,6 +2,7 @@ import { cache } from "react";
 
 import { prisma } from "@/server/prisma";
 import { Decimal } from "@/server/decimal";
+import { installDepreciation, type InstallChargeRow } from "@/server/depreciation";
 
 export type HarvestPL = {
   revenue: string;
@@ -27,7 +28,11 @@ async function effectiveRate(staffId: string, date: Date): Promise<Decimal> {
 }
 
 export const getHarvestPL = cache(async (harvestId: string): Promise<HarvestPL> => {
-  const [sales, usages, depreciableAssets, wageLines, expenses] = await Promise.all([
+  const [harvest, sales, usages, depreciableAssets, wageLines, expenses] = await Promise.all([
+    prisma.harvest.findUnique({
+      where: { id: harvestId },
+      select: { manualLabourCost: true, endDate: true },
+    }),
     prisma.sale.findMany({ where: { harvestId }, select: { amount: true } }),
     prisma.harvestUsage.findMany({
       where: { harvestId },
@@ -35,7 +40,14 @@ export const getHarvestPL = cache(async (harvestId: string): Promise<HarvestPL> 
     }),
     prisma.harvestAsset.findMany({
       where: { harvestId, depreciable: true },
-      select: { amortisedCharge: true },
+      select: {
+        depreciationMode: true,
+        amortisedCharge: true,
+        acquisitionCost: true,
+        usefulLifeMonths: true,
+        date: true,
+        returnedAt: true,
+      },
     }),
     prisma.wageEntryLine.findMany({
       where: { harvestId },
@@ -58,17 +70,27 @@ export const getHarvestPL = cache(async (harvestId: string): Promise<HarvestPL> 
     },
     new Decimal(0),
   );
-  const depreciationCost = (
-    depreciableAssets as { amortisedCharge: Decimal | null }[]
-  ).reduce(
-    (s: Decimal, a) => (a.amortisedCharge ? s.plus(a.amortisedCharge) : s),
+  // Depreciation. PER_USE charges are stored on the install; CALENDAR charges
+  // are recomputed live from the in-service window so they accrue over the
+  // cycle and are final at close/return (see installDepreciation).
+  const harvestEnd = (harvest as { endDate: Date | null } | null)?.endDate ?? null;
+  const depreciationCost = (depreciableAssets as InstallChargeRow[]).reduce(
+    (s: Decimal, a) => s.plus(installDepreciation(a, harvestEnd)),
     new Decimal(0),
   );
 
+  // Manual override wins: when the harvest has a manualLabourCost set, it
+  // REPLACES the computed hours×rate figure (for when reality differs from the
+  // logged hours). Otherwise sum the wage lines.
+  const manual = (harvest as { manualLabourCost: Decimal | null } | null)?.manualLabourCost ?? null;
   let labourCost = new Decimal(0);
-  for (const line of wageLines as { hours: Decimal; wageEntry: { staffId: string; date: Date } }[]) {
-    const rate = await effectiveRate(line.wageEntry.staffId, line.wageEntry.date);
-    labourCost = labourCost.plus(new Decimal(line.hours).times(rate));
+  if (manual !== null) {
+    labourCost = new Decimal(manual);
+  } else {
+    for (const line of wageLines as { hours: Decimal; wageEntry: { staffId: string; date: Date } }[]) {
+      const rate = await effectiveRate(line.wageEntry.staffId, line.wageEntry.date);
+      labourCost = labourCost.plus(new Decimal(line.hours).times(rate));
+    }
   }
 
   const expenseCost = (expenses as { amount: Decimal }[]).reduce(

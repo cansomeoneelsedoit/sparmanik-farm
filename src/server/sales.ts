@@ -32,11 +32,53 @@ export type SaleLineInput = {
   charity?: boolean;
   /** Optional: which charity/organisation received the produce. */
   charityRecipient?: string | null;
+  /** Where the produce came from when the crop tracks an unsold pool:
+   *  true = the unsold-on-hand pile, false = freshly picked (grew the
+   *  harvested total). Stored on the sale so deletes/edits can reverse the
+   *  pool bookkeeping. undefined/null = untracked (legacy, POS). */
+  fromUnsold?: boolean;
 };
 
 /** True when the override string is a usable number we should apply. */
 export function hasOverride(v: string | undefined): v is string {
   return v !== undefined && v.trim() !== "" && /^[0-9]+(\.[0-9]+)?$/.test(v.trim());
+}
+
+/**
+ * Pool bookkeeping for a produce that tracks an unsold pile (harvestedKg set).
+ * Shifts the harvested total by `deltaKg` (0 = clamp only) and clamps it so it
+ * never drops below what's already sold + given away — the derived unsold can
+ * never go negative. Serialised per (harvest, produce) with an advisory lock so
+ * two tablets logging sales at once can't lose an adjustment. No-op when the
+ * produce has no recorded total. Shared by logSale/updateSale/deleteSale, the
+ * POS register, and the undo handlers.
+ */
+export async function adjustHarvestedTotal(
+  tx: TransactionClient,
+  harvestId: string,
+  produceId: string,
+  deltaKg: Decimal,
+): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${harvestId}:${produceId}:pool`}))`;
+  const hp = (await tx.harvestProduce.findUnique({
+    where: { harvestId_produceId: { harvestId, produceId } },
+    select: { harvestedKg: true },
+  })) as { harvestedKg: Decimal | null } | null;
+  if (hp?.harvestedKg == null) return;
+
+  const [soldAgg, dispAgg] = await Promise.all([
+    tx.sale.aggregate({ where: { harvestId, produceId }, _sum: { weight: true } }),
+    tx.harvestDisposition.aggregate({ where: { harvestId, produceId }, _sum: { weight: true } }),
+  ]);
+  const gone = new Decimal(soldAgg._sum.weight ?? 0).plus(new Decimal(dispAgg._sum.weight ?? 0));
+
+  const next = Decimal.max(new Decimal(hp.harvestedKg).plus(deltaKg), gone).toDecimalPlaces(4);
+  if (!next.equals(new Decimal(hp.harvestedKg))) {
+    await tx.harvestProduce.update({
+      where: { harvestId_produceId: { harvestId, produceId } },
+      data: { harvestedKg: next },
+    });
+  }
 }
 
 /**
@@ -127,6 +169,7 @@ export async function createSaleTx(
       paymentId: opts.paymentId ?? null,
       charity: !!d.charity,
       charityRecipient: d.charity ? d.charityRecipient?.trim() || null : null,
+      fromUnsold: d.fromUnsold ?? null,
     },
   });
   await recordAction(tx, {

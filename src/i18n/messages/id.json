@@ -19,6 +19,7 @@
   "nav": {
     "dashboard": "Dasbor",
     "calendar": "Kalender",
+    "plantTags": "Label Tanaman",
     "sales": "Penjualan",
     "harvest": "Rumah Kaca",
     "pos": "Kasir",
@@ -290,6 +291,12 @@
     "log": "Catat",
     "save": "Simpan",
     "saving": "Menyimpan…",
+    "sourceQuestion": "Melon ini dari mana?",
+    "sourceUnsold": "Stok belum terjual ({kg} kg tersisa)",
+    "sourceUnsoldSub": "Mengurangi tumpukan belum terjual — total produksi tetap",
+    "sourceFresh": "Baru dipetik",
+    "sourceFreshSub": "Menambah total produksi — tumpukan belum terjual tetap",
+    "sourceOverWarning": "Lebih dari {kg} kg yang tercatat belum terjual — total produksi akan dinaikkan menyesuaikan.",
     "toastLogged": "Penjualan dicatat",
     "toastUpdated": "Penjualan diperbarui"
   },
