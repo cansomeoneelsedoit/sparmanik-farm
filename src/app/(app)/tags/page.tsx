@@ -39,6 +39,28 @@ export default async function TagsPage({
 
   const active = greenhouses.find((g) => g.id === gh) ?? greenhouses[0] ?? null;
 
+  // Laid-out greenhouses carry hundreds of tags — decide up front so we can
+  // skip loading every tag's full crop history (the overview only needs the
+  // OPEN record, if any). Keeps this page fast at 860 tags.
+  const isLaidOut = active
+    ? (await prisma.plantTag.findFirst({
+        where: { greenhouseId: active.id, row: { not: null } },
+        select: { id: true },
+      })) !== null
+    : false;
+
+  const recordSelect = {
+    id: true,
+    plantedAt: true,
+    endedAt: true,
+    seed: true,
+    method: true,
+    notes: true,
+    photoMime: true,
+    produceId: true,
+    produce: { select: { name: true } },
+  } as const;
+
   const [tags, produces] = active
     ? await Promise.all([
         prisma.plantTag.findMany({
@@ -51,20 +73,9 @@ export default async function TagsPage({
             row: true,
             col: true,
             produce: { select: { id: true, name: true, photoMime: true } },
-            records: {
-              orderBy: { createdAt: "desc" },
-              select: {
-                id: true,
-                plantedAt: true,
-                endedAt: true,
-                seed: true,
-                method: true,
-                notes: true,
-                photoMime: true,
-                produceId: true,
-                produce: { select: { name: true } },
-              },
-            },
+            records: isLaidOut
+              ? { where: { endedAt: null }, take: 1, select: recordSelect }
+              : { orderBy: { createdAt: "desc" as const }, select: recordSelect },
           },
         }),
         prisma.produce.findMany({
@@ -101,7 +112,6 @@ export default async function TagsPage({
     records: { endedAt: Date | null }[];
   };
   const laidTags = tags as LaidTag[];
-  const isLaidOut = laidTags.some((t) => t.row != null);
   const varietyStats = (() => {
     const m = new Map<
       string,
