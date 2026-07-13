@@ -115,7 +115,7 @@ export default async function GreenhouseMapPage({
   });
 
   const Dot = ({ t }: { t: (typeof tags)[number] | undefined }) => {
-    if (!t) return <span style={{ width: 9, height: 9 }} />;
+    if (!t) return <span style={{ width: 11, height: 11 }} />;
     const s = styleFor(t.produce?.name);
     const growing = t.records.length > 0;
     return (
@@ -124,8 +124,8 @@ export default async function GreenhouseMapPage({
         title={`${t.label} — ${t.produce?.name ?? ""}${growing ? " (growing)" : " (free)"}`}
         className="inline-block shrink-0 rounded-full transition-transform hover:scale-150"
         style={{
-          width: 9,
-          height: 9,
+          width: 11,
+          height: 11,
           border: `1.5px solid ${s.border}`,
           background: s.hollow ? (growing ? s.border : "#fff") : growing ? s.fill : "#fff",
         }}
@@ -149,7 +149,7 @@ export default async function GreenhouseMapPage({
 
       {/* The layout "document" — always white, like the printed diagram. */}
       <div className="overflow-x-auto rounded-lg border bg-white p-5 text-zinc-900 shadow-sm">
-        <div className="min-w-[1180px]">
+        <div className="min-w-[1560px]">
           {/* Title block */}
           <div className="text-center">
             <h1
@@ -192,10 +192,10 @@ export default async function GreenhouseMapPage({
                 <span>WEST (END)</span>
               </div>
               {/* column numbers */}
-              <div className="flex items-center gap-[3px] px-1 pt-1">
+              <div className="flex items-center gap-[5px] px-1.5 pt-1.5">
                 <div className="w-7 shrink-0" />
                 {cols.map((c) => (
-                  <div key={c} className="w-[21px] shrink-0 text-center text-[7px] font-semibold text-zinc-600">
+                  <div key={c} className="w-[28px] shrink-0 text-center text-[8px] font-semibold text-zinc-600">
                     {String(c).padStart(2, "0")}
                   </div>
                 ))}
@@ -206,18 +206,18 @@ export default async function GreenhouseMapPage({
                 style={{
                   backgroundImage:
                     "linear-gradient(#e4e4e7 1px, transparent 1px), linear-gradient(90deg, #e4e4e7 1px, transparent 1px)",
-                  backgroundSize: "24px 24px",
+                  backgroundSize: "33px 33px",
                 }}
               >
                 {rowsNorthFirst.map((r) => (
-                  <div key={r} className="flex items-center gap-[3px] py-[5px]">
+                  <div key={r} className="flex items-center gap-[5px] py-[9px]">
                     <div className="flex w-7 shrink-0 items-center justify-center">
                       <span className="flex h-5 w-5 items-center justify-center rounded-full border-2 border-zinc-800 text-[10px] font-bold">
                         {r}
                       </span>
                     </div>
                     {cols.map((c) => (
-                      <div key={c} className="flex w-[21px] shrink-0 items-center justify-center gap-[2px]">
+                      <div key={c} className="flex w-[28px] shrink-0 items-center justify-center gap-[4px]">
                         <Dot t={byKey.get(`${r}:${c}:A`)} />
                         <Dot t={byKey.get(`${r}:${c}:B`)} />
                       </div>
