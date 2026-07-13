@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Sprout } from "lucide-react";
+import { ArrowLeft, Map, Sprout } from "lucide-react";
 
 import { prisma } from "@/server/prisma";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   AssignPlantDialog,
@@ -85,8 +86,23 @@ export default async function TagScanPage({
 
   return (
     <div className="mx-auto max-w-xl space-y-4">
-      <header className="flex items-center justify-between gap-2">
-        <div>
+      {/* Back bar — a QR scan lands straight on this page, so give it its own
+          way out (thumb-sized targets for the greenhouse phone). */}
+      <div className="flex items-center gap-2">
+        <Button asChild variant="outline" size="sm" className="h-10 sm:h-9">
+          <Link href={`/tags?gh=${tag.greenhouse.id}`}>
+            <ArrowLeft className="h-4 w-4" /> Tags
+          </Link>
+        </Button>
+        <Button asChild variant="outline" size="sm" className="h-10 sm:h-9">
+          <Link href={`/tags/map/${tag.greenhouse.id}`}>
+            <Map className="h-4 w-4" /> Map
+          </Link>
+        </Button>
+      </div>
+
+      <header className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
           <h1 className="font-serif text-2xl">
             {tag.label}
           </h1>
@@ -182,7 +198,9 @@ export default async function TagScanPage({
         </Card>
       )}
 
-      <div className="flex flex-wrap gap-2">
+      {/* Actions — 2-up grid on phones (big tap targets), inline row on larger
+          screens. */}
+      <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
         <ShowQrDialog
           tagId={tag.id}
           tagLabel={tag.label}
@@ -211,12 +229,6 @@ export default async function TagScanPage({
           />
         ) : null}
         {current ? <EndAllocationButton tagId={tag.id} tagLabel={tag.label} /> : null}
-        <Link
-          href={`/tags?gh=${tag.greenhouse.id}`}
-          className="ml-auto self-center text-sm text-muted-foreground hover:underline"
-        >
-          All tags →
-        </Link>
       </div>
 
       {history.length > 0 ? (

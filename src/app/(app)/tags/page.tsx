@@ -121,8 +121,8 @@ export default async function TagsPage({
           </p>
         </div>
         {active ? (
-          <div className="flex items-center gap-2">
-            <Button asChild variant="outline">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+            <Button asChild variant="outline" className="w-full sm:w-auto">
               <Link href={`/print/tags/${active.id}?auto=1`} target="_blank">
                 <Printer className="h-4 w-4" /> Print QR sheet
               </Link>
