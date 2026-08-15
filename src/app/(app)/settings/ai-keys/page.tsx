@@ -25,6 +25,7 @@ export default async function AiKeysSettingsPage() {
     label: string | null;
     apiKey: string;
     model: string | null;
+    baseUrl: string | null;
     rank: number;
     enabled: boolean;
     lastStatus: string | null;
@@ -39,6 +40,7 @@ export default async function AiKeysSettingsPage() {
     maskedKey: maskKey(r.apiKey),
     keyLength: r.apiKey.length,
     model: r.model,
+    baseUrl: r.baseUrl,
     rank: r.rank,
     enabled: r.enabled,
     lastStatus: r.lastStatus,

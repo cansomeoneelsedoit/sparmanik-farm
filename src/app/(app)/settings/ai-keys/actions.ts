@@ -16,6 +16,7 @@ const addSchema = z.object({
   label: z.string().optional().default(""),
   apiKey: z.string().min(8, "Key looks too short — paste the full value"),
   model: z.string().optional().default(""),
+  baseUrl: z.string().optional().default(""),
   rank: z.number().int().min(1).max(9999).optional(),
 });
 
@@ -29,6 +30,14 @@ export async function addAiKey(input: unknown): Promise<ActionResult<{ id: strin
       error: parsed.error.errors[0]?.message ?? "Invalid input",
     };
   }
+  if (parsed.data.provider === "custom") {
+    if (!parsed.data.baseUrl.trim() || !parsed.data.model.trim()) {
+      return { ok: false, error: "Custom provider needs both a base URL and a model" };
+    }
+    if (!/^https?:\/\//.test(parsed.data.baseUrl.trim())) {
+      return { ok: false, error: "Base URL must start with http(s)://" };
+    }
+  }
   // Default rank: bump to end of the list so newly added keys try last.
   const last = await prisma.aiProviderKey.aggregate({ _max: { rank: true } });
   const rank = parsed.data.rank ?? ((last._max.rank ?? 0) + 10);
@@ -38,6 +47,7 @@ export async function addAiKey(input: unknown): Promise<ActionResult<{ id: strin
       label: parsed.data.label || null,
       apiKey: parsed.data.apiKey.trim(),
       model: parsed.data.model || null,
+      baseUrl: parsed.data.baseUrl.trim().replace(/\/+$/, "") || null,
       rank,
       enabled: true,
       lastStatus: "untested",
@@ -53,6 +63,7 @@ const updateSchema = z.object({
    * leaves the masked field untouched). */
   apiKey: z.string().optional().default(""),
   model: z.string().optional().default(""),
+  baseUrl: z.string().optional(),
   rank: z.number().int().min(1).max(9999).optional(),
   enabled: z.boolean().optional(),
 });
@@ -66,6 +77,9 @@ export async function updateAiKey(id: string, input: unknown): Promise<ActionRes
     label: parsed.data.label || null,
     model: parsed.data.model || null,
   };
+  if (parsed.data.baseUrl !== undefined) {
+    data.baseUrl = parsed.data.baseUrl.trim().replace(/\/+$/, "") || null;
+  }
   if (parsed.data.rank !== undefined) data.rank = parsed.data.rank;
   if (parsed.data.enabled !== undefined) data.enabled = parsed.data.enabled;
   if (parsed.data.apiKey && parsed.data.apiKey.trim().length >= 8) {
@@ -129,13 +143,20 @@ export async function testAiKey(id: string): Promise<ActionResult<{ text: string
   if (!gate.ok) return gate;
   const row = (await prisma.aiProviderKey.findFirst({
     where: { id },
-    select: { id: true, provider: true, apiKey: true, model: true },
-  })) as { id: string; provider: string; apiKey: string; model: string | null } | null;
+    select: { id: true, provider: true, apiKey: true, model: true, baseUrl: true },
+  })) as {
+    id: string;
+    provider: string;
+    apiKey: string;
+    model: string | null;
+    baseUrl: string | null;
+  } | null;
   if (!row) return { ok: false, error: "Key not found" };
   const r = await testProviderKey({
     provider: row.provider,
     apiKey: row.apiKey,
     model: row.model || undefined,
+    baseUrl: row.baseUrl || undefined,
   });
   if (r.ok) {
     await prisma.aiProviderKey.update({
