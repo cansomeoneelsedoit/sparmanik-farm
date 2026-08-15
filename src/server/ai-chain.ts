@@ -96,6 +96,9 @@ const DEFAULT_MODELS: Record<string, { kind: ProviderKind; model: string; baseUr
     baseUrl: "https://api.mistral.ai/v1",
   },
   anthropic: { kind: "anthropic", model: "claude-sonnet-4-6" },
+  // Any OpenAI-compatible endpoint (self-hosted, gpu.ai, vLLM…). No usable
+  // defaults — the per-key baseUrl + model are required.
+  custom: { kind: "openai", model: "" },
 };
 
 /**
@@ -184,6 +187,7 @@ async function loadDbChain(): Promise<Provider[]> {
         label: true,
         apiKey: true,
         model: true,
+        baseUrl: true,
       },
     })) as {
       id: string;
@@ -191,18 +195,21 @@ async function loadDbChain(): Promise<Provider[]> {
       label: string | null;
       apiKey: string;
       model: string | null;
+      baseUrl: string | null;
     }[];
     const providers: Provider[] = [];
     for (const r of rows) {
       const defaults = DEFAULT_MODELS[r.provider];
       if (!defaults) continue;
+      // "custom" has no usable defaults — skip half-configured rows.
+      if (r.provider === "custom" && (!r.baseUrl || !r.model)) continue;
       providers.push({
         dbId: r.id,
         name: `db-${r.provider}-${r.id.slice(-4)}`,
         kind: defaults.kind,
         apiKey: r.apiKey,
         model: r.model || defaults.model,
-        baseUrl: defaults.baseUrl,
+        baseUrl: r.baseUrl || defaults.baseUrl,
         providerSlug: r.provider,
         label: r.label,
       });
@@ -526,16 +533,20 @@ export async function testProviderKey(opts: {
   provider: string;
   apiKey: string;
   model?: string;
+  baseUrl?: string;
 }): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   const defaults = DEFAULT_MODELS[opts.provider];
   if (!defaults) return { ok: false, error: `Unknown provider "${opts.provider}"` };
+  if (opts.provider === "custom" && (!opts.baseUrl || !opts.model)) {
+    return { ok: false, error: "Custom provider needs both a base URL and a model" };
+  }
   const p: Provider = {
     dbId: null,
     name: `test-${opts.provider}`,
     kind: defaults.kind,
     apiKey: opts.apiKey,
     model: opts.model || defaults.model,
-    baseUrl: defaults.baseUrl,
+    baseUrl: opts.baseUrl || defaults.baseUrl,
     providerSlug: opts.provider,
   };
   try {

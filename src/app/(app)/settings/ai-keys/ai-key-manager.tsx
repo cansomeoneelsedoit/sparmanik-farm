@@ -36,6 +36,7 @@ type KeyRow = {
   maskedKey: string;
   keyLength: number;
   model: string | null;
+  baseUrl: string | null;
   rank: number;
   enabled: boolean;
   lastStatus: string | null;
@@ -57,17 +58,20 @@ export function AiKeyManager({
   const [label, setLabel] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
   const [reveal, setReveal] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [editLabel, setEditLabel] = useState("");
   const [editApiKey, setEditApiKey] = useState("");
   const [editModel, setEditModel] = useState("");
+  const [editBaseUrl, setEditBaseUrl] = useState("");
 
   function startEdit(r: KeyRow) {
     setEditId(r.id);
     setEditLabel(r.label ?? "");
     setEditApiKey("");
     setEditModel(r.model ?? "");
+    setEditBaseUrl(r.baseUrl ?? "");
   }
 
   function clearAdd() {
@@ -75,6 +79,7 @@ export function AiKeyManager({
     setLabel("");
     setApiKey("");
     setModel("");
+    setBaseUrl("");
     setAdding(false);
   }
 
@@ -133,10 +138,29 @@ export function AiKeyManager({
             <Input
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              placeholder="e.g. gemini-2.5-pro · leave blank for default"
+              placeholder={
+                provider === "custom"
+                  ? "Required, e.g. nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4"
+                  : "e.g. gemini-2.5-pro · leave blank for default"
+              }
               className="font-mono text-xs"
             />
           </div>
+          {provider === "custom" ? (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">
+                Base URL (OpenAI-compatible)
+              </label>
+              <Input
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+                placeholder="e.g. https://gpu-xxxx.apps.gpu.ai/v1"
+                className="font-mono text-xs"
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+          ) : null}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" size="sm" onClick={clearAdd} disabled={pending}>
               Cancel
@@ -151,6 +175,7 @@ export function AiKeyManager({
                     label: label.trim(),
                     apiKey: apiKey.trim(),
                     model: model.trim(),
+                    baseUrl: baseUrl.trim(),
                   });
                   if (r.ok) {
                     toast.success(`Added ${provider} key`);
@@ -272,6 +297,16 @@ export function AiKeyManager({
                           placeholder="Model override (blank = default)"
                           className="h-8 font-mono text-xs"
                         />
+                        {r.provider === "custom" ? (
+                          <Input
+                            value={editBaseUrl}
+                            onChange={(e) => setEditBaseUrl(e.target.value)}
+                            placeholder="Base URL, e.g. https://gpu-xxxx.apps.gpu.ai/v1"
+                            autoComplete="off"
+                            spellCheck={false}
+                            className="h-8 font-mono text-xs"
+                          />
+                        ) : null}
                         <div className="flex gap-2">
                           <Button
                             size="sm"
@@ -282,6 +317,9 @@ export function AiKeyManager({
                                   label: editLabel.trim(),
                                   apiKey: editApiKey.trim(),
                                   model: editModel.trim(),
+                                  ...(r.provider === "custom"
+                                    ? { baseUrl: editBaseUrl.trim() }
+                                    : {}),
                                 });
                                 if (x.ok) {
                                   toast.success("Saved");
@@ -312,6 +350,11 @@ export function AiKeyManager({
                         {r.model ? (
                           <div className="text-xs text-muted-foreground">
                             Model: <code className="font-mono">{r.model}</code>
+                          </div>
+                        ) : null}
+                        {r.baseUrl ? (
+                          <div className="truncate text-xs text-muted-foreground">
+                            Endpoint: <code className="font-mono">{r.baseUrl}</code>
                           </div>
                         ) : null}
                         {r.lastUsedAt ? (

@@ -1258,6 +1258,8 @@ model AiProviderKey {
   apiKey         String    @map("api_key")
   /** Override the provider's default model for this key. Null = use default. */
   model          String?
+  /** OpenAI-compatible base URL. Required for provider="custom"; overrides the default for other openai-kind providers. */
+  baseUrl        String?   @map("base_url")
   /** Lower = tried first. */
   rank           Int       @default(100)
   enabled        Boolean   @default(true)
