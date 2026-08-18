@@ -32,8 +32,12 @@ export async function extractDocumentText(file: File): Promise<{ text: string; k
   let text = "";
   let pages: number | undefined;
   if (kind === "pdf") {
-    // pdf-parse ships CommonJS; dynamic import keeps it off the client bundle.
-    const mod = (await import("pdf-parse")) as unknown as { default?: typeof import("pdf-parse") } & typeof import("pdf-parse");
+    // pdf-parse's index.js runs a self-test when it isn't `require`d (ESM
+    // import) — go straight to the library file. Dynamic import keeps it
+    // server-only.
+    const mod = (await import("pdf-parse/lib/pdf-parse.js")) as unknown as {
+      default?: typeof import("pdf-parse/lib/pdf-parse.js");
+    } & typeof import("pdf-parse/lib/pdf-parse.js");
     const parse = mod.default ?? mod;
     const r = await parse(buf);
     text = r.text ?? "";

@@ -7,3 +7,8 @@ declare module "pdf-parse" {
   function pdfParse(data: Buffer, options?: Record<string, unknown>): Promise<PdfParseResult>;
   export = pdfParse;
 }
+
+declare module "pdf-parse/lib/pdf-parse.js" {
+  import pdfParse = require("pdf-parse");
+  export = pdfParse;
+}
