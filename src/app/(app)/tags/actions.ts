@@ -451,3 +451,87 @@ export async function deletePlantTag(tagId: string): Promise<ActionResult> {
   revalidatePath("/tags");
   return { ok: true };
 }
+
+// ---------------------------------------------------------------------------
+// Growth measurements — numbers at an HST, charted per variety across cycles.
+// ---------------------------------------------------------------------------
+
+const measureSchema = z.object({
+  recordId: z.string().min(1),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  heightCm: z.string().optional(),
+  leafCount: z.string().optional(),
+  stemMm: z.string().optional(),
+  fruitCm: z.string().optional(),
+  fruitG: z.string().optional(),
+  brix: z.string().optional(),
+  note: z.string().max(500).optional(),
+});
+
+const num = (v: string | undefined) => {
+  if (v === undefined) return null;
+  const t = v.trim().replace(",", ".");
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+};
+
+export async function addPlantMeasurement(input: unknown): Promise<ActionResult> {
+  const gate = await requireStaff();
+  if (!gate.ok) return { ok: false, error: gate.error };
+  const parsed = measureSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Validation failed" };
+  const d = parsed.data;
+  const owned = await ownedRecord(d.recordId);
+  if (!owned) return { ok: false, error: "Plant record not found" };
+  const vals = {
+    heightCm: num(d.heightCm),
+    leafCount: num(d.leafCount) == null ? null : Math.round(num(d.leafCount)!),
+    stemMm: num(d.stemMm),
+    fruitCm: num(d.fruitCm),
+    fruitG: num(d.fruitG),
+    brix: num(d.brix),
+  };
+  if (Object.values(vals).every((v) => v == null)) return { ok: false, error: "Enter at least one measurement" };
+
+  // HST from the cycle's transplant date (else the plant's own planted date).
+  const rec = (await prisma.plantRecord.findUnique({
+    where: { id: owned.rec.id },
+    select: { plantedAt: true, harvest: { select: { transplantDate: true } } },
+  })) as { plantedAt: Date; harvest: { transplantDate: Date | null } | null } | null;
+  const base = rec?.harvest?.transplantDate ?? rec?.plantedAt ?? null;
+  const hst = base ? Math.round((Date.parse(d.date) - Date.parse(base.toISOString().slice(0, 10))) / 86_400_000) : null;
+
+  try {
+    await prisma.$transaction(async (tx: TransactionClient) => {
+      const m = await tx.plantMeasurement.create({
+        data: { recordId: owned.rec.id, date: new Date(d.date), hst, ...vals, note: d.note?.trim() || null, userId: gate.userId },
+        select: { id: true },
+      });
+      await recordAction(tx, {
+        type: "tags.measure",
+        entityType: "PlantTag",
+        entityId: owned.tag.id,
+        description: `Measured ${owned.tag.label}${hst != null ? ` at HST ${hst}` : ""}${vals.heightCm != null ? `: ${vals.heightCm} cm` : ""}`,
+        userId: gate.userId,
+        payload: { tagId: owned.tag.id, recordId: owned.rec.id, measurementId: m.id, hst, ...vals },
+      });
+    });
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't save" };
+  }
+  revalidatePath("/tags");
+  return { ok: true };
+}
+
+export async function deletePlantMeasurement(id: string): Promise<ActionResult> {
+  const gate = await requireStaff();
+  if (!gate.ok) return { ok: false, error: gate.error };
+  const m = await prisma.plantMeasurement.findUnique({ where: { id }, select: { id: true, recordId: true } });
+  if (!m) return { ok: false, error: "Not found" };
+  const owned = await ownedRecord(m.recordId);
+  if (!owned) return { ok: false, error: "Not found" };
+  await prisma.plantMeasurement.delete({ where: { id: m.id } });
+  revalidatePath("/tags");
+  return { ok: true };
+}

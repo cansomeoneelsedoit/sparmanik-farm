@@ -15,6 +15,8 @@ import {
 import { listTrays } from "@/app/(app)/tags/actions";
 import type { PlantNoteKind } from "@/app/(app)/tags/journal-kinds";
 import { AddJournalEntryDialog, JournalTimeline, type JournalEntry } from "@/app/(app)/t/[code]/plant-journal";
+import { MeasureDialog, MeasurementList, type MeasurementRow } from "@/app/(app)/t/[code]/plant-measure";
+import { LineChart } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +56,10 @@ export default async function TagScanPage({
           produceId: true,
           produce: { select: { name: true } },
           harvest: { select: { id: true, name: true } },
+          measurements: {
+            orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+            select: { id: true, date: true, hst: true, heightCm: true, leafCount: true, stemMm: true, fruitCm: true, fruitG: true, brix: true, note: true },
+          },
           journal: {
             orderBy: [{ date: "desc" }, { createdAt: "desc" }],
             select: {
@@ -89,12 +95,27 @@ export default async function TagScanPage({
     note: string;
     photoMime: string | null;
   };
+  type MeasureRaw = { id: string; date: Date; hst: number | null; heightCm: unknown; leafCount: number | null; stemMm: unknown; fruitCm: unknown; fruitG: unknown; brix: unknown; note: string | null };
+  const toMeasurements = (rows: MeasureRaw[]): MeasurementRow[] =>
+    rows.map((m) => ({
+      id: m.id,
+      date: new Date(m.date).toISOString().slice(0, 10),
+      hst: m.hst,
+      heightCm: m.heightCm == null ? null : Number(m.heightCm),
+      leafCount: m.leafCount,
+      stemMm: m.stemMm == null ? null : Number(m.stemMm),
+      fruitCm: m.fruitCm == null ? null : Number(m.fruitCm),
+      fruitG: m.fruitG == null ? null : Number(m.fruitG),
+      brix: m.brix == null ? null : Number(m.brix),
+      note: m.note,
+    }));
   type RecordRow = {
     id: string;
     plantedAt: Date;
     endedAt: Date | null;
     seed: string | null;
     tray: string | null;
+    measurements: MeasureRaw[];
     method: string | null;
     notes: string | null;
     photoMime: string | null;
@@ -284,6 +305,27 @@ export default async function TagScanPage({
         ) : null}
         {current ? <EndAllocationButton tagId={tag.id} tagLabel={tag.label} /> : null}
       </div>
+
+      {current ? (
+        <Card>
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 pb-2">
+            <CardTitle className="text-base">Growth measurements</CardTitle>
+            <div className="flex flex-wrap gap-2">
+              {current.produceId ? (
+                <Button asChild variant="ghost" size="sm" className="h-10 sm:h-9">
+                  <Link href={`/tags/growth?produce=${current.produceId}`}>
+                    <LineChart className="h-3.5 w-3.5" /> Variety chart
+                  </Link>
+                </Button>
+              ) : null}
+              <MeasureDialog recordId={current.id} tagLabel={tag.label} />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <MeasurementList rows={toMeasurements(current.measurements)} />
+          </CardContent>
+        </Card>
+      ) : null}
 
       {current ? (
         <Card>

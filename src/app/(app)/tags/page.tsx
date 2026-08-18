@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Map as MapIcon, Printer, QrCode } from "lucide-react";
+import { Map as MapIcon, Printer, QrCode, LineChart } from "lucide-react";
 
 import { prisma } from "@/server/prisma";
 import { Button } from "@/components/ui/button";
@@ -229,6 +229,11 @@ export default async function TagsPage({
                   <Button asChild className="h-10">
                     <Link href={`/tags/map/${active.id}`}>
                       <MapIcon className="h-4 w-4" /> Open layout map
+                    </Link>
+                  </Button>
+                  <Button asChild variant="outline" className="h-10">
+                    <Link href="/tags/growth">
+                      <LineChart className="h-4 w-4" /> Growth chart
                     </Link>
                   </Button>
                 </div>
