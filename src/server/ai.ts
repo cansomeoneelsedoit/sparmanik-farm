@@ -4,7 +4,9 @@ import { prisma } from "@/server/prisma";
 import { Decimal } from "@/server/decimal";
 import { readUpload, readUploadAsBase64 } from "@/server/uploads";
 
-const SYSTEM_PROMPT = `You are the operations assistant for Sparmanik Farm, a hydroponic farm in Indonesia growing primarily melon, chili, and seasonal greens. You help the operator make decisions about inventory, harvests, tasks, staff scheduling, and nutrient recipes. Be concise (3-5 sentences unless detailed steps are requested), practical, and pragmatic. Use IDR (rupiah) for prices. When the user attaches a photo, describe what you see and answer their question using both the image and the farm context. When uncertain, ask for the missing detail rather than guessing.`;
+const SYSTEM_PROMPT = `You are the operations assistant for Sparmanik Farm, a hydroponic farm in Indonesia growing primarily melon, chili, and seasonal greens. You help the operator make decisions about inventory, harvests, tasks, staff scheduling, and nutrient recipes. Be concise (3-5 sentences unless detailed steps are requested), practical, and pragmatic. Use IDR (rupiah) for prices. When the user attaches a photo, describe what you see and answer their question using both the image and the farm context. When uncertain, ask for the missing detail rather than guessing.
+
+GREENHOUSE SOPs: the farm context lists, per greenhouse, the SOP assigned to its live cycle with today's HST (days after transplant), today's feed/water settings and job, the current stage's rules, and the next few days. When the user asks about a specific greenhouse or cycle, answer ONLY from THAT greenhouse's SOP block — never borrow numbers, stages or jobs from another greenhouse's SOP. If a greenhouse has no SOP listed, say so instead of guessing. Quote the SOP's exact EC/ppm/water/pulse figures.`;
 
 export type ChatAttachment = { path: string; mimeType: string; name?: string };
 export type ChatMessage = {
@@ -47,7 +49,53 @@ export async function flattenMessageToText(m: ChatMessage): Promise<string> {
   return parts.join("\n\n");
 }
 
+/**
+ * Per-greenhouse SOP block for the AI context: today's HST row, the current
+ * stage's rules (compressed), and the next few days' jobs. Kept compact so it
+ * fits every provider's context; the full booklet stays on the SOP page.
+ */
+async function buildSopContext(): Promise<string> {
+  const { sopTodayCards } = await import("@/server/sop-today");
+  const cards = await sopTodayCards().catch(() => []);
+  if (!cards.length) return "";
+  const rows = (await prisma.sopDay.findMany({
+    where: { sopId: { in: [...new Set(cards.map((c) => c.sopId))] } },
+    orderBy: { day: "asc" },
+    select: { sopId: true, day: true, stage: true, ec: true, ppm: true, sopPerTank: true, waterMl: true, pulses: true, times: true, jobEn: true },
+  })) as { sopId: string; day: number; stage: string | null; ec: number | null; ppm: number | null; sopPerTank: string | null; waterMl: number | null; pulses: string | null; times: string | null; jobEn: string | null }[];
+
+  const out: string[] = ["Greenhouse SOPs (one block per greenhouse — do not mix them):"];
+  for (const c of cards) {
+    const days = rows.filter((r) => r.sopId === c.sopId);
+    const today = days.find((d) => d.day === c.hst);
+    const stage = today?.stage ?? null;
+    const stageRows = stage ? days.filter((d) => d.stage === stage) : [];
+    // Compress the stage into runs of identical settings: "HST 8–24: EC 2100 · 800 mL · 4 × 6m".
+    const runs: string[] = [];
+    for (const r of stageRows) {
+      const sig = `EC ${r.ec ?? "—"} µS (${r.ppm ?? "—"} ppm) · ${r.waterMl ?? "—"} mL/polybag · ${r.pulses ?? "—"}${r.times ? ` @ ${r.times}` : ""}${r.sopPerTank ? ` · SOP ${r.sopPerTank}/tank` : ""}`;
+      const last = runs[runs.length - 1];
+      if (last && last.endsWith(`| ${sig}`)) {
+        runs[runs.length - 1] = last.replace(/^HST (\d+)(?:–\d+)? \|/, `HST $1–${r.day} |`);
+      } else runs.push(`HST ${r.day} | ${sig}`);
+    }
+    const jobsAhead = days.filter((d) => d.day > c.hst && d.day <= c.hst + 7 && d.jobEn).map((d) => `HST ${d.day}: ${d.jobEn}`);
+    const jobsInStage = stageRows.filter((d) => d.jobEn).map((d) => `HST ${d.day}: ${d.jobEn}`);
+    out.push(
+      `## ${c.greenhouseName} — cycle "${c.harvestName}" — SOP "${c.sopTitleEn}" — HST 0 (transplant) = ${c.hst0}, TODAY = HST ${c.hst}${stage ? ` (${stage} stage)` : ""}`,
+      today
+        ? `Today: EC ${today.ec ?? "—"} µS (${today.ppm ?? "—"} ppm) · ${today.waterMl ?? "—"} mL/polybag · ${today.pulses ?? "—"}${today.times ? ` @ ${today.times}` : ""}${today.sopPerTank ? ` · SOP ${today.sopPerTank}/tank` : ""}${today.jobEn ? ` · JOB TODAY: ${today.jobEn}` : " · routine day, no special job"}`
+        : `Today: no schedule row for HST ${c.hst} (before start or past the end of the schedule)`,
+      stage ? `${stage} stage settings: ${runs.map((r) => r.replace(" | ", ": ")).join("; ")}` : "",
+      jobsInStage.length ? `${stage} stage jobs: ${jobsInStage.join("; ")}` : "",
+      jobsAhead.length ? `Next 7 days: ${jobsAhead.join("; ")}` : "Next 7 days: no special jobs scheduled",
+    );
+  }
+  return out.filter((l) => l !== "").join(String.fromCharCode(10));
+}
+
 export async function buildFarmContext(): Promise<string> {
+  const sopBlock = await buildSopContext();
   const [activeHarvests, lowItems, openTasks] = await Promise.all([
     prisma.harvest.findMany({
       where: { status: "LIVE" },
@@ -95,6 +143,7 @@ export async function buildFarmContext(): Promise<string> {
     ...openTasks.map((t: { title: string; dueDate: Date; priority: "LOW" | "MEDIUM" | "HIGH" }) =>
       `- [${t.priority}] ${t.title} — due ${t.dueDate.toISOString().slice(0, 10)}`,
     ),
+    ...(sopBlock ? ["", sopBlock] : []),
   ].join("\n");
 }
 
