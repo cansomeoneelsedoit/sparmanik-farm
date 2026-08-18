@@ -80,6 +80,7 @@ import { recordAction } from "@/server/audit";
 import { extractDocumentText } from "@/server/doc-text";
 import { saveFileUpload } from "@/server/uploads";
 import { guessSopTitle, parseSopDays, parseSopPages } from "@/server/sop-parse";
+import { formatSopInBackground } from "@/server/sop-format";
 
 export async function buildSopFromPdfs(
   formData: FormData,
@@ -155,8 +156,9 @@ export async function buildSopFromPdfs(
           category,
           sourceEnPath: savedEn?.path ?? null,
           sourceIdPath: savedId?.path ?? null,
-          steps: { create: steps.map((s, i) => ({ position: i + 1, bodyEn: s.bodyEn, bodyId: s.bodyId })) },
+          steps: { create: steps.map((s, i) => ({ position: i + 1, bodyEn: s.bodyEn, bodyId: s.bodyId, rawEn: s.bodyEn, rawId: s.bodyId })) },
           days: { create: days },
+          formatTotal: steps.length,
         },
         select: { id: true },
       });
@@ -171,10 +173,24 @@ export async function buildSopFromPdfs(
       });
     });
     revalidatePath("/sops");
+    // Make the pages read like the book — runs in the background; the SOP
+    // page shows progress and swaps raw text for formatted pages as they land.
+    void formatSopInBackground(sopId);
     return { ok: true, data: { id: sopId, days: days.length, sections: steps.length } };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Couldn't build the SOP" };
   }
+}
+
+/** Re-run the AI page formatting for an SOP (e.g. after a chain/model change). */
+export async function reformatSop(sopId: string): Promise<ActionResult> {
+  const gate = await requireStaff();
+  if (!gate.ok) return { ok: false, error: gate.error };
+  const sop = await prisma.sop.findFirst({ where: { id: sopId }, select: { id: true } });
+  if (!sop) return { ok: false, error: "SOP not found" };
+  void formatSopInBackground(sop.id);
+  revalidatePath(`/sops/${sop.id}`);
+  return { ok: true };
 }
 
 const assignSchema = z.object({

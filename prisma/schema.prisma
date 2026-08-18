@@ -1059,6 +1059,9 @@ model Sop {
   /// Source booklets this SOP was built from (uploads-relative), when built from PDF.
   sourceEnPath   String?   @map("source_en_path")
   sourceIdPath   String?   @map("source_id_path")
+  /// Background AI formatting of booklet pages into Markdown: done/total.
+  formatDone     Int       @default(0) @map("format_done")
+  formatTotal    Int       @default(0) @map("format_total")
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
@@ -1079,6 +1082,11 @@ model SopStep {
   bodyEn    String @map("body_en")
   bodyId    String @map("body_id")
   photoPath String? @map("photo_path")
+  /// Raw extracted page text kept so the page can be re-formatted later.
+  rawEn     String? @map("raw_en")
+  rawId     String? @map("raw_id")
+  /// True once bodyEn/bodyId hold AI-formatted Markdown (render as markdown).
+  formatted Boolean @default(false)
 
   sop Sop @relation(fields: [sopId], references: [id], onDelete: Cascade)
 
