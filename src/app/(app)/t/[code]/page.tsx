@@ -12,6 +12,9 @@ import {
   PlantNotesPhotoDialog,
   ShowQrDialog,
 } from "@/app/(app)/tags/tag-dialogs";
+import { listTrays } from "@/app/(app)/tags/actions";
+import type { PlantNoteKind } from "@/app/(app)/tags/journal-kinds";
+import { AddJournalEntryDialog, JournalTimeline, type JournalEntry } from "@/app/(app)/t/[code]/plant-journal";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +46,7 @@ export default async function TagScanPage({
           plantedAt: true,
           endedAt: true,
           seed: true,
+          tray: true,
           method: true,
           notes: true,
           // photoMime (small) tells us a photo exists without pulling the blob.
@@ -50,32 +54,69 @@ export default async function TagScanPage({
           produceId: true,
           produce: { select: { name: true } },
           harvest: { select: { id: true, name: true } },
+          journal: {
+            orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+            select: {
+              id: true,
+              date: true,
+              kind: true,
+              product: true,
+              amount: true,
+              note: true,
+              photoMime: true,
+            },
+          },
         },
       },
     },
   });
   if (!tag) notFound();
 
-  const produces = (await prisma.produce.findMany({
-    orderBy: { name: "asc" },
-    select: { id: true, name: true },
-  })) as { id: string; name: string }[];
+  const [produces, trays] = await Promise.all([
+    prisma.produce.findMany({
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }) as Promise<{ id: string; name: string }[]>,
+    listTrays(tag.greenhouse.id),
+  ]);
 
+  type JournalRow = {
+    id: string;
+    date: Date;
+    kind: string;
+    product: string | null;
+    amount: string | null;
+    note: string;
+    photoMime: string | null;
+  };
   type RecordRow = {
     id: string;
     plantedAt: Date;
     endedAt: Date | null;
     seed: string | null;
+    tray: string | null;
     method: string | null;
     notes: string | null;
     photoMime: string | null;
     produceId: string | null;
     produce: { name: string } | null;
     harvest: { id: string; name: string } | null;
+    journal: JournalRow[];
   };
   const records = tag.records as RecordRow[];
   const current = records.find((r) => r.endedAt === null) ?? null;
   const history = records.filter((r) => r.endedAt !== null);
+  const toEntries = (r: RecordRow): JournalEntry[] =>
+    r.journal.map((j) => ({
+      id: j.id,
+      date: new Date(j.date).toISOString().slice(0, 10),
+      kind: j.kind as PlantNoteKind,
+      product: j.product,
+      amount: j.amount,
+      note: j.note,
+      hasPhoto: !!j.photoMime,
+      hst: Math.round((new Date(j.date).getTime() - new Date(r.plantedAt).getTime()) / 86_400_000),
+    }));
   // Layout variety planned for this stake (from the greenhouse layout).
   const planned = (tag as { produce: { id: string; name: string; photoMime: string | null } | null })
     .produce;
@@ -144,10 +185,20 @@ export default async function TagScanPage({
                 <div className="font-medium">{daysSince(current.plantedAt)} days</div>
               </div>
             </div>
-            {current.seed ? (
-              <div>
-                <div className="text-xs text-muted-foreground">Seed</div>
-                <div>{current.seed}</div>
+            {current.seed || current.tray ? (
+              <div className="grid grid-cols-2 gap-3">
+                {current.seed ? (
+                  <div>
+                    <div className="text-xs text-muted-foreground">Seed</div>
+                    <div>{current.seed}</div>
+                  </div>
+                ) : null}
+                {current.tray ? (
+                  <div>
+                    <div className="text-xs text-muted-foreground">From tray</div>
+                    <div className="font-medium">{current.tray}</div>
+                  </div>
+                ) : null}
               </div>
             ) : null}
             {current.method ? (
@@ -214,22 +265,37 @@ export default async function TagScanPage({
           produces={produces}
           current={
             current
-              ? { produceId: current.produceId, seed: current.seed, method: current.method }
+              ? { produceId: current.produceId, seed: current.seed, method: current.method, tray: current.tray }
               : null
           }
           defaultProduceId={planned?.id ?? null}
+          trays={trays}
         />
         {current ? (
           <PlantNotesPhotoDialog
-            key={`${current.id}:${current.photoMime ?? "none"}`}
+            key={`${current.id}:${current.photoMime ?? "none"}:${current.tray ?? ""}`}
             recordId={current.id}
             hasPhoto={!!current.photoMime}
             currentNotes={current.notes}
+            currentTray={current.tray}
+            trays={trays}
             produceName={current.produce?.name ?? "plant"}
           />
         ) : null}
         {current ? <EndAllocationButton tagId={tag.id} tagLabel={tag.label} /> : null}
       </div>
+
+      {current ? (
+        <Card>
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 pb-2">
+            <CardTitle className="text-base">Journal</CardTitle>
+            <AddJournalEntryDialog recordId={current.id} tagLabel={tag.label} />
+          </CardHeader>
+          <CardContent>
+            <JournalTimeline entries={toEntries(current)} />
+          </CardContent>
+        </Card>
+      ) : null}
 
       {history.length > 0 ? (
         <Card>
@@ -238,21 +304,34 @@ export default async function TagScanPage({
           </CardHeader>
           <CardContent className="space-y-2">
             {history.map((r) => (
-              <div key={r.id} className="flex items-center justify-between gap-3 border-b pb-2 text-sm last:border-0 last:pb-0">
-                <div className="min-w-0">
-                  <div className="font-medium">{r.produce?.name ?? "Unnamed plant"}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {fmt(r.plantedAt)} → {r.endedAt ? fmt(r.endedAt) : "…"}
-                    {r.seed ? ` · ${r.seed}` : ""}
+              <div key={r.id} className="border-b pb-2 text-sm last:border-0 last:pb-0">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-medium">{r.produce?.name ?? "Unnamed plant"}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {fmt(r.plantedAt)} → {r.endedAt ? fmt(r.endedAt) : "…"}
+                      {r.seed ? ` · ${r.seed}` : ""}
+                      {r.tray ? ` · tray ${r.tray}` : ""}
+                    </div>
                   </div>
+                  {r.harvest ? (
+                    <Link
+                      href={`/harvest/${r.harvest.id}`}
+                      className="shrink-0 text-xs text-accent hover:underline"
+                    >
+                      {r.harvest.name}
+                    </Link>
+                  ) : null}
                 </div>
-                {r.harvest ? (
-                  <Link
-                    href={`/harvest/${r.harvest.id}`}
-                    className="shrink-0 text-xs text-accent hover:underline"
-                  >
-                    {r.harvest.name}
-                  </Link>
+                {r.journal.length ? (
+                  <details className="mt-1">
+                    <summary className="cursor-pointer text-xs text-muted-foreground">
+                      {r.journal.length} journal entr{r.journal.length === 1 ? "y" : "ies"}
+                    </summary>
+                    <div className="mt-2">
+                      <JournalTimeline entries={toEntries(r)} />
+                    </div>
+                  </details>
                 ) : null}
               </div>
             ))}
