@@ -1542,7 +1542,8 @@ model PlantRecord {
   tag     PlantTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
   harvest Harvest? @relation(fields: [harvestId], references: [id], onDelete: SetNull)
   produce Produce? @relation(fields: [produceId], references: [id], onDelete: SetNull)
-  journal PlantNote[]
+  journal      PlantNote[]
+  measurements PlantMeasurement[]
 
   @@index([tagId, endedAt])
   @@map("plant_records")
@@ -1572,4 +1573,29 @@ model PlantNote {
 
   @@index([recordId, date])
   @@map("plant_notes")
+}
+
+/// Structured growth measurement on a plant record at a given HST — height,
+/// leaves, stem, fruit, brix. Charted per variety across cycles so the next
+/// crop can be compared day-for-day ("HST 18 should be ~X cm").
+model PlantMeasurement {
+  id        String   @id @default(cuid())
+  recordId  String   @map("record_id")
+  date      DateTime @db.Date
+  /// Days after transplant on `date` (from the cycle's transplant date, else the plant's plantedAt).
+  hst       Int?
+  heightCm  Decimal? @db.Decimal(8, 2) @map("height_cm")
+  leafCount Int?     @map("leaf_count")
+  stemMm    Decimal? @db.Decimal(8, 2) @map("stem_mm")
+  fruitCm   Decimal? @db.Decimal(8, 2) @map("fruit_cm")
+  fruitG    Decimal? @db.Decimal(10, 2) @map("fruit_g")
+  brix      Decimal? @db.Decimal(6, 2)
+  note      String?
+  userId    String?  @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  record PlantRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+
+  @@index([recordId, date])
+  @@map("plant_measurements")
 }
