@@ -327,7 +327,11 @@ async function callOpenAiCompatible(p: Provider, o: CallShape): Promise<string> 
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${p.apiKey}` },
       body: JSON.stringify({
         model: p.model,
-        max_tokens: o.maxTokens,
+        // Reasoning models (e.g. Nemotron via vLLM) spend tokens thinking
+        // before the visible answer, and vLLM counts that against
+        // max_tokens. Give custom endpoints generous headroom so a short
+        // prompt doesn't come back with empty content.
+        max_tokens: p.providerSlug === "custom" ? Math.max(o.maxTokens, 2048) : o.maxTokens,
         messages: [{ role: "user", content: o.prompt }],
         ...(o.json ? { response_format: { type: "json_object" } } : {}),
       }),
@@ -335,10 +339,12 @@ async function callOpenAiCompatible(p: Provider, o: CallShape): Promise<string> 
     });
     if (!res.ok) throw new ProviderError(res.status, await res.text().catch(() => ""));
     const j = (await res.json()) as {
-      choices?: { message?: { content?: string } }[];
+      choices?: { message?: { content?: string; reasoning?: string } }[];
     };
-    const text = j.choices?.[0]?.message?.content ?? "";
-    if (!text) throw new ProviderError(502, "no text");
+    const msg = j.choices?.[0]?.message;
+    // Strip any inline <think>…</think> block some servers emit in content.
+    const text = (msg?.content ?? "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+    if (!text) throw new ProviderError(502, msg?.reasoning ? "no text (reasoning only)" : "no text");
     return text;
   } finally {
     clearTimeout(t);
