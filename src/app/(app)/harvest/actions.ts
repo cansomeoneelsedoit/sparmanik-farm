@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { prisma } from "@/server/prisma";
 import { auth } from "@/auth";
-import { requireSuperuser } from "@/server/authz";
+import { requireStaff, requireSuperuser } from "@/server/authz";
 import { recordAction } from "@/server/audit";
 import { consumeFifo } from "@/server/fifo";
 import {
@@ -873,6 +873,30 @@ export async function installHarvestAsset(input: unknown): Promise<ActionResult>
   const userId = await uid();
   try {
     await prisma.$transaction(async (tx: TransactionClient) => {
+      await installAssetTx(tx, parsed.data, userId);
+    });
+    revalidatePath(`/harvest/${parsed.data.harvestId}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed" };
+  }
+}
+
+/**
+ * Transaction body for installing one asset: FIFO-consume the stock, snapshot
+ * the depreciation charge, create the HarvestAsset + consumptions, bump batch
+ * useCounts, audit. Shared by the single-item dialog and "reuse last cycle".
+ * Returns the created asset id and the charge that lands on this cycle.
+ */
+async function installAssetTx(
+  tx: TransactionClient,
+  data: z.infer<typeof installSchema>,
+  userId: string | null,
+): Promise<{ assetId: string; charge: Decimal | null; fullCost: Decimal }> {
+  const parsed = { data };
+  {
+    {
+      // (Body kept at its original indentation to keep the diff reviewable.)
       const { consumed, totalCost } = await consumeFifo(tx, parsed.data.itemId, parsed.data.qty);
       const fullCost = new Decimal(totalCost);
 
@@ -978,12 +1002,209 @@ export async function installHarvestAsset(input: unknown): Promise<ActionResult>
         userId,
         payload: { harvestId: parsed.data.harvestId, assetId: asset.id, consumptionIds },
       });
-    });
-    revalidatePath(`/harvest/${parsed.data.harvestId}`);
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Failed" };
+      return { assetId: asset.id, charge: depreciable ? charge : null, fullCost: capturedFullCost };
+    }
   }
+}
+
+// ============================================================================
+// Reuse last cycle's setup — the "same kit as last grow" button.
+// Looks at the most recent CLOSED cycle in the same greenhouse, takes every
+// asset that came back in good condition (or was flagged reusable), and offers
+// to install the same quantities on this cycle. Re-installing PER_USE kit
+// consumes it again at the per-use rate, so each cycle bears 1/N of the
+// original outlay — the outlay×uses spreading Boyd described.
+// ============================================================================
+
+export type ReuseSetupLine = {
+  itemId: string;
+  name: string;
+  unit: string;
+  lastQty: number;
+  available: number;
+  /** Quantity we'd install = min(lastQty, available). */
+  qty: number;
+  /** Already installed on THIS cycle (any qty) — skipped by default. */
+  alreadyInstalled: boolean;
+  /** Estimated charge landing on this cycle (per-use × qty, or full cost). */
+  estCharge: number;
+  depreciationMode: "PER_USE" | "CALENDAR" | null;
+};
+
+export type ReuseSetupPreview = {
+  sourceHarvest: { id: string; name: string; startDate: string; endDate: string | null } | null;
+  lines: ReuseSetupLine[];
+};
+
+/** What "reuse last cycle" would do — feeds the confirm dialog. */
+export async function previewReuseSetup(harvestId: string): Promise<ActionResult<ReuseSetupPreview>> {
+  const gate = await requireStaff();
+  if (!gate.ok) return { ok: false, error: gate.error };
+  const h = (await prisma.harvest.findFirst({
+    where: { id: harvestId },
+    select: { id: true, greenhouseId: true, startDate: true },
+  })) as { id: string; greenhouseId: string; startDate: Date } | null;
+  if (!h) return { ok: false, error: "Harvest not found" };
+
+  const prev = (await prisma.harvest.findFirst({
+    where: { greenhouseId: h.greenhouseId, id: { not: h.id }, startDate: { lt: h.startDate } },
+    orderBy: { startDate: "desc" },
+    select: { id: true, name: true, startDate: true, endDate: true },
+  })) as { id: string; name: string; startDate: Date; endDate: Date | null } | null;
+  if (!prev) return { ok: true, data: { sourceHarvest: null, lines: [] } };
+
+  const prevAssets = (await prisma.harvestAsset.findMany({
+    where: {
+      harvestId: prev.id,
+      discarded: false,
+      OR: [{ returnCondition: "good" }, { returnCondition: null, reusable: true }],
+    },
+    select: {
+      itemId: true,
+      qty: true,
+      depreciationMode: true,
+      item: { select: { name: true, nameEn: true, unit: true } },
+    },
+  })) as {
+    itemId: string;
+    qty: Decimal;
+    depreciationMode: string | null;
+    item: { name: string; nameEn: string | null; unit: string };
+  }[];
+  if (!prevAssets.length) return { ok: true, data: { sourceHarvest: serHarvest(prev), lines: [] } };
+
+  // Group by item (an item may have been installed in several slices).
+  const byItem = new Map<string, { qty: Decimal; mode: string | null; item: (typeof prevAssets)[number]["item"] }>();
+  for (const a of prevAssets) {
+    const cur = byItem.get(a.itemId);
+    if (cur) cur.qty = cur.qty.plus(a.qty);
+    else byItem.set(a.itemId, { qty: new Decimal(a.qty), mode: a.depreciationMode, item: a.item });
+  }
+  const itemIds = [...byItem.keys()];
+
+  const [batches, thisCycle] = await Promise.all([
+    prisma.batch.findMany({
+      where: { itemId: { in: itemIds } },
+      select: {
+        itemId: true,
+        qty: true,
+        price: true,
+        maxUses: true,
+        useCount: true,
+        amortisedCostPerUse: true,
+        usefulLifeMonths: true,
+        consumptions: { select: { qty: true } },
+      },
+    }) as Promise<
+      {
+        itemId: string;
+        qty: Decimal;
+        price: Decimal;
+        maxUses: number;
+        useCount: number;
+        amortisedCostPerUse: Decimal | null;
+        usefulLifeMonths: number | null;
+        consumptions: { qty: Decimal }[];
+      }[]
+    >,
+    prisma.harvestAsset.findMany({
+      where: { harvestId: h.id, itemId: { in: itemIds } },
+      select: { itemId: true },
+    }) as Promise<{ itemId: string }[]>,
+  ]);
+  const installedHere = new Set(thisCycle.map((x) => x.itemId));
+
+  const lines: ReuseSetupLine[] = [];
+  for (const [itemId, g] of byItem) {
+    // Available = Σ (batch qty − consumed) over batches with uses left.
+    let available = new Decimal(0);
+    let est = new Decimal(0);
+    let need = g.qty;
+    let mode: "PER_USE" | "CALENDAR" | null = null;
+    for (const b of batches.filter((x) => x.itemId === itemId)) {
+      if (b.maxUses > 1 && b.useCount >= b.maxUses) continue; // fully used up
+      const left = new Decimal(b.qty).minus(b.consumptions.reduce((s, c) => s.plus(c.qty), new Decimal(0)));
+      if (left.lte(0)) continue;
+      available = available.plus(left);
+      const take = Decimal.min(left, Decimal.max(need, 0));
+      if (take.gt(0)) {
+        if (b.usefulLifeMonths && b.usefulLifeMonths > 0) mode = mode ?? "CALENDAR";
+        else if (b.maxUses > 1 && b.amortisedCostPerUse) {
+          mode = mode ?? "PER_USE";
+          est = est.plus(take.times(b.amortisedCostPerUse));
+        } else est = est.plus(take.times(b.price));
+        need = need.minus(take);
+      }
+    }
+    const qty = Decimal.min(g.qty, available);
+    lines.push({
+      itemId,
+      name: g.item.nameEn || g.item.name,
+      unit: g.item.unit,
+      lastQty: Number(g.qty),
+      available: Number(available.toDecimalPlaces(4)),
+      qty: Number(qty.toDecimalPlaces(4)),
+      alreadyInstalled: installedHere.has(itemId),
+      estCharge: Number(est.toDecimalPlaces(0)),
+      depreciationMode: mode ?? (g.mode as "PER_USE" | "CALENDAR" | null),
+    });
+  }
+  lines.sort((a, b) => b.estCharge - a.estCharge || a.name.localeCompare(b.name));
+  return { ok: true, data: { sourceHarvest: serHarvest(prev), lines } };
+}
+
+function serHarvest(p: { id: string; name: string; startDate: Date; endDate: Date | null }) {
+  return {
+    id: p.id,
+    name: p.name,
+    startDate: p.startDate.toISOString().slice(0, 10),
+    endDate: p.endDate ? p.endDate.toISOString().slice(0, 10) : null,
+  };
+}
+
+const reuseSchema = z.object({
+  harvestId: z.string(),
+  date: z.string().min(1),
+  /** Item ids + quantities the user confirmed (defaults from the preview). */
+  lines: z.array(z.object({ itemId: z.string(), qty: z.string() })).min(1).max(200),
+});
+
+/** Install the confirmed lines on this cycle — one transaction per line so a
+ *  single short item can't roll back the whole kit; the summary says what
+ *  landed and what didn't. */
+export async function reuseSetupFromLastCycle(
+  input: unknown,
+): Promise<ActionResult<{ installed: number; failed: { itemId: string; error: string }[] }>> {
+  const gate = await requireStaff();
+  if (!gate.ok) return { ok: false, error: gate.error };
+  const parsed = reuseSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Validation failed" };
+  const userId = await uid();
+  const { harvestId, date, lines } = parsed.data;
+  const h = await prisma.harvest.findFirst({ where: { id: harvestId }, select: { id: true } });
+  if (!h) return { ok: false, error: "Harvest not found" };
+
+  let installed = 0;
+  const failed: { itemId: string; error: string }[] = [];
+  for (const l of lines) {
+    if (!(Number(l.qty) > 0)) continue;
+    try {
+      await prisma.$transaction(async (tx: TransactionClient) => {
+        await installAssetTx(
+          tx,
+          { harvestId, itemId: l.itemId, qty: l.qty, date, reusable: true, condition: "" },
+          userId,
+        );
+      });
+      installed += 1;
+    } catch (e) {
+      failed.push({ itemId: l.itemId, error: e instanceof Error ? e.message : "Failed" });
+    }
+  }
+  revalidatePath(`/harvest/${harvestId}`);
+  revalidatePath("/inventory");
+  revalidatePath("/financials");
+  return { ok: true, data: { installed, failed } };
 }
 
 const saleSchema = z.object({
