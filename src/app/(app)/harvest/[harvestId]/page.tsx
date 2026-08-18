@@ -21,6 +21,7 @@ import { Decimal } from "@/server/decimal";
 import { installDepreciation } from "@/server/depreciation";
 import { localizedItemName } from "@/lib/item-name";
 import { RecordUsageDialog } from "@/app/(app)/harvest/[harvestId]/record-usage-dialog";
+import { ReuseSetupDialog } from "@/app/(app)/harvest/[harvestId]/reuse-setup-dialog";
 import {
   InstallAssetDialog,
   type InstallAssetItem,
@@ -643,6 +644,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
             harvestId={harvest.id}
             items={installItems}
           />
+          {harvest.status === "LIVE" ? <ReuseSetupDialog harvestId={harvest.id} /> : null}
           <Button asChild variant="outline" size="sm">
             <a href={`/print/harvest/${harvest.id}?auto=1`} target="_blank" rel="noopener noreferrer">Download PDF</a>
           </Button>
