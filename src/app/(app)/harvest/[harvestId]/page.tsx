@@ -24,6 +24,7 @@ import { RecordUsageDialog } from "@/app/(app)/harvest/[harvestId]/record-usage-
 import { UsageTable } from "@/app/(app)/harvest/[harvestId]/usage-table";
 import { sopTodayCards } from "@/server/sop-today";
 import { SopTodayCard } from "@/components/shared/sop-today-card";
+import { todayWIB } from "@/lib/date";
 import { ReuseSetupDialog } from "@/app/(app)/harvest/[harvestId]/reuse-setup-dialog";
 import {
   InstallAssetDialog,
@@ -690,6 +691,8 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
               variety: harvest.variety,
               startDate: harvest.startDate.toISOString().slice(0, 10),
               endDate: harvest.endDate ? harvest.endDate.toISOString().slice(0, 10) : null,
+              sowDate: harvest.sowDate ? harvest.sowDate.toISOString().slice(0, 10) : null,
+              transplantDate: harvest.transplantDate ? harvest.transplantDate.toISOString().slice(0, 10) : null,
               status: harvest.status,
             }}
             trigger={<Button variant="ghost" size="sm">Edit</Button>}
@@ -711,6 +714,25 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
             <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Started</div>
             <div className="font-medium">{harvest.startDate.toISOString().slice(0, 10)}</div>
           </div>
+          {harvest.sowDate ? (
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Seeds sown</div>
+              <div className="font-medium">{harvest.sowDate.toISOString().slice(0, 10)}</div>
+            </div>
+          ) : null}
+          {harvest.transplantDate ? (
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Transplant (HST 0)</div>
+              <div className="font-medium">
+                {harvest.transplantDate.toISOString().slice(0, 10)}
+                {harvest.status === "LIVE" ? (
+                  <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 font-mono text-xs text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+                    HST {Math.round((Date.parse(todayWIB()) - harvest.transplantDate.getTime()) / 86_400_000)} today
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
           <div>
             <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
               {harvest.endDate ? "Ended" : "Status"}

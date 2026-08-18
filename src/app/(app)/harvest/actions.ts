@@ -46,6 +46,10 @@ const startSchema = z.object({
   name: z.string().min(1),
   variety: z.string().optional().default(""),
   startDate: z.string().min(1),
+  /** Seed sowing date (nursery). */
+  sowDate: z.string().optional().nullable(),
+  /** Transplant into polybags = HST 0. Every SOP day count runs from this. */
+  transplantDate: z.string().optional().nullable(),
 });
 
 export async function startHarvest(input: unknown): Promise<ActionResult<{ id: string }>> {
@@ -62,6 +66,8 @@ export async function startHarvest(input: unknown): Promise<ActionResult<{ id: s
         name: parsed.data.name,
         variety: parsed.data.variety || null,
         startDate: new Date(parsed.data.startDate),
+        sowDate: parsed.data.sowDate ? new Date(parsed.data.sowDate) : null,
+        transplantDate: parsed.data.transplantDate ? new Date(parsed.data.transplantDate) : null,
         status: "LIVE",
       },
     });
@@ -93,6 +99,8 @@ const updateHarvestSchema = z.object({
   produceIds: z.array(z.string()).optional(),
   startDate: z.string().min(1),
   endDate: z.string().optional().nullable(),
+  sowDate: z.string().optional().nullable(),
+  transplantDate: z.string().optional().nullable(),
   status: z.enum(["LIVE", "CLOSED"]).default("LIVE"),
 });
 
@@ -111,6 +119,8 @@ export async function updateHarvest(id: string, input: unknown): Promise<ActionR
         produceId: primary,
         startDate: new Date(parsed.data.startDate),
         endDate: parsed.data.endDate ? new Date(parsed.data.endDate) : null,
+        ...(parsed.data.sowDate !== undefined ? { sowDate: parsed.data.sowDate ? new Date(parsed.data.sowDate) : null } : {}),
+        ...(parsed.data.transplantDate !== undefined ? { transplantDate: parsed.data.transplantDate ? new Date(parsed.data.transplantDate) : null } : {}),
         status: parsed.data.status,
       },
     });

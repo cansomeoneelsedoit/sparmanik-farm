@@ -35,6 +35,8 @@ const schema = z.object({
   variety: z.string().optional(),
   startDate: z.string().min(1),
   endDate: z.string().optional(),
+  sowDate: z.string().optional(),
+  transplantDate: z.string().optional(),
   status: z.enum(["LIVE", "CLOSED"]).optional(),
 });
 type Form = z.infer<typeof schema>;
@@ -56,6 +58,8 @@ export function StartHarvestDialog({
     variety: string | null;
     startDate: string;
     endDate: string | null;
+    sowDate?: string | null;
+    transplantDate?: string | null;
     status: "LIVE" | "CLOSED";
   };
 }) {
@@ -123,6 +127,8 @@ export function StartHarvestDialog({
           variety: existing.variety ?? "",
           startDate: existing.startDate,
           endDate: existing.endDate ?? "",
+          sowDate: existing.sowDate ?? "",
+          transplantDate: existing.transplantDate ?? "",
           status: existing.status,
         }
       : { name: "", startDate: today(), produceIds: [] },
@@ -146,6 +152,8 @@ export function StartHarvestDialog({
           produceIds: ids,
           produceId: ids[0] ?? null,
           endDate: v.endDate || null,
+          sowDate: v.sowDate || null,
+          transplantDate: v.transplantDate || null,
           status: v.status ?? "LIVE",
         });
         if (r.ok) { toast.success("Saved"); setOpen(false); router.refresh(); }
@@ -155,6 +163,8 @@ export function StartHarvestDialog({
           ...v,
           produceIds: ids,
           produceId: ids[0] ?? null,
+          sowDate: v.sowDate || null,
+          transplantDate: v.transplantDate || null,
         });
         if (r.ok) {
           toast.success("Harvest started");
@@ -273,6 +283,19 @@ export function StartHarvestDialog({
             <div className="space-y-2">
               <Label>Start date</Label>
               <Input type="date" {...form.register("startDate")} />
+              <p className="text-[11px] text-muted-foreground">When the cycle opened in the app (prep, buffering…).</p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Seeds sown</Label>
+                <Input type="date" {...form.register("sowDate")} />
+                <p className="text-[11px] text-muted-foreground">Seeds soaked / into trays.</p>
+              </div>
+              <div className="space-y-2">
+                <Label>Transplant date (HST 0)</Label>
+                <Input type="date" {...form.register("transplantDate")} />
+                <p className="text-[11px] text-muted-foreground">Into polybags — every SOP day counts from here.</p>
+              </div>
             </div>
             {isEdit ? (
               <div className="grid grid-cols-2 gap-3">

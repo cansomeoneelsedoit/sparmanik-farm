@@ -37,8 +37,8 @@ export default async function SopDetailPage({ params }: { params: Promise<{ sopI
   const liveHarvests = (await prisma.harvest.findMany({
     where: { status: "LIVE" },
     orderBy: { startDate: "desc" },
-    select: { id: true, name: true, startDate: true, greenhouse: { select: { name: true } } },
-  })) as { id: string; name: string; startDate: Date; greenhouse: { name: string } }[];
+    select: { id: true, name: true, startDate: true, transplantDate: true, greenhouse: { select: { name: true } } },
+  })) as { id: string; name: string; startDate: Date; transplantDate: Date | null; greenhouse: { name: string } }[];
   type DayRow = { id: string; day: number; stage: string | null; ec: number | null; ppm: number | null; sopPerTank: string | null; waterMl: number | null; pulses: string | null; times: string | null; jobEn: string | null; jobId: string | null };
   const days = sop.days as DayRow[];
   type Assign = { id: string; hst0: Date; harvest: { id: string; name: string; status: string; greenhouse: { name: string } } };
@@ -62,7 +62,7 @@ export default async function SopDetailPage({ params }: { params: Promise<{ sopI
         <div className="flex flex-wrap gap-2">
           <AssignSopDialog
             sopId={sop.id}
-            harvests={liveHarvests.map((h) => ({ id: h.id, name: h.name, greenhouse: h.greenhouse.name, startDate: h.startDate.toISOString().slice(0, 10) }))}
+            harvests={liveHarvests.map((h) => ({ id: h.id, name: h.name, greenhouse: h.greenhouse.name, startDate: (h.transplantDate ?? h.startDate).toISOString().slice(0, 10) }))}
           />
           {isSuperuser ? <BuildCourseButton sopId={sop.id} /> : null}
           <SopFormDialog

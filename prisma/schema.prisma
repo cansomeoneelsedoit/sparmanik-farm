@@ -593,6 +593,10 @@ model Harvest {
   variety        String?
   startDate      DateTime      @db.Date @map("start_date")
   endDate        DateTime?     @db.Date @map("end_date")
+  /// Seed sowing date (seeds soaked / into trays) — nursery starts here.
+  sowDate        DateTime?     @db.Date @map("sow_date")
+  /// Transplant date into polybags = HST 0. Every SOP day count runs from this.
+  transplantDate DateTime?     @db.Date @map("transplant_date")
   status         HarvestStatus @default(LIVE)
   /// Manual labour-cost override for this cycle. When set, it REPLACES the
   /// computed hours×rate labour in the P&L — for when reality differs from the
