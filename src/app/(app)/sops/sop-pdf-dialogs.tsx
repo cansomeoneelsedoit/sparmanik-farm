@@ -45,7 +45,7 @@ export function BuildSopFromPdfDialog({ trigger }: { trigger?: React.ReactNode }
       toast.message("Reading the booklet…");
       const r = await buildSopFromPdfs(fd);
       if (r.ok && r.data) {
-        toast.success(`SOP built — ${r.data.days} scheduled days, ${r.data.sections} sections`);
+        toast.success(`SOP built — ${r.data.days} scheduled days, ${r.data.sections} pages. Polishing the pages in the background…`);
         setOpen(false);
         router.push(`/sops/${r.data.id}`);
         router.refresh();
@@ -70,7 +70,7 @@ export function BuildSopFromPdfDialog({ trigger }: { trigger?: React.ReactNode }
           <p className="text-xs text-muted-foreground">
             Upload the English and/or Indonesian booklet. The day-by-day table (HST, EC, water, pulses,
             job for the day) is read exactly as printed, and each page becomes a section with the EN/ID
-            toggle. Upload both books for a fully bilingual SOP.
+            toggle. Upload both books for a fully bilingual SOP. After the build, the pages are polished into clean, book-style layout in the background (a few minutes) — you can use the schedule straight away.
           </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1">
