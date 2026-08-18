@@ -9,6 +9,7 @@ import { requireStaff, requireSuperuser } from "@/server/authz";
 import { recordAction } from "@/server/audit";
 import { processImageToBuffer } from "@/server/uploads";
 import type { TransactionClient } from "@/server/decimal";
+import { PLANT_NOTE_KINDS } from "@/app/(app)/tags/journal-kinds";
 
 export type ActionResult<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
@@ -96,6 +97,8 @@ const assignSchema = z.object({
   produceId: z.string().optional(),
   plantedAt: z.string().min(1),
   seed: z.string().max(200).optional(),
+  /** Seedling tray the plant came from, e.g. "Pink tray Dalmation 001". */
+  tray: z.string().max(120).optional(),
   method: z.string().max(500).optional(),
   notes: z.string().max(2000).optional(),
 });
@@ -140,6 +143,7 @@ export async function assignPlant(input: unknown): Promise<ActionResult> {
           produceId: d.produceId || null,
           plantedAt: new Date(d.plantedAt),
           seed: d.seed?.trim() || null,
+          tray: d.tray?.trim() || null,
           method: d.method?.trim() || null,
           notes: d.notes?.trim() || null,
         },
@@ -209,6 +213,8 @@ export async function updatePlantRecord(formData: FormData): Promise<ActionResul
   if (!recordId) return { ok: false, error: "Missing record" };
   const notesRaw = formData.get("notes");
   const notes = typeof notesRaw === "string" ? notesRaw.trim() : undefined;
+  const trayRaw = formData.get("tray");
+  const tray = typeof trayRaw === "string" ? trayRaw.trim().slice(0, 120) : undefined;
   const clearPhoto = formData.get("clearPhoto") === "1";
   const file = formData.get("photo");
   const hasFile = file instanceof File && file.size > 0;
@@ -227,10 +233,12 @@ export async function updatePlantRecord(formData: FormData): Promise<ActionResul
 
   const data: {
     notes?: string | null;
+    tray?: string | null;
     photoData?: Uint8Array<ArrayBuffer> | null;
     photoMime?: string | null;
   } = {};
   if (notes !== undefined) data.notes = notes || null;
+  if (tray !== undefined) data.tray = tray || null;
   if (hasFile) {
     try {
       const processed = await processImageToBuffer(file as File);
@@ -269,6 +277,131 @@ export async function updatePlantRecord(formData: FormData): Promise<ActionResul
   }
   revalidatePath("/tags");
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Plant journal — dated entries per plant record (spray / feed / issue /
+// observation / result). The tag page shows them as a timeline; the same
+// entries feed training + monitoring later.
+// ---------------------------------------------------------------------------
+
+/** Resolve a record's tag through the org-scoped tag query (tenancy gate). */
+async function ownedRecord(recordId: string) {
+  const rec = await prisma.plantRecord.findUnique({
+    where: { id: recordId },
+    select: { id: true, tagId: true },
+  });
+  if (!rec) return null;
+  const tag = await prisma.plantTag.findFirst({
+    where: { id: rec.tagId },
+    select: { id: true, label: true },
+  });
+  return tag ? { rec, tag } : null;
+}
+
+/**
+ * Add a journal entry (FormData so a photo can ride along). Fields: recordId,
+ * date (YYYY-MM-DD), kind, product?, amount?, note, photo?.
+ */
+export async function addPlantNote(formData: FormData): Promise<ActionResult> {
+  const gate = await requireStaff();
+  if (!gate.ok) return { ok: false, error: gate.error };
+  const recordId = String(formData.get("recordId") ?? "");
+  const date = String(formData.get("date") ?? "").trim();
+  const kindRaw = String(formData.get("kind") ?? "OBSERVATION").toUpperCase();
+  const kind = (PLANT_NOTE_KINDS as readonly string[]).includes(kindRaw) ? kindRaw : "OBSERVATION";
+  const product = String(formData.get("product") ?? "").trim().slice(0, 200) || null;
+  const amount = String(formData.get("amount") ?? "").trim().slice(0, 200) || null;
+  const note = String(formData.get("note") ?? "").trim().slice(0, 4000);
+  const file = formData.get("photo");
+  const hasFile = file instanceof File && file.size > 0;
+  if (!recordId) return { ok: false, error: "Missing plant record" };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, error: "Pick a date" };
+  if (!note && !product && !hasFile) return { ok: false, error: "Write something (or add a photo)" };
+
+  const owned = await ownedRecord(recordId);
+  if (!owned) return { ok: false, error: "Plant record not found" };
+
+  let photoData: Uint8Array<ArrayBuffer> | null = null;
+  let photoMime: string | null = null;
+  if (hasFile) {
+    try {
+      const processed = await processImageToBuffer(file as File);
+      photoData = Uint8Array.from(processed.buffer);
+      photoMime = processed.mime;
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : "Couldn't process the photo" };
+    }
+  }
+
+  try {
+    await prisma.$transaction(async (tx: TransactionClient) => {
+      const created = await tx.plantNote.create({
+        data: {
+          recordId: owned.rec.id,
+          date: new Date(date),
+          kind,
+          product,
+          amount,
+          note: note || (product ? `${product}${amount ? ` — ${amount}` : ""}` : "Photo"),
+          photoData,
+          photoMime,
+          userId: gate.userId,
+        },
+        select: { id: true },
+      });
+      await recordAction(tx, {
+        type: "tags.journal_add",
+        entityType: "PlantTag",
+        entityId: owned.tag.id,
+        description: `Journal ${kind.toLowerCase()} on ${owned.tag.label}${product ? `: ${product}` : ""}`,
+        userId: gate.userId,
+        payload: { tagId: owned.tag.id, recordId: owned.rec.id, noteId: created.id, kind, date },
+      });
+    });
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't save the entry" };
+  }
+  revalidatePath("/tags");
+  return { ok: true };
+}
+
+export async function deletePlantNote(noteId: string): Promise<ActionResult> {
+  const gate = await requireStaff();
+  if (!gate.ok) return { ok: false, error: gate.error };
+  const n = await prisma.plantNote.findUnique({ where: { id: noteId }, select: { id: true, recordId: true } });
+  if (!n) return { ok: false, error: "Entry not found" };
+  const owned = await ownedRecord(n.recordId);
+  if (!owned) return { ok: false, error: "Entry not found" };
+  try {
+    await prisma.$transaction(async (tx: TransactionClient) => {
+      await tx.plantNote.delete({ where: { id: n.id } });
+      await recordAction(tx, {
+        type: "tags.journal_delete",
+        entityType: "PlantTag",
+        entityId: owned.tag.id,
+        description: `Removed a journal entry on ${owned.tag.label}`,
+        userId: gate.userId,
+        payload: { tagId: owned.tag.id, noteId: n.id },
+      });
+    });
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't delete" };
+  }
+  revalidatePath("/tags");
+  return { ok: true };
+}
+
+/** Distinct tray names used in this greenhouse (for the datalist / consistency). */
+export async function listTrays(greenhouseId: string): Promise<string[]> {
+  const rows = (await prisma.plantRecord.findMany({
+    where: { tray: { not: null }, tag: { greenhouseId } },
+    distinct: ["tray"],
+    select: { tray: true },
+    orderBy: { tray: "asc" },
+    take: 200,
+  })) as { tray: string | null }[];
+  return rows.map((r) => r.tray!).filter(Boolean);
 }
 
 /** Look up a tag by its printed label (e.g. "A012-001") so staff can jump to a

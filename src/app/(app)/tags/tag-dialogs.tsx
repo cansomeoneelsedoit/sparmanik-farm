@@ -124,6 +124,8 @@ export function PlantNotesPhotoDialog({
   recordId: string;
   hasPhoto: boolean;
   currentNotes: string | null;
+  currentTray?: string | null;
+  trays?: string[];
   produceName: string;
   trigger?: React.ReactNode;
 }) {
@@ -131,12 +133,14 @@ export function PlantNotesPhotoDialog({
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [notes, setNotes] = useState(currentNotes ?? "");
+  const [tray, setTray] = useState(currentTray ?? "");
   const [preview, setPreview] = useState<string | null>(null);
   const [removePhoto, setRemovePhoto] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   function reset() {
     setNotes(currentNotes ?? "");
+    setTray(currentTray ?? "");
     setPreview(null);
     setRemovePhoto(false);
     if (fileRef.current) fileRef.current.value = "";
@@ -153,6 +157,7 @@ export function PlantNotesPhotoDialog({
       const fd = new FormData();
       fd.set("recordId", recordId);
       fd.set("notes", notes);
+      fd.set("tray", tray);
       const f = fileRef.current?.files?.[0];
       if (f) fd.set("photo", f);
       else if (removePhoto) fd.set("clearPhoto", "1");
@@ -243,13 +248,34 @@ export function PlantNotesPhotoDialog({
           </div>
 
           <div className="space-y-1">
+            <Label htmlFor="ptray">
+              Seedling tray <span className="font-normal text-muted-foreground">(optional)</span>
+            </Label>
+            <Input
+              id="ptray"
+              value={tray}
+              onChange={(e) => setTray(e.target.value)}
+              placeholder="e.g. Pink tray Dalmation 001"
+              list="tray-suggestions-edit"
+              autoCapitalize="words"
+            />
+            {trays && trays.length ? (
+              <datalist id="tray-suggestions-edit">
+                {trays.map((t) => (
+                  <option key={t} value={t} />
+                ))}
+              </datalist>
+            ) : null}
+          </div>
+
+          <div className="space-y-1">
             <Label htmlFor="pnotes">Notes</Label>
             <Textarea
               id="pnotes"
               rows={4}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="How's it doing? Watering, fertigation, pests, anything worth remembering."
+              placeholder="General notes about this plant. For dated sprays / issues / results use the Journal below."
             />
           </div>
         </div>
@@ -341,9 +367,11 @@ export function AssignPlantDialog({
   tagLabel: string;
   produces: { id: string; name: string }[];
   /** The live record's values, when re-staking an occupied tag. */
-  current?: { produceId: string | null; seed: string | null; method: string | null } | null;
+  current?: { produceId: string | null; seed: string | null; method: string | null; tray?: string | null } | null;
   /** Layout variety for this stake — pre-selected when planting a free tag. */
   defaultProduceId?: string | null;
+  /** Tray names already used in this greenhouse — suggestions for consistency. */
+  trays?: string[];
   trigger?: React.ReactNode;
 }) {
   const router = useRouter();
@@ -354,6 +382,7 @@ export function AssignPlantDialog({
   );
   const [plantedAt, setPlantedAt] = useState(today());
   const [seed, setSeed] = useState(current?.seed ?? "");
+  const [tray, setTray] = useState(current?.tray ?? "");
   const [method, setMethod] = useState(current?.method ?? "");
   const [notes, setNotes] = useState("");
 
@@ -364,6 +393,7 @@ export function AssignPlantDialog({
         produceId: produceId || undefined,
         plantedAt,
         seed,
+        tray,
         method,
         notes,
       });
@@ -421,6 +451,28 @@ export function AssignPlantDialog({
               onChange={(e) => setSeed(e.target.value)}
               placeholder="e.g. Known-You G Rock F1, lot 24-08"
             />
+          </div>
+          <div className="space-y-1">
+            <Label>
+              Seedling tray <span className="font-normal text-muted-foreground">(optional)</span>
+            </Label>
+            <Input
+              value={tray}
+              onChange={(e) => setTray(e.target.value)}
+              placeholder="e.g. Pink tray Dalmation 001"
+              list="tray-suggestions"
+              autoCapitalize="words"
+            />
+            {trays && trays.length ? (
+              <datalist id="tray-suggestions">
+                {trays.map((t) => (
+                  <option key={t} value={t} />
+                ))}
+              </datalist>
+            ) : null}
+            <p className="text-[11px] text-muted-foreground">
+              Which tray the seedling was raised in — traces the plant from sowing to stake.
+            </p>
           </div>
           <div className="space-y-1">
             <Label>

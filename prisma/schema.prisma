@@ -1438,6 +1438,9 @@ model PlantRecord {
   produceId String?   @map("produce_id")
   plantedAt DateTime  @db.Date @map("planted_at")
   seed      String?
+  /// Seedling tray the plant came from ("Pink tray Dalmation 001") — provenance
+  /// from sowing to stake, so a tray-wide issue can be traced to every plant.
+  tray      String?
   method    String?
   notes     String?
   /// Optional plant photo, stored INLINE on the row (same pattern as
@@ -1451,7 +1454,34 @@ model PlantRecord {
   tag     PlantTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
   harvest Harvest? @relation(fields: [harvestId], references: [id], onDelete: SetNull)
   produce Produce? @relation(fields: [produceId], references: [id], onDelete: SetNull)
+  journal PlantNote[]
 
   @@index([tagId, endedAt])
   @@map("plant_records")
+}
+
+/// Dated journal entry on one plant (record): "sprayed YaraVita 2 mL/L, leaf
+/// spot easing" — treatments, issues, observations, results. Kept per record so
+/// each crop on a stake carries its own story; the tag page shows the timeline.
+/// Not org-scoped: it anchors via record → tag (org-scoped) like PlantRecord.
+model PlantNote {
+  id        String   @id @default(cuid())
+  recordId  String   @map("record_id")
+  date      DateTime @db.Date
+  /// SPRAY | FEED | ISSUE | OBSERVATION | RESULT | OTHER
+  kind      String   @default("OBSERVATION")
+  /// Product used (spray/feed), free text — "YaraVita Bortrac".
+  product   String?
+  /// Dose / amount, free text — "2 mL/L, 300 mL per plant".
+  amount    String?
+  note      String
+  photoData Bytes?   @map("photo_data")
+  photoMime String?  @map("photo_mime")
+  userId    String?  @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  record PlantRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+
+  @@index([recordId, date])
+  @@map("plant_notes")
 }
