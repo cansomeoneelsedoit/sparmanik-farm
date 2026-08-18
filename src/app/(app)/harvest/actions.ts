@@ -15,7 +15,7 @@ import {
   type InstallChargeRow,
 } from "@/server/depreciation";
 import { Decimal, type TransactionClient } from "@/server/decimal";
-import { adjustHarvestedTotal, createSaleTx, hasOverride } from "@/server/sales";
+import { adjustHarvestedTotal, assertUnsoldAvailable, createSaleTx, hasOverride } from "@/server/sales";
 import { todayWIB } from "@/lib/date";
 
 export type ActionResult<T = void> =
@@ -1030,6 +1030,9 @@ export async function logSale(input: unknown): Promise<ActionResult> {
   try {
     // Single verified sale-creation path, shared with the POS register.
     await prisma.$transaction(async (tx: TransactionClient) => {
+      if (d.fromUnsold === true) {
+        await assertUnsoldAvailable(tx, d.harvestId, d.produceId, new Decimal(d.weight));
+      }
       await createSaleTx(tx, d, { userId, paymentStatus: "PAID" });
       if (d.fromUnsold !== undefined) {
         // "Freshly picked" grows the total by the sale weight; "from unsold"
