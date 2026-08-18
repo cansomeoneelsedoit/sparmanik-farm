@@ -25,6 +25,41 @@ export function detectDocKind(file: { name: string; type: string }): DocKind | n
   return null;
 }
 
+type PdfTextItem = { str: string; transform: number[]; width?: number };
+type PdfPageData = {
+  getTextContent: (o: Record<string, unknown>) => Promise<{ items: PdfTextItem[] }>;
+};
+
+/**
+ * Custom pdf-parse page renderer: (a) put a SPACE between text items on the
+ * same line when there's a horizontal gap (the default glues table cells:
+ * "2100 1050" → "21001050"); (b) end every page with a form-feed so downstream
+ * parsers can split pages (pdf-parse drops page boundaries otherwise).
+ */
+async function renderPdfPage(pageData: PdfPageData): Promise<string> {
+  const tc = await pageData.getTextContent({ normalizeWhitespace: false, disableCombineTextItems: false });
+  let out = "";
+  let lastY: number | null = null;
+  let lastEndX = 0;
+  const NL = String.fromCharCode(10);
+  const FF = String.fromCharCode(12);
+  for (const it of tc.items) {
+    const y = it.transform[5];
+    const x = it.transform[4];
+    if (lastY === null || Math.abs(y - lastY) < 0.5) {
+      const gap = x - lastEndX;
+      const needSpace =
+        out.length > 0 && !out.endsWith(" ") && !out.endsWith(NL) && !it.str.startsWith(" ") && gap > 1.5;
+      out += (needSpace ? " " : "") + it.str;
+    } else {
+      out += NL + it.str;
+    }
+    lastY = y;
+    lastEndX = x + (it.width ?? 0);
+  }
+  return out + NL + FF;
+}
+
 export async function extractDocumentText(file: File): Promise<{ text: string; kind: DocKind; pages?: number }> {
   const kind = detectDocKind(file);
   if (!kind) throw new Error("Unsupported file — use PDF, Word (.docx), or a text file");
@@ -39,7 +74,7 @@ export async function extractDocumentText(file: File): Promise<{ text: string; k
       default?: typeof import("pdf-parse/lib/pdf-parse.js");
     } & typeof import("pdf-parse/lib/pdf-parse.js");
     const parse = mod.default ?? mod;
-    const r = await parse(buf);
+    const r = await parse(buf, { pagerender: (pd: unknown) => renderPdfPage(pd as PdfPageData) });
     text = r.text ?? "";
     pages = r.numpages;
   } else if (kind === "docx") {

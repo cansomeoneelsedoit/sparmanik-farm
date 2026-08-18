@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SopFormDialog } from "@/app/(app)/sops/sop-form-dialog";
 import { SopsBrowser } from "@/app/(app)/sops/sops-browser";
+import { BuildSopFromPdfDialog } from "@/app/(app)/sops/sop-pdf-dialogs";
 
 export const dynamic = "force-dynamic";
 
@@ -24,13 +25,16 @@ export default async function SopsPage({
     <div className="space-y-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-serif text-3xl">SOPs</h1>
-        <SopFormDialog
-          trigger={
-            <Button>
-              <Plus className="h-4 w-4" /> New SOP
-            </Button>
-          }
-        />
+        <div className="flex flex-wrap gap-2">
+          <BuildSopFromPdfDialog />
+          <SopFormDialog
+            trigger={
+              <Button>
+                <Plus className="h-4 w-4" /> New SOP
+              </Button>
+            }
+          />
+        </div>
       </header>
 
       <Tabs value={filter}>
