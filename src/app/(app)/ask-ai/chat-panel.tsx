@@ -3,21 +3,27 @@
 import { useState, useTransition, useRef, useEffect, type ClipboardEvent, type DragEvent } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Paperclip, ArrowUp, X, Sparkles } from "lucide-react";
+import { Paperclip, ArrowUp, X, Sparkles, FileText } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { cn } from "@/lib/utils";
 import { sendAiMessage, uploadAiAttachment } from "@/app/(app)/ask-ai/actions";
 
-export type Attachment = { path: string; mimeType: string; width?: number; height?: number };
-export type AiProvider = "claude" | "gemini";
+export type Attachment = { path: string; mimeType: string; width?: number; height?: number; name?: string };
+export type AiProvider = "auto" | "claude" | "gemini";
+
+const DOC_ACCEPT = "image/*,.pdf,.docx,.txt,.md,.csv,application/pdf,text/plain";
+const isDocFile = (f: File) =>
+  !f.type.startsWith("image/") &&
+  (/\.(pdf|docx|txt|md|markdown|csv|tsv|json)$/i.test(f.name) || f.type === "application/pdf" || f.type.startsWith("text/"));
 type Msg = { id: string; role: "user" | "assistant"; content: string; attachments?: Attachment[] };
 
 const MAX_ATTACHMENTS = 4;
 const PROVIDER_STORAGE_KEY = "askai.provider";
 
 const PROVIDER_LABELS: Record<AiProvider, string> = {
+  auto: "Farm AI (your ranked keys)",
   claude: "Claude (Sonnet 4.6)",
   gemini: "Gemini 2.5 Flash-Lite",
 };
@@ -46,7 +52,7 @@ export function ChatPanel({
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [provider, setProvider] = useState<AiProvider>(() => providers[0] ?? "claude");
+  const [provider, setProvider] = useState<AiProvider>(() => providers[0] ?? "auto");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -97,9 +103,9 @@ export function ChatPanel({
       toast.error(`Up to ${MAX_ATTACHMENTS} attachments per message`);
       return;
     }
-    const toUpload = files.filter((f) => f.type.startsWith("image/")).slice(0, room);
+    const toUpload = files.filter((f) => f.type.startsWith("image/") || isDocFile(f)).slice(0, room);
     if (toUpload.length === 0) {
-      toast.error("Only images are supported");
+      toast.error("Attach images, PDFs, Word (.docx) or text files");
       return;
     }
     setUploading(true);
@@ -126,7 +132,7 @@ export function ChatPanel({
     for (const item of items) {
       if (item.kind === "file") {
         const f = item.getAsFile();
-        if (f && f.type.startsWith("image/")) files.push(f);
+        if (f && (f.type.startsWith("image/") || isDocFile(f))) files.push(f);
       }
     }
     if (files.length > 0) {
@@ -230,6 +236,8 @@ export function ChatPanel({
               <AttachmentChip
                 key={a.path}
                 path={a.path}
+                name={a.name}
+                isDoc={a.mimeType.startsWith("text/")}
                 onRemove={() => setAttachments((prev) => prev.filter((_, idx) => idx !== i))}
               />
             ))}
@@ -241,7 +249,7 @@ export function ChatPanel({
             type="button"
             disabled={disabled || uploading || attachments.length >= MAX_ATTACHMENTS}
             onClick={() => fileInputRef.current?.click()}
-            title="Attach images"
+            title="Attach images, PDF, Word or text files"
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted disabled:opacity-40"
           >
             <Paperclip className="h-4 w-4" />
@@ -249,7 +257,7 @@ export function ChatPanel({
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept={DOC_ACCEPT}
             multiple
             className="hidden"
             onChange={(e) => {
@@ -341,18 +349,36 @@ function EmptyState({ disabled, onPick }: { disabled: boolean; onPick: (s: strin
 }
 
 function UserBubble({ content, attachments }: { content: string; attachments?: Attachment[] }) {
-  const hasImages = attachments && attachments.length > 0;
+  const docs = (attachments ?? []).filter((a) => a.mimeType.startsWith("text/"));
+  const images = (attachments ?? []).filter((a) => !a.mimeType.startsWith("text/"));
+  const hasImages = images.length > 0;
   return (
     <div className="flex justify-end">
       <div className="max-w-[85%] space-y-2 rounded-2xl bg-accent/10 px-4 py-3 text-sm">
+        {docs.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {docs.map((a) => (
+              <a
+                key={a.path}
+                href={`/api/uploads/${a.path}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex max-w-full items-center gap-1 rounded-md border bg-background/60 px-2 py-1 text-xs hover:bg-background"
+              >
+                <FileText className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{a.name ?? a.path.split("/").pop()}</span>
+              </a>
+            ))}
+          </div>
+        ) : null}
         {hasImages ? (
           <div
             className={cn(
               "grid gap-2",
-              attachments!.length === 1 ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2",
+              images.length === 1 ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2",
             )}
           >
-            {attachments!.map((a) => (
+            {images.map((a) => (
               <a
                 key={a.path}
                 href={`/api/uploads/${a.path}`}
@@ -413,7 +439,35 @@ function AssistantBubble({ content }: { content: string }) {
   );
 }
 
-function AttachmentChip({ path, onRemove }: { path: string; onRemove: () => void }) {
+function AttachmentChip({
+  path,
+  name,
+  isDoc,
+  onRemove,
+}: {
+  path: string;
+  name?: string;
+  isDoc?: boolean;
+  onRemove: () => void;
+}) {
+  if (isDoc) {
+    return (
+      <div className="relative flex h-14 max-w-[14rem] items-center gap-2 rounded-md border bg-muted/30 px-2 pr-7">
+        <FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
+        <span className="truncate text-xs" title={name ?? path}>
+          {name ?? path.split("/").pop()}
+        </span>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="absolute right-0.5 top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-background/90 text-foreground shadow-sm hover:bg-background"
+          title="Remove"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </div>
+    );
+  }
   return (
     <div className="relative h-14 w-14 overflow-hidden rounded-md border">
       {/* eslint-disable-next-line @next/next/no-img-element */}

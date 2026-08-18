@@ -6,7 +6,8 @@ import { z } from "zod";
 import { prisma } from "@/server/prisma";
 import { auth } from "@/auth";
 import { askAi, type AiProvider, type ChatMessage, type ChatAttachment } from "@/server/ai";
-import { saveImageUpload } from "@/server/uploads";
+import { saveFileUpload, saveImageUpload } from "@/server/uploads";
+import { extractDocumentText } from "@/server/doc-text";
 
 export type ActionResult<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
@@ -15,13 +16,15 @@ const attachmentSchema = z.object({
   mimeType: z.string().min(1),
   width: z.number().int().nonnegative().optional(),
   height: z.number().int().nonnegative().optional(),
+  /** Display name for document attachments (original filename). */
+  name: z.string().max(200).optional(),
 });
 
 const schema = z.object({
   conversationId: z.string().min(1),
   content: z.string().max(8000),
   attachments: z.array(attachmentSchema).max(4).optional(),
-  provider: z.enum(["claude", "gemini"]).default("claude"),
+  provider: z.enum(["auto", "claude", "gemini"]).default("auto"),
 });
 
 export async function sendAiMessage(
@@ -133,21 +136,38 @@ export async function deleteConversation(id: string): Promise<ActionResult> {
 
 export async function uploadAiAttachment(
   formData: FormData,
-): Promise<ActionResult<{ path: string; mimeType: string; width: number; height: number }>> {
+): Promise<
+  ActionResult<{ path: string; mimeType: string; width: number; height: number; name?: string; chars?: number }>
+> {
   const session = await auth();
   if (!session?.user?.id) return { ok: false, error: "Not authenticated" };
   const file = formData.get("file");
   if (!(file instanceof File)) return { ok: false, error: "No file provided" };
-  if (!file.type.startsWith("image/")) return { ok: false, error: "Images only" };
   try {
-    const saved = await saveImageUpload(file, "ai");
+    if (file.type.startsWith("image/")) {
+      const saved = await saveImageUpload(file, "ai");
+      return {
+        ok: true,
+        data: { path: saved.path, mimeType: "image/webp", width: saved.width, height: saved.height },
+      };
+    }
+    // Documents (PDF / Word / text): extract the text once at upload and store
+    // THAT — every provider in the chain can read plain text, and the model
+    // never has to re-parse the file on each turn.
+    const { text, kind, pages } = await extractDocumentText(file);
+    const base = file.name.replace(/\.[^.]+$/, "").slice(0, 80) || "document";
+    const header = `# ${file.name}${pages ? ` (${pages} pages)` : ""}\n\n`;
+    const txt = new File([header + text], `${base}.txt`, { type: "text/plain" });
+    const saved = await saveFileUpload(txt, "ai");
     return {
       ok: true,
       data: {
         path: saved.path,
-        mimeType: "image/webp",
-        width: saved.width,
-        height: saved.height,
+        mimeType: "text/plain",
+        width: 0,
+        height: 0,
+        name: `${file.name} (${kind}${pages ? `, ${pages} pp` : ""})`,
+        chars: text.length,
       },
     };
   } catch (e) {
