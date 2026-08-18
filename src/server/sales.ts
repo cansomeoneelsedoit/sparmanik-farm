@@ -53,6 +53,38 @@ export function hasOverride(v: string | undefined): v is string {
  * produce has no recorded total. Shared by logSale/updateSale/deleteSale, the
  * POS register, and the undo handlers.
  */
+/**
+ * Guard for "sell from the unsold pile": re-read the LIVE pool under the same
+ * advisory lock and refuse a sale bigger than what's actually left. Without
+ * this a stale page (opened before someone else's sale) can over-sell and the
+ * clamp quietly inflates the harvest total instead of complaining.
+ */
+export async function assertUnsoldAvailable(
+  tx: TransactionClient,
+  harvestId: string,
+  produceId: string,
+  weightKg: Decimal,
+): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${harvestId}:${produceId}:pool`}))`;
+  const hp = (await tx.harvestProduce.findUnique({
+    where: { harvestId_produceId: { harvestId, produceId } },
+    select: { harvestedKg: true },
+  })) as { harvestedKg: Decimal | null } | null;
+  if (hp?.harvestedKg == null) return; // no pool tracked → nothing to guard
+  const [soldAgg, dispAgg] = await Promise.all([
+    tx.sale.aggregate({ where: { harvestId, produceId }, _sum: { weight: true } }),
+    tx.harvestDisposition.aggregate({ where: { harvestId, produceId }, _sum: { weight: true } }),
+  ]);
+  const unsold = new Decimal(hp.harvestedKg)
+    .minus(new Decimal(soldAgg._sum.weight ?? 0))
+    .minus(new Decimal(dispAgg._sum.weight ?? 0));
+  if (weightKg.gt(unsold.plus("0.0005"))) {
+    throw new Error(
+      `Only ${Decimal.max(unsold, 0).toDecimalPlaces(3).toString()} kg is still unsold — refresh the page and try again.`,
+    );
+  }
+}
+
 export async function adjustHarvestedTotal(
   tx: TransactionClient,
   harvestId: string,
