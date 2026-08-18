@@ -21,6 +21,7 @@ import { Decimal } from "@/server/decimal";
 import { installDepreciation } from "@/server/depreciation";
 import { localizedItemName } from "@/lib/item-name";
 import { RecordUsageDialog } from "@/app/(app)/harvest/[harvestId]/record-usage-dialog";
+import { UsageTable } from "@/app/(app)/harvest/[harvestId]/usage-table";
 import { ReuseSetupDialog } from "@/app/(app)/harvest/[harvestId]/reuse-setup-dialog";
 import {
   InstallAssetDialog,
@@ -31,6 +32,8 @@ import { LogDispositionDialog } from "@/app/(app)/harvest/[harvestId]/log-dispos
 import { SetHarvestedDialog } from "@/app/(app)/harvest/[harvestId]/set-harvested-dialog";
 import { LogLabourDialog } from "@/app/(app)/harvest/[harvestId]/log-labour-dialog";
 import { LabourOverrideDialog } from "@/app/(app)/harvest/[harvestId]/labour-override-dialog";
+import { AddSalaryDialog, RemoveSalaryButton } from "@/app/(app)/harvest/[harvestId]/salary-dialog";
+import { salaryAccrual, salaryDays } from "@/server/salary";
 import { CheckInAssetDialog } from "@/app/(app)/harvest/[harvestId]/check-in-asset-dialog";
 import { SetDepreciationDialog } from "@/app/(app)/inventory/set-depreciation-dialog";
 import { ExpenseFormDialog } from "@/app/(app)/expenses/expense-form-dialog";
@@ -168,6 +171,27 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
     Number(pl.depreciationCost) +
     Number(pl.expenseCost)
   ).toFixed(4);
+
+  const settingRow = (await prisma.setting.findFirst({ select: { exchangeRate: true } })) as { exchangeRate: Decimal } | null;
+  const exchangeRateStr = settingRow ? new Decimal(settingRow.exchangeRate).toFixed(4) : null;
+
+  // Fixed monthly salaries on this cycle (accrue daily; see src/server/salary.ts).
+  const salaryRows = (await prisma.harvestSalary.findMany({
+    where: { harvestId: harvest.id },
+    orderBy: { startDate: "asc" },
+    select: { id: true, monthlyAmount: true, startDate: true, endDate: true, note: true, staff: { select: { name: true } } },
+  })) as { id: string; monthlyAmount: Decimal; startDate: Date; endDate: Date | null; note: string | null; staff: { name: string } }[];
+  const salaryView = salaryRows.map((r) => ({
+    id: r.id,
+    name: r.staff.name,
+    monthly: Number(r.monthlyAmount),
+    from: r.startDate.toISOString().slice(0, 10),
+    to: r.endDate ? r.endDate.toISOString().slice(0, 10) : null,
+    note: r.note,
+    days: salaryDays(r, harvest.endDate ?? null),
+    accrued: salaryAccrual(r, harvest.endDate ?? null),
+  }));
+  const salaryTotal = salaryView.reduce((s, r) => s.plus(r.accrued), new Decimal(0));
 
   // Labour lines for this harvest — resolves rates via effective-from history
   const labourLines = await prisma.wageEntryLine.findMany({
@@ -949,36 +973,19 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
           {harvest.usages.length === 0 ? (
             <div className="p-12 text-center text-muted-foreground">No usage recorded yet.</div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Item</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Cost</TableHead>
-                  <TableHead className="w-10" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(harvest.usages as { id: string; date: Date; item: { name: string; unit: string }; qty: Decimal; displayQty: string | null; consumptions: { qty: Decimal; unitCost: Decimal }[] }[]).map((u) => {
-                  const cost = u.consumptions.reduce((s: Decimal, c) => s.plus(new Decimal(c.qty).times(c.unitCost)), new Decimal(0));
-                  return (
-                    <TableRow key={u.id}>
-                      <TableCell className="text-muted-foreground">{u.date.toISOString().slice(0, 10)}</TableCell>
-                      <TableCell>{itemName(u.item)}</TableCell>
-                      <TableCell className="text-right">{u.displayQty || `${Number(u.qty)} ${u.item.unit}`}</TableCell>
-                      <TableCell className="text-right"><Money value={cost.toFixed(4)} /></TableCell>
-                      <TableCell className="p-0"><DeleteUsageButton id={u.id} /></TableCell>
-                    </TableRow>
-                  );
-                })}
-                <TableRow className="border-t-2 bg-muted/20 font-semibold hover:bg-muted/20">
-                  <TableCell colSpan={3} className="text-right">Total</TableCell>
-                  <TableCell className="text-right text-red-600"><Money value={pl.usageCost} /></TableCell>
-                  <TableCell />
-                </TableRow>
-              </TableBody>
-            </Table>
+            <UsageTable
+              rows={(harvest.usages as { id: string; date: Date; item: { name: string; nameEn: string | null; unit: string }; qty: Decimal; displayQty: string | null; consumptions: { qty: Decimal; unitCost: Decimal }[] }[]).map((u) => ({
+                id: u.id,
+                date: u.date.toISOString().slice(0, 10),
+                name: itemName(u.item),
+                qty: u.displayQty || `${Number(u.qty)} ${u.item.unit}`,
+                cost: u.consumptions
+                  .reduce((s: Decimal, c) => s.plus(new Decimal(c.qty).times(c.unitCost)), new Decimal(0))
+                  .toFixed(0),
+              }))}
+              total={new Decimal(pl.usageCost).toFixed(0)}
+              exchangeRate={exchangeRateStr}
+            />
           )}
         </CardContent>
       </Card>
@@ -1038,17 +1045,69 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
               </p>
             ) : null}
           </div>
-          <LabourOverrideDialog
-            key={`${harvest.manualLabourCost ?? ""}:${computedLabour}`}
-            harvestId={harvest.id}
-            current={labourOverridden ? String(harvest.manualLabourCost) : null}
-            computed={String(computedLabour)}
-            note={harvest.manualLabourNote ?? null}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            {harvest.status === "LIVE" ? (
+              <AddSalaryDialog
+                harvestId={harvest.id}
+                staff={staffForDialog.map((s: { id: string; name: string }) => ({ id: s.id, name: s.name }))}
+                defaultStart={harvest.startDate.toISOString().slice(0, 10)}
+              />
+            ) : null}
+            <LabourOverrideDialog
+              key={`${harvest.manualLabourCost ?? ""}:${computedLabour}`}
+              harvestId={harvest.id}
+              current={labourOverridden ? String(harvest.manualLabourCost) : null}
+              computed={String(computedLabour + Number(salaryTotal))}
+              note={harvest.manualLabourNote ?? null}
+            />
+          </div>
         </CardHeader>
         <CardContent className="p-0">
+          {salaryView.length > 0 ? (
+            <div className="border-b">
+              <div className="px-4 pt-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Fixed salaries — accrue automatically each day
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead className="text-right">Monthly</TableHead>
+                    <TableHead>Period</TableHead>
+                    <TableHead className="text-right">Days</TableHead>
+                    <TableHead className="text-right">Accrued to date</TableHead>
+                    <TableHead className="w-10" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {salaryView.map((r) => (
+                    <TableRow key={r.id}>
+                      <TableCell>
+                        {r.name}
+                        {r.note ? <span className="ml-1 text-xs text-muted-foreground">· {r.note}</span> : null}
+                      </TableCell>
+                      <TableCell className="text-right"><Money value={String(r.monthly)} /></TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {r.from} → {r.to ?? (harvest.status === "LIVE" ? "ongoing" : "cycle end")}
+                      </TableCell>
+                      <TableCell className="text-right">{r.days}</TableCell>
+                      <TableCell className="text-right font-medium"><Money value={r.accrued.toFixed(4)} /></TableCell>
+                      <TableCell className="p-0 text-center"><RemoveSalaryButton id={r.id} name={r.name} /></TableCell>
+                    </TableRow>
+                  ))}
+                  <TableRow className="bg-muted/20 font-semibold hover:bg-muted/20">
+                    <TableCell colSpan={4} className="text-right">Salaries to date</TableCell>
+                    <TableCell className="text-right text-red-600"><Money value={salaryTotal.toFixed(4)} /></TableCell>
+                    <TableCell />
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          ) : null}
           {labourRows.length === 0 && !labourOverridden ? (
-            <div className="p-12 text-center text-muted-foreground">No labour logged against this harvest.</div>
+            <div className="p-12 text-center text-muted-foreground">
+              {salaryView.length ? "No hourly labour logged — fixed salaries above cover this cycle so far." : "No labour logged against this harvest."}
+            </div>
           ) : (
             <Table>
               <TableHeader>
