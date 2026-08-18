@@ -205,6 +205,7 @@ model Organization {
   harvests        Harvest[]
   harvestUsages   HarvestUsage[]
   harvestAssets   HarvestAsset[]
+  harvestSalaries HarvestSalary[]
   sales           Sale[]
   dispositions    HarvestDisposition[]
   tasks           Task[]
@@ -606,6 +607,7 @@ model Harvest {
   produces         HarvestProduce[]
   assets           HarvestAsset[]
   usages           HarvestUsage[]
+  salaries         HarvestSalary[]
   sales            Sale[]
   dispositions     HarvestDisposition[]
   wageLines        WageEntryLine[]
@@ -873,6 +875,7 @@ model Staff {
   user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
   rates        StaffRate[]
   wageEntries  WageEntry[]
+  salaries     HarvestSalary[]
   tasks        Task[]       @relation("AssignedTasks")
   dispositions HarvestDisposition[]
 
@@ -891,6 +894,30 @@ model StaffRate {
 
   @@index([staffId, effectiveFrom])
   @@map("staff_rates")
+}
+
+/// Fixed monthly salary assigned to a cycle: accrues automatically day by day
+/// (monthly ÷ days in that calendar month) from `startDate` until `endDate`,
+/// the harvest's end, or today — whichever comes first. Adds to labour cost
+/// alongside hourly wage lines (unless the harvest's manual labour override is set).
+model HarvestSalary {
+  id             String    @id @default(cuid())
+  organizationId String?   @map("organization_id")
+  harvestId      String    @map("harvest_id")
+  staffId        String    @map("staff_id")
+  monthlyAmount  Decimal   @db.Decimal(18, 4) @map("monthly_amount")
+  startDate      DateTime  @db.Date @map("start_date")
+  endDate        DateTime? @db.Date @map("end_date")
+  note           String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  harvest      Harvest       @relation(fields: [harvestId], references: [id], onDelete: Cascade)
+  staff        Staff         @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([harvestId])
+  @@map("harvest_salaries")
 }
 
 model WageEntry {

@@ -1507,3 +1507,86 @@ export async function listCustomers(): Promise<
   })) as { id: string; name: string; type: string; email: string | null }[];
   return rows;
 }
+
+// ============================================================================
+// Fixed monthly salaries on a cycle — accrue day by day into labour cost.
+// ============================================================================
+
+const salarySchema = z.object({
+  harvestId: z.string().min(1),
+  staffId: z.string().min(1),
+  monthlyAmount: z.string().refine((v) => Number(v) > 0, "Enter a monthly amount"),
+  startDate: z.string().min(1),
+  endDate: z.string().optional(),
+  note: z.string().max(200).optional(),
+});
+
+export async function addHarvestSalary(input: unknown): Promise<ActionResult> {
+  const gate = await requireStaff();
+  if (!gate.ok) return { ok: false, error: gate.error };
+  const parsed = salarySchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Validation failed" };
+  const d = parsed.data;
+  const [h, staff] = await Promise.all([
+    prisma.harvest.findFirst({ where: { id: d.harvestId }, select: { id: true } }),
+    prisma.staff.findFirst({ where: { id: d.staffId }, select: { id: true, name: true } }),
+  ]);
+  if (!h) return { ok: false, error: "Harvest not found" };
+  if (!staff) return { ok: false, error: "Staff member not found" };
+  try {
+    await prisma.$transaction(async (tx: TransactionClient) => {
+      const row = await tx.harvestSalary.create({
+        data: {
+          harvestId: d.harvestId,
+          staffId: d.staffId,
+          monthlyAmount: new Decimal(d.monthlyAmount),
+          startDate: new Date(d.startDate),
+          endDate: d.endDate ? new Date(d.endDate) : null,
+          note: d.note?.trim() || null,
+        },
+        select: { id: true },
+      });
+      await recordAction(tx, {
+        type: "harvest.salary_add",
+        entityType: "Harvest",
+        entityId: d.harvestId,
+        description: `Fixed salary: ${staff.name} Rp ${Number(d.monthlyAmount).toLocaleString("id-ID")}/month from ${d.startDate}`,
+        userId: gate.userId,
+        payload: { harvestId: d.harvestId, salaryId: row.id, staffId: d.staffId, monthlyAmount: d.monthlyAmount },
+      });
+    });
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed" };
+  }
+  revalidatePath(`/harvest/${d.harvestId}`);
+  revalidatePath("/financials");
+  return { ok: true };
+}
+
+export async function removeHarvestSalary(id: string): Promise<ActionResult> {
+  const gate = await requireStaff();
+  if (!gate.ok) return { ok: false, error: gate.error };
+  const row = await prisma.harvestSalary.findFirst({
+    where: { id },
+    select: { id: true, harvestId: true, staff: { select: { name: true } } },
+  });
+  if (!row) return { ok: false, error: "Not found" };
+  try {
+    await prisma.$transaction(async (tx: TransactionClient) => {
+      await tx.harvestSalary.delete({ where: { id: row.id } });
+      await recordAction(tx, {
+        type: "harvest.salary_remove",
+        entityType: "Harvest",
+        entityId: row.harvestId,
+        description: `Removed fixed salary for ${row.staff.name}`,
+        userId: gate.userId,
+        payload: { harvestId: row.harvestId, salaryId: row.id },
+      });
+    });
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed" };
+  }
+  revalidatePath(`/harvest/${row.harvestId}`);
+  revalidatePath("/financials");
+  return { ok: true };
+}

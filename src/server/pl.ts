@@ -1,6 +1,7 @@
 import { cache } from "react";
 
 import { prisma } from "@/server/prisma";
+import { salaryAccrual } from "@/server/salary";
 import { Decimal } from "@/server/decimal";
 import { installDepreciation, type InstallChargeRow } from "@/server/depreciation";
 
@@ -28,7 +29,7 @@ async function effectiveRate(staffId: string, date: Date): Promise<Decimal> {
 }
 
 export const getHarvestPL = cache(async (harvestId: string): Promise<HarvestPL> => {
-  const [harvest, sales, usages, depreciableAssets, wageLines, expenses] = await Promise.all([
+  const [harvest, sales, usages, depreciableAssets, wageLines, expenses, salaries] = await Promise.all([
     prisma.harvest.findUnique({
       where: { id: harvestId },
       select: { manualLabourCost: true, endDate: true },
@@ -54,6 +55,10 @@ export const getHarvestPL = cache(async (harvestId: string): Promise<HarvestPL> 
       select: { hours: true, wageEntry: { select: { staffId: true, date: true } } },
     }),
     prisma.expense.findMany({ where: { harvestId }, select: { amount: true } }),
+    prisma.harvestSalary.findMany({
+      where: { harvestId },
+      select: { monthlyAmount: true, startDate: true, endDate: true },
+    }),
   ]);
 
   const revenue = sales.reduce(
@@ -90,6 +95,10 @@ export const getHarvestPL = cache(async (harvestId: string): Promise<HarvestPL> 
     for (const line of wageLines as { hours: Decimal; wageEntry: { staffId: string; date: Date } }[]) {
       const rate = await effectiveRate(line.wageEntry.staffId, line.wageEntry.date);
       labourCost = labourCost.plus(new Decimal(line.hours).times(rate));
+    }
+    // Fixed monthly salaries assigned to the cycle accrue day by day.
+    for (const s of salaries as { monthlyAmount: Decimal; startDate: Date; endDate: Date | null }[]) {
+      labourCost = labourCost.plus(salaryAccrual(s, harvestEnd));
     }
   }
 
