@@ -22,6 +22,8 @@ import { installDepreciation } from "@/server/depreciation";
 import { localizedItemName } from "@/lib/item-name";
 import { RecordUsageDialog } from "@/app/(app)/harvest/[harvestId]/record-usage-dialog";
 import { UsageTable } from "@/app/(app)/harvest/[harvestId]/usage-table";
+import { sopTodayCards } from "@/server/sop-today";
+import { SopTodayCard } from "@/components/shared/sop-today-card";
 import { ReuseSetupDialog } from "@/app/(app)/harvest/[harvestId]/reuse-setup-dialog";
 import {
   InstallAssetDialog,
@@ -172,6 +174,7 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
     Number(pl.expenseCost)
   ).toFixed(4);
 
+  const sopCards = harvest.status === "LIVE" ? await sopTodayCards({ harvestId: harvest.id }) : [];
   const settingRow = (await prisma.setting.findFirst({ select: { exchangeRate: true } })) as { exchangeRate: Decimal } | null;
   const exchangeRateStr = settingRow ? new Decimal(settingRow.exchangeRate).toFixed(4) : null;
 
@@ -739,6 +742,14 @@ export default async function HarvestDetailPage({ params }: { params: Promise<{ 
           </div>
         ) : null}
       </div>
+
+      {sopCards.length ? (
+        <div className="space-y-2">
+          {sopCards.map((c) => (
+            <SopTodayCard key={c.assignmentId} card={c} compact />
+          ))}
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
         <StatCard label="Revenue" value={<MoneyDual value={pl.revenue} align="start" />} accent="green" />

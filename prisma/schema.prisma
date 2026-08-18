@@ -206,6 +206,7 @@ model Organization {
   harvestUsages   HarvestUsage[]
   harvestAssets   HarvestAsset[]
   harvestSalaries HarvestSalary[]
+  harvestSops     HarvestSop[]
   sales           Sale[]
   dispositions    HarvestDisposition[]
   tasks           Task[]
@@ -608,6 +609,7 @@ model Harvest {
   assets           HarvestAsset[]
   usages           HarvestUsage[]
   salaries         HarvestSalary[]
+  sops             HarvestSop[]
   sales            Sale[]
   dispositions     HarvestDisposition[]
   wageLines        WageEntryLine[]
@@ -1050,11 +1052,16 @@ model Sop {
   version        Int       @default(1)
   status         SopStatus @default(ACTIVE)
   coverPhotoPath String?   @map("cover_photo_path")
+  /// Source booklets this SOP was built from (uploads-relative), when built from PDF.
+  sourceEnPath   String?   @map("source_en_path")
+  sourceIdPath   String?   @map("source_id_path")
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   steps        SopStep[]
+  days         SopDay[]
+  assignments  HarvestSop[]
 
   @@index([organizationId])
   @@index([status])
@@ -1073,6 +1080,48 @@ model SopStep {
 
   @@unique([sopId, position])
   @@map("sop_steps")
+}
+
+/// One row of an SOP's day-by-day schedule (HST = days after transplant).
+/// Numbers are parsed straight from the booklet's table, so they're exact.
+model SopDay {
+  id         String  @id @default(cuid())
+  sopId      String  @map("sop_id")
+  day        Int
+  stage      String?
+  ec         Int?
+  ppm        Int?
+  sopPerTank String? @map("sop_per_tank")
+  waterMl    Int?    @map("water_ml")
+  pulses     String?
+  times      String?
+  jobEn      String? @map("job_en")
+  jobId      String? @map("job_id")
+
+  sop Sop @relation(fields: [sopId], references: [id], onDelete: Cascade)
+
+  @@unique([sopId, day])
+  @@map("sop_days")
+}
+
+/// An SOP running on a live cycle. `hst0` is the transplant date, so today's
+/// instruction = the SopDay whose day == today − hst0. Feeds the Tasks page
+/// "today's SOP" alerts and the harvest page strip.
+model HarvestSop {
+  id             String   @id @default(cuid())
+  organizationId String?  @map("organization_id")
+  harvestId      String   @map("harvest_id")
+  sopId          String   @map("sop_id")
+  hst0           DateTime @db.Date
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  harvest      Harvest       @relation(fields: [harvestId], references: [id], onDelete: Cascade)
+  sop          Sop           @relation(fields: [sopId], references: [id], onDelete: Cascade)
+
+  @@unique([harvestId, sopId])
+  @@index([organizationId])
+  @@map("harvest_sops")
 }
 
 model Video {

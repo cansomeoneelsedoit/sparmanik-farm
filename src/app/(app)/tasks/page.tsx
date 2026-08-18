@@ -7,6 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AddTaskDialog } from "@/app/(app)/tasks/add-task-dialog";
 import { TaskCard } from "@/app/(app)/tasks/task-card";
+import { sopTodayCards } from "@/server/sop-today";
+import { SopTodayCard } from "@/components/shared/sop-today-card";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +28,7 @@ export default async function TasksPage() {
   const t = await getTranslations("tasks");
   const today = new Date(); today.setHours(0, 0, 0, 0);
 
-  const [tasks, staff, harvests] = await Promise.all([
+  const [tasks, staff, harvests, sopCards] = await Promise.all([
     prisma.task.findMany({
       orderBy: [{ status: "asc" }, { dueDate: "asc" }],
       select: {
@@ -43,6 +45,7 @@ export default async function TasksPage() {
     }),
     prisma.staff.findMany({ orderBy: { name: "asc" } }),
     prisma.harvest.findMany({ where: { status: "LIVE" }, select: { id: true, name: true } }),
+    sopTodayCards(),
   ]);
 
   const rows = tasks as TaskRow[];
@@ -63,6 +66,15 @@ export default async function TasksPage() {
           trigger={<Button><Plus className="h-4 w-4" /> {t("addTask")}</Button>}
         />
       </header>
+
+      {sopCards.length ? (
+        <section className="space-y-2">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Today on the SOP</h2>
+          {sopCards.map((c) => (
+            <SopTodayCard key={c.assignmentId} card={c} />
+          ))}
+        </section>
+      ) : null}
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat label={t("overdue")} count={overdue.length} accent="red" />
