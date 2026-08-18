@@ -103,7 +103,7 @@ export default async function AskAiPage({
     attachments: parseAttachments(m.attachments),
   }));
 
-  const providers = availableProviders();
+  const providers = await availableProviders();
   const hasAnyProvider = providers.length > 0;
 
   return (
@@ -112,7 +112,7 @@ export default async function AskAiPage({
         <div className="mx-auto w-full max-w-3xl px-4 pt-4">
           <Card>
             <CardContent className="p-4 text-sm text-muted-foreground">
-              Set <code>ANTHROPIC_API_KEY</code> or <code>GEMINI_API_KEY</code> in your environment to enable Ask AI.
+              Add a key under Settings → AI keys (or set <code>ANTHROPIC_API_KEY</code> / <code>GEMINI_API_KEY</code>) to enable Ask AI.
             </CardContent>
           </Card>
         </div>

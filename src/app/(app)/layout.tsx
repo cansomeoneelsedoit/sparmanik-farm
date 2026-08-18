@@ -56,7 +56,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     );
   }
 
-  const echoEnabled = availableProviders().length > 0;
+  const echoEnabled = (await availableProviders()).length > 0;
   const isSuperuser = session.user.role === "SUPERUSER";
 
   // Pulled at layout time so the sidebar can render a count chip beside the

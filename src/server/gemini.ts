@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI, type Content, type Part } from "@google/generative-ai";
 
 import { readUploadAsBase64 } from "@/server/uploads";
-import type { ChatAttachment, ChatMessage } from "@/server/ai";
+import { isTextAttachment, readTextAttachment, type ChatAttachment, type ChatMessage } from "@/server/ai";
 
 const SYSTEM_PROMPT = `You are the operations assistant for Sparmanik Farm, a hydroponic farm in Indonesia growing primarily melon, chili, and seasonal greens. You help the operator make decisions about inventory, harvests, tasks, staff scheduling, and nutrient recipes. Be concise (3-5 sentences unless detailed steps are requested), practical, and pragmatic. Use IDR (rupiah) for prices. When the user attaches a photo, describe what you see and answer their question using both the image and the farm context. When uncertain, ask for the missing detail rather than guessing.`;
 
@@ -16,6 +16,10 @@ async function attachmentsToParts(attachments: ChatAttachment[] | undefined): Pr
   if (!attachments || attachments.length === 0) return [];
   const parts: Part[] = [];
   for (const a of attachments) {
+    if (isTextAttachment(a)) {
+      parts.push({ text: await readTextAttachment(a) });
+      continue;
+    }
     if (!SUPPORTED_VISION_MEDIA.has(a.mimeType)) continue;
     const data = await readUploadAsBase64(a.path);
     parts.push({ inlineData: { data, mimeType: a.mimeType } });

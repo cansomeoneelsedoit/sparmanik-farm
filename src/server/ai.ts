@@ -2,11 +2,11 @@ import Anthropic from "@anthropic-ai/sdk";
 
 import { prisma } from "@/server/prisma";
 import { Decimal } from "@/server/decimal";
-import { readUploadAsBase64 } from "@/server/uploads";
+import { readUpload, readUploadAsBase64 } from "@/server/uploads";
 
 const SYSTEM_PROMPT = `You are the operations assistant for Sparmanik Farm, a hydroponic farm in Indonesia growing primarily melon, chili, and seasonal greens. You help the operator make decisions about inventory, harvests, tasks, staff scheduling, and nutrient recipes. Be concise (3-5 sentences unless detailed steps are requested), practical, and pragmatic. Use IDR (rupiah) for prices. When the user attaches a photo, describe what you see and answer their question using both the image and the farm context. When uncertain, ask for the missing detail rather than guessing.`;
 
-export type ChatAttachment = { path: string; mimeType: string };
+export type ChatAttachment = { path: string; mimeType: string; name?: string };
 export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
@@ -19,6 +19,33 @@ const SUPPORTED_VISION_MEDIA: ReadonlySet<string> = new Set([
   "image/png",
   "image/gif",
 ]);
+
+/** Document attachments are stored as extracted plain text (see
+ *  uploadAiAttachment) — read them back and wrap so the model knows what it is. */
+export function isTextAttachment(a: ChatAttachment): boolean {
+  return a.mimeType === "text/plain" || a.mimeType.startsWith("text/");
+}
+export async function readTextAttachment(a: ChatAttachment): Promise<string> {
+  const { buffer } = await readUpload(a.path);
+  const body = buffer.toString("utf8");
+  return `<attached_document name="${(a.name ?? a.path).replace(/"/g, "'")}">\n${body}\n</attached_document>`;
+}
+
+/**
+ * Flatten a message to plain text: document attachments become inline text
+ * blocks, images become a short marker. Used by text-only providers (the
+ * OpenAI-compatible chain endpoints) so PDFs/Word docs still work there.
+ */
+export async function flattenMessageToText(m: ChatMessage): Promise<string> {
+  if (!m.attachments?.length) return m.content;
+  const parts: string[] = [];
+  for (const a of m.attachments) {
+    if (isTextAttachment(a)) parts.push(await readTextAttachment(a));
+    else if (SUPPORTED_VISION_MEDIA.has(a.mimeType)) parts.push("[image attached — not visible to this provider]");
+  }
+  if (m.content) parts.push(m.content);
+  return parts.join("\n\n");
+}
 
 export async function buildFarmContext(): Promise<string> {
   const [activeHarvests, lowItems, openTasks] = await Promise.all([
@@ -84,6 +111,10 @@ async function buildMessageContent(m: ChatMessage): Promise<Anthropic.Messages.M
   }
   const blocks: Anthropic.Messages.ContentBlockParam[] = [];
   for (const a of m.attachments) {
+    if (isTextAttachment(a)) {
+      blocks.push({ type: "text", text: await readTextAttachment(a) });
+      continue;
+    }
     if (!SUPPORTED_VISION_MEDIA.has(a.mimeType)) continue;
     const data = await readUploadAsBase64(a.path);
     blocks.push({
@@ -101,10 +132,18 @@ async function buildMessageContent(m: ChatMessage): Promise<Anthropic.Messages.M
   return { role: "user", content: blocks };
 }
 
-export type AiProvider = "claude" | "gemini";
+/**
+ * "auto" = the ranked provider chain from Settings → AI keys (Nemotron / Gemini
+ * / Anthropic…, tried top-down). "claude" / "gemini" = the env-key direct
+ * paths, kept as explicit options.
+ */
+export type AiProvider = "auto" | "claude" | "gemini";
 
-export function availableProviders(): AiProvider[] {
+export async function availableProviders(): Promise<AiProvider[]> {
   const out: AiProvider[] = [];
+  const { describeChain } = await import("@/server/ai-chain");
+  const chain = await describeChain().catch(() => []);
+  if (chain.length > 0) out.push("auto");
   if (process.env.ANTHROPIC_API_KEY) out.push("claude");
   if (process.env.GEMINI_API_KEY) out.push("gemini");
   return out;
@@ -118,6 +157,26 @@ export async function askAi(
   if (provider === "gemini") {
     const { askGemini } = await import("@/server/gemini");
     return askGemini(messages, context);
+  }
+  if (provider === "auto") {
+    // Images need a vision-capable provider; the chain's chat path is text.
+    // If the conversation carries images and a direct vision key exists, use
+    // it; otherwise the chain sees a text marker in place of the image.
+    const hasImages = messages.some((m) => m.attachments?.some((a) => SUPPORTED_VISION_MEDIA.has(a.mimeType)));
+    if (hasImages && process.env.ANTHROPIC_API_KEY) return askClaude(messages, context);
+    if (hasImages && process.env.GEMINI_API_KEY) {
+      const { askGemini } = await import("@/server/gemini");
+      return askGemini(messages, context);
+    }
+    const { askChat } = await import("@/server/ai-chain");
+    const flat = await Promise.all(
+      messages.map(async (m) => ({ role: m.role, content: await flattenMessageToText(m) })),
+    );
+    return askChat({
+      system: `${SYSTEM_PROMPT}\n\nCurrent farm state:\n${context}`,
+      messages: flat,
+      maxTokens: 1024,
+    });
   }
   return askClaude(messages, context);
 }

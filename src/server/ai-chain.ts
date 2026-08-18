@@ -529,6 +529,157 @@ export async function askVision(opts: AskVisionOptions): Promise<string> {
   return runChain(visionChain, o, !!opts.debug);
 }
 
+// ---------------------------------------------------------------------------
+// Multi-turn chat through the chain (Ask AI "auto" mode). Text-only: callers
+// flatten document attachments to text first. Same advance/retry semantics.
+// ---------------------------------------------------------------------------
+
+export type ChainChatMessage = { role: "user" | "assistant"; content: string };
+export type AskChatOptions = {
+  system?: string;
+  messages: ChainChatMessage[];
+  maxTokens?: number;
+  timeoutMs?: number;
+  debug?: boolean;
+};
+
+async function chatOpenAiCompatible(p: Provider, o: AskChatOptions): Promise<string> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), o.timeoutMs ?? 90_000);
+  try {
+    const res = await fetch(`${p.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${p.apiKey}` },
+      body: JSON.stringify({
+        model: p.model,
+        max_tokens: p.providerSlug === "custom" ? Math.max(o.maxTokens ?? 1024, 4096) : (o.maxTokens ?? 1024),
+        messages: [
+          ...(o.system ? [{ role: "system", content: o.system }] : []),
+          ...o.messages.map((m) => ({ role: m.role, content: m.content })),
+        ],
+      }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new ProviderError(res.status, await res.text().catch(() => ""));
+    const j = (await res.json()) as { choices?: { message?: { content?: string; reasoning?: string } }[] };
+    const msg = j.choices?.[0]?.message;
+    const text = (msg?.content ?? "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+    if (!text) throw new ProviderError(502, msg?.reasoning ? "no text (reasoning only)" : "no text");
+    return text;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function chatGemini(p: Provider, o: AskChatOptions): Promise<string> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), o.timeoutMs ?? 90_000);
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${p.model}:generateContent?key=${p.apiKey}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...(o.system ? { systemInstruction: { parts: [{ text: o.system }] } } : {}),
+        contents: o.messages.map((m) => ({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: m.content || " " }],
+        })),
+        generationConfig: { maxOutputTokens: o.maxTokens ?? 1024 },
+      }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new ProviderError(res.status, await res.text().catch(() => ""));
+    const j = (await res.json()) as {
+      candidates?: { finishReason?: string; content?: { parts?: { text?: string }[] } }[];
+      promptFeedback?: { blockReason?: string };
+    };
+    const text = j.candidates?.[0]?.content?.parts?.map((x) => x.text ?? "").join("") ?? "";
+    if (!text) {
+      const finish = j.candidates?.[0]?.finishReason ?? "";
+      throw new ProviderError(finish === "MAX_TOKENS" ? 502 : 400, j.promptFeedback?.blockReason || finish || "no text");
+    }
+    return text;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function chatAnthropic(p: Provider, o: AskChatOptions): Promise<string> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), o.timeoutMs ?? 90_000);
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": p.apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: p.model,
+        max_tokens: o.maxTokens ?? 1024,
+        ...(o.system ? { system: o.system } : {}),
+        messages: o.messages.map((m) => ({ role: m.role, content: m.content || " " })),
+      }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new ProviderError(res.status, await res.text().catch(() => ""));
+    const j = (await res.json()) as { content?: { type: string; text?: string }[] };
+    const text = (j.content ?? []).filter((b) => b.type === "text").map((b) => b.text ?? "").join("\n");
+    if (!text) throw new ProviderError(502, "no text");
+    return text;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+function chatProvider(p: Provider, o: AskChatOptions): Promise<string> {
+  if (p.kind === "gemini") return chatGemini(p, o);
+  if (p.kind === "anthropic") return chatAnthropic(p, o);
+  return chatOpenAiCompatible(p, o);
+}
+
+/** Walk the chain with a multi-turn conversation; first success wins. */
+export async function askChat(o: AskChatOptions): Promise<string> {
+  const chain = [...(await loadDbChain()), ...buildEnvChain()];
+  if (!chain.length) throw new Error("No AI provider configured — add a key under Settings → AI keys.");
+  const tried: string[] = [];
+  let lastErr: unknown = null;
+  for (const p of chain) {
+    tried.push(p.name);
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        const text = await chatProvider(p, o);
+        recordOutcome(p.dbId, "ok");
+        return text;
+      } catch (e) {
+        lastErr = e;
+        if (e instanceof ProviderError) {
+          if (isQuotaError(e.status, e.body) || (e.status >= 400 && e.status < 500)) {
+            recordOutcome(p.dbId, isQuotaError(e.status, e.body) ? "quota" : "error", `${e.status}: ${e.body.slice(0, 200)}`);
+            break;
+          }
+          if (attempt < 2) {
+            await new Promise((r) => setTimeout(r, 400 * attempt));
+            continue;
+          }
+          recordOutcome(p.dbId, "error", `${e.status}: ${e.body.slice(0, 200)}`);
+          break;
+        }
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 400 * attempt));
+          continue;
+        }
+        recordOutcome(p.dbId, "error", (e as Error).message);
+        break;
+      }
+    }
+  }
+  const lastMsg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+  throw new Error(`All ${chain.length} AI providers exhausted. Last: ${lastMsg}${o.debug ? ` (tried: ${tried.join(" → ")})` : ""}`);
+}
+
 /**
  * Hit a single provider in isolation. Used by the settings UI's "Test"
  * button so users can verify a key works without running it through the

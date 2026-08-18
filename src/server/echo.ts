@@ -8,11 +8,12 @@ import { askAi, availableProviders, type ChatMessage } from "@/server/ai";
  * the whole page like /ask-ai.
  */
 export async function askEcho(question: string): Promise<string> {
-  const providers = availableProviders();
+  const providers = await availableProviders();
   if (providers.length === 0) {
-    throw new Error("Set ANTHROPIC_API_KEY or GEMINI_API_KEY to enable Echo.");
+    throw new Error("Add an AI key under Settings → AI keys to enable Echo.");
   }
-  const provider = providers.includes("claude") ? "claude" : providers[0];
+  // Prefer the ranked chain (auto) — it's what the user configured.
+  const provider = providers.includes("auto") ? "auto" : providers.includes("claude") ? "claude" : providers[0];
   const messages: ChatMessage[] = [
     {
       role: "user",

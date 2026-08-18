@@ -118,6 +118,8 @@ export function PlantNotesPhotoDialog({
   recordId,
   hasPhoto,
   currentNotes,
+  currentTray,
+  trays,
   produceName,
   trigger,
 }: {
@@ -361,6 +363,7 @@ export function AssignPlantDialog({
   produces,
   current,
   defaultProduceId,
+  trays,
   trigger,
 }: {
   tagId: string;
