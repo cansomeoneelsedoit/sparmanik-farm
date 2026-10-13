@@ -11,7 +11,10 @@ WORKDIR /app
 RUN apk add --no-cache libc6-compat openssl
 COPY package.json package-lock.json ./
 COPY prisma ./prisma
-RUN npm ci --no-audit --no-fund
+# --include=dev: Coolify's build env can have NODE_ENV=production, which makes
+# plain `npm ci` skip devDependencies (@tailwindcss/postcss) and break the
+# Next.js build. Railway masked this. Explicit include fixes both.
+RUN npm ci --no-audit --no-fund --include=dev
 
 # ---------- 2. builder: compile Next.js ----------
 FROM node:${NODE_VERSION} AS builder
